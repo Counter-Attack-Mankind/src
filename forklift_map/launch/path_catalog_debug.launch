@@ -24,10 +24,14 @@
     <!-- Used only when use_exact_midpoints=false, kept for field tuning. -->
     <param name="a1_x" value="1.25"/>
     <param name="a1_y" value="4.38"/>
-    <param name="a1_yaw" value="-1.57079632679"/>
+    <param name="a1_pre_x" value="1.25"/>
+    <param name="a1_pre_y" value="4.105"/>
+    <param name="a1_yaw" value="1.57079632679"/>
     <param name="a2_x" value="1.25"/>
     <param name="a2_y" value="0.12"/>
-    <param name="a2_yaw" value="1.57079632679"/>
+    <param name="a2_pre_x" value="1.25"/>
+    <param name="a2_pre_y" value="0.395"/>
+    <param name="a2_yaw" value="-1.57079632679"/>
 
     <param name="depot" type="str" value="$(arg depot)"/>
     <param name="target_slot" type="int" value="$(arg target_slot)"/>

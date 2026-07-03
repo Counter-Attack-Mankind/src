@@ -25,6 +25,7 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
+//================（1.辅助可视化函数）===============
 std_msgs::ColorRGBA rgba(float r, float g, float b, float a = 1.0f) {
     std_msgs::ColorRGBA c;
     c.r = r;
@@ -151,27 +152,33 @@ std::string idsToString(const std::vector<int>& ids) {
     return out.str();
 }
 
-Slot makeVirtualStart(const std::string& name,
-                      int id,
-                      int row_id,
-                      double x,
-                      double y,
-                      double theta) {
+
+//======（2.构造虚拟货位A1,A2，用于复用路径生成器）==================
+Slot makeVirtualSlot(const std::string& name,
+                     int id,
+                     int row_id,
+                     double x,
+                     double y,
+                     double pre_x,
+                     double pre_y,
+                     double theta) {
     Slot s;
     s.id = id;
     s.row_id = row_id;
     s.col = -1;
     s.cx = x;
     s.cy = y;
-    s.pre_dock_x = x;
-    s.pre_dock_y = y;
+    s.pre_dock_x = pre_x;
+    s.pre_dock_y = pre_y;
     s.dock_theta = theta;
     s.occupied = false;
-    ROS_INFO("[path_catalog] %s virtual start: id=%d row=%d x=%.4f y=%.4f yaw=%.1fdeg",
-             name.c_str(), id, row_id, x, y, theta * 180.0 / kPi);
+    ROS_INFO("[path_catalog] %s virtual slot: id=%d row=%d dock=(%.4f,%.4f) pre=(%.4f,%.4f) yaw=%.1fdeg",
+             name.c_str(), id, row_id, x, y, pre_x, pre_y,
+             theta * 180.0 / kPi);
     return s;
 }
 
+//==========（3.数学工具）=============
 double midpoint(double a, double b) {
     return 0.5 * (a + b);
 }
@@ -184,6 +191,10 @@ double normAngle(double a) {
 
 double angleLerp(double a, double b, double u) {
     return normAngle(a + normAngle(b - a) * u);
+}
+
+double angleDiffAbs(double a, double b) {
+    return std::abs(normAngle(b - a));
 }
 
 RoughWp poseAtS(const RoughPath& path, double query_s) {
@@ -215,6 +226,9 @@ std::string uppercase(std::string s) {
     return s;
 }
 
+// ================（4.定义路径生成失败的原因，枚举类）==================
+// 无，路径为空，曲率不连续，车辆包络超出地图，车辆与货架发生碰撞，路径存在折角或姿态突变
+
 enum class DebugRejectReason {
     NONE,
     EMPTY_PATH,
@@ -240,32 +254,45 @@ const char* rejectReasonName(DebugRejectReason reason) {
 
 }  // namespace
 
+//===================（1.构造函数初始化）=========================
+//  完成参数读取 → 地图构造 → 路径生成 → Marker 发布 → 动画启动
+
 class PathCatalogDebugNode {
 public:
     PathCatalogDebugNode() : nh_("~") {
+        
+        //============ 1.1 读取全局参数
         ros::NodeHandle param_nh;
         mp_ = MapParam::fromROSParam(param_nh);
         pp_ = PlannerParam::fromROSParam(param_nh);
         cfg_ = forklift_planner::multi_vehicle::MultiVehicleConfig::fromROSParam(
             param_nh);
+        
+        //========= 1.2 创建地图对象和路径生成器对象 =========
         map_ = std::make_unique<ForkliftMap>(mp_);
         generator_ = std::make_unique<PathGenerator>(mp_, pp_);
-
+        
+        //========  1.3 读取A1,A2，运行参数模式 ===================
         use_exact_midpoints_ = true;
         nh_.param("use_exact_midpoints", use_exact_midpoints_,
                   use_exact_midpoints_);
         nh_.param("a1_x", a1_x_, 1.25);
         nh_.param("a1_y", a1_y_, 4.38);
-        nh_.param("a1_yaw", a1_yaw_, -kPi * 0.5);
+        nh_.param("a1_pre_x", a1_pre_x_, a1_x_);
+        nh_.param("a1_pre_y", a1_pre_y_, a1_y_ - virtual_pre_dock_distance());
+        nh_.param("a1_yaw", a1_yaw_, kPi * 0.5);
         nh_.param("a2_x", a2_x_, 1.25);
         nh_.param("a2_y", a2_y_, 0.12);
-        nh_.param("a2_yaw", a2_yaw_, kPi * 0.5);
+        nh_.param("a2_pre_x", a2_pre_x_, a2_x_);
+        nh_.param("a2_pre_y", a2_pre_y_, a2_y_ + virtual_pre_dock_distance());
+        nh_.param("a2_yaw", a2_yaw_, -kPi * 0.5);
         nh_.param("depot", depot_name_, depot_name_);
         nh_.param("target_slot", target_slot_, target_slot_);
         nh_.param("animate", animate_, animate_);
         nh_.param("animation_period", animation_period_, animation_period_);
         nh_.param("animation_duration", animation_duration_, animation_duration_);
 
+        //========== 1.4 此时A1与A2通过B4,B5;B60,B61得出，确定取货点A1,A2位置 ==========
         if (use_exact_midpoints_ && map_->slots().size() > 61) {
             const Slot& b4 = map_->slots().at(4);
             const Slot& b5 = map_->slots().at(5);
@@ -273,17 +300,23 @@ public:
             const Slot& b61 = map_->slots().at(61);
             a1_x_ = midpoint(b4.cx, b5.cx);
             a1_y_ = midpoint(b4.cy, b5.cy);
+            a1_pre_x_ = midpoint(b4.pre_dock_x, b5.pre_dock_x);
+            a1_pre_y_ = midpoint(b4.pre_dock_y, b5.pre_dock_y);
             a2_x_ = midpoint(b60.cx, b61.cx);
             a2_y_ = midpoint(b60.cy, b61.cy);
+            a2_pre_x_ = midpoint(b60.pre_dock_x, b61.pre_dock_x);
+            a2_pre_y_ = midpoint(b60.pre_dock_y, b61.pre_dock_y);
             ROS_INFO("[path_catalog] midpoint check: B4(%.4f,%.4f), B5(%.4f,%.4f) -> A1(%.4f,%.4f)",
                      b4.cx, b4.cy, b5.cx, b5.cy, a1_x_, a1_y_);
             ROS_INFO("[path_catalog] midpoint check: B60(%.4f,%.4f), B61(%.4f,%.4f) -> A2(%.4f,%.4f)",
                      b60.cx, b60.cy, b61.cx, b61.cy, a2_x_, a2_y_);
         }
 
+        //========= 1.5 创建发布器来显示rviz中的图形 ======================
         pub_ = nh_.advertise<visualization_msgs::MarkerArray>(
             "/forklift_map/markers", 1, true);
 
+        //=========== 1.6 发布路径 =======================
         publish();
         if (!selected_path_.empty()) {
             animation_start_ = ros::Time::now();
@@ -297,9 +330,15 @@ public:
     }
 
 private:
+    double virtual_pre_dock_distance() const {
+        return mp_.bottom_shelf_depth * 0.5 + mp_.pre_dock_clearance;
+    }
+
     void publish() {
-        const Slot a1 = makeVirtualStart("A1", -101, 0, a1_x_, a1_y_, a1_yaw_);
-        const Slot a2 = makeVirtualStart("A2", -102, 7, a2_x_, a2_y_, a2_yaw_);
+        const Slot a1 = makeVirtualSlot("A1", 101, 0, a1_x_, a1_y_,
+                                        a1_pre_x_, a1_pre_y_, a1_yaw_);
+        const Slot a2 = makeVirtualSlot("A2", 102, 7, a2_x_, a2_y_,
+                                        a2_pre_x_, a2_pre_y_, a2_yaw_);
 
         std::vector<int> all_targets;
         for (const Slot& s : map_->slots()) {
@@ -517,6 +556,62 @@ private:
         }
 
         if (cfg_.reject_path_kinks) {
+            auto legal_pose_flip_at = [&](size_t idx) {
+                bool have_prev_seg = false;
+                bool have_next_seg = false;
+                double before_dx = 0.0;
+                double before_dy = 0.0;
+                double before_len = 0.0;
+                double after_dx = 0.0;
+                double after_dy = 0.0;
+                double after_len = 0.0;
+                WpType before_type = path.front().type;
+                WpType after_type = path.front().type;
+
+                for (size_t j = idx; j > 0; --j) {
+                    const double dx = path[j].x - path[j - 1].x;
+                    const double dy = path[j].y - path[j - 1].y;
+                    const double len = std::hypot(dx, dy);
+                    if (len < 1e-4) continue;
+                    before_dx = dx;
+                    before_dy = dy;
+                    before_len = len;
+                    before_type = path[j].type;
+                    have_prev_seg = true;
+                    break;
+                }
+                for (size_t j = idx; j + 1 < path.size(); ++j) {
+                    const double dx = path[j + 1].x - path[j].x;
+                    const double dy = path[j + 1].y - path[j].y;
+                    const double len = std::hypot(dx, dy);
+                    if (len < 1e-4) continue;
+                    after_dx = dx;
+                    after_dy = dy;
+                    after_len = len;
+                    after_type = path[j + 1].type;
+                    have_next_seg = true;
+                    break;
+                }
+                if (!have_prev_seg || !have_next_seg ||
+                    before_type == after_type) {
+                    return false;
+                }
+                double c = (before_dx * after_dx + before_dy * after_dy) /
+                           (before_len * after_len);
+                c = std::max(-1.0, std::min(1.0, c));
+                return std::acos(c) >= cfg_.kink_cusp_angle;
+            };
+
+            for (size_t i = 1; i < path.size(); ++i) {
+                if (angleDiffAbs(path[i - 1].theta, path[i].theta) <=
+                    cfg_.kink_min_angle) {
+                    continue;
+                }
+                if (!legal_pose_flip_at(i)) {
+                    return DebugRejectReason::KINK;
+                }
+            }
+
             bool have_prev = false;
             double prev_dx = 0.0;
             double prev_dy = 0.0;
@@ -544,6 +639,21 @@ private:
                 const bool legal_reverse_cusp =
                     prev_type != type && ang >= cfg_.kink_cusp_angle;
                 if (ang > cfg_.kink_min_angle && !legal_reverse_cusp) {
+                    return DebugRejectReason::KINK;
+                }
+
+                const double prev_motion =
+                    std::atan2(prev_dy, prev_dx);
+                const double motion = std::atan2(dy, dx);
+                const double prev_body =
+                    prev_type == WpType::REVERSE
+                        ? normAngle(prev_motion + kPi)
+                        : prev_motion;
+                const double body =
+                    type == WpType::REVERSE ? normAngle(motion + kPi) : motion;
+                const bool body_flip =
+                    angleDiffAbs(prev_body, body) > cfg_.kink_min_angle;
+                if (body_flip && !legal_reverse_cusp) {
                     return DebugRejectReason::KINK;
                 }
 
@@ -632,10 +742,14 @@ private:
     bool use_exact_midpoints_ = true;
     double a1_x_ = 1.25;
     double a1_y_ = 4.38;
-    double a1_yaw_ = -kPi * 0.5;
+    double a1_pre_x_ = 1.25;
+    double a1_pre_y_ = 4.105;
+    double a1_yaw_ = kPi * 0.5;
     double a2_x_ = 1.25;
     double a2_y_ = 0.12;
-    double a2_yaw_ = kPi * 0.5;
+    double a2_pre_x_ = 1.25;
+    double a2_pre_y_ = 0.395;
+    double a2_yaw_ = -kPi * 0.5;
 
     std::string depot_name_ = "A1";
     int target_slot_ = -1;
