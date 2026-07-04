@@ -288,6 +288,7 @@ public:
         nh_.param("a2_yaw", a2_yaw_, -kPi * 0.5);
         nh_.param("depot", depot_name_, depot_name_);
         nh_.param("target_slot", target_slot_, target_slot_);
+        nh_.param("validate_paths", validate_paths_, validate_paths_);
         nh_.param("animate", animate_, animate_);
         nh_.param("animation_period", animation_period_, animation_period_);
         nh_.param("animation_duration", animation_duration_, animation_duration_);
@@ -391,12 +392,21 @@ private:
         PathGenerationInfo info;
         selected_path_ = generator_->generate(src, dst, &info);
         selected_label_ = label + "_to_B" + std::to_string(target_slot_);
-        const DebugRejectReason reject = validatePath(selected_path_, info, src, dst);
-        if (reject != DebugRejectReason::NONE) {
-            ROS_ERROR("[path_catalog] %s rejected by task-style validation: %s",
-                      selected_label_.c_str(), rejectReasonName(reject));
+        if (selected_path_.size() < 2) {
+            ROS_ERROR("[path_catalog] %s rejected: empty_path",
+                      selected_label_.c_str());
             selected_path_.clear();
             return;
+        }
+        if (validate_paths_) {
+            const DebugRejectReason reject =
+                validatePath(selected_path_, info, src, dst);
+            if (reject != DebugRejectReason::NONE) {
+                ROS_ERROR("[path_catalog] %s rejected by task-style validation: %s",
+                          selected_label_.c_str(), rejectReasonName(reject));
+                selected_path_.clear();
+                return;
+            }
         }
 
         const bool use_a2 = label == "A2";
@@ -404,7 +414,8 @@ private:
             use_a2 ? rgba(1.0f, 0.55f, 0.05f, 1.0f)
                    : rgba(0.1f, 0.65f, 1.0f, 1.0f);
         const double len = pathLength(selected_path_);
-        ROS_WARN("[path_catalog] single path %s row=%d col=%d wpts=%zu len=%.3f arc=%d animate=%d",
+        ROS_WARN("[path_catalog] %ssingle path %s row=%d col=%d wpts=%zu len=%.3f arc=%d animate=%d",
+                 validate_paths_ ? "" : "RAW ",
                  selected_label_.c_str(), dst.row_id, dst.col,
                  selected_path_.size(), len, info.used_arc_fallback ? 1 : 0,
                  animate_ ? 1 : 0);
@@ -465,22 +476,32 @@ private:
             PathGenerationInfo info;
             const Slot& dst = map_->slots().at(static_cast<size_t>(target));
             RoughPath path = generator_->generate(depot, dst, &info);
-            const DebugRejectReason reject = validatePath(path, info, depot, dst);
-            if (reject != DebugRejectReason::NONE) {
+            if (path.size() < 2) {
                 ++failed;
-                ROS_ERROR("[path_catalog] %s -> B%d rejected: %s",
-                          depot_label.c_str(), target, rejectReasonName(reject));
+                ROS_ERROR("[path_catalog] %s -> B%d rejected: empty_path",
+                          depot_label.c_str(), target);
                 continue;
+            }
+            if (validate_paths_) {
+                const DebugRejectReason reject = validatePath(path, info, depot, dst);
+                if (reject != DebugRejectReason::NONE) {
+                    ++failed;
+                    ROS_ERROR("[path_catalog] %s -> B%d rejected: %s",
+                              depot_label.c_str(), target, rejectReasonName(reject));
+                    continue;
+                }
             }
             ++ok;
             addPath(arr, pp_.frame_id, depot_label + "_to_B", id++, path, color,
                     z_offset);
-            ROS_INFO("[path_catalog] %s -> B%d row=%d col=%d wpts=%zu len=%.3f arc=%d",
+            ROS_INFO("[path_catalog] %s%s -> B%d row=%d col=%d wpts=%zu len=%.3f arc=%d",
+                     validate_paths_ ? "" : "RAW ",
                      depot_label.c_str(), target, dst.row_id, dst.col,
                      path.size(), pathLength(path),
                      info.used_arc_fallback ? 1 : 0);
         }
-        ROS_WARN("[path_catalog] %s generated %d/%zu paths, failed=%d",
+        ROS_WARN("[path_catalog] %s%s generated %d/%zu paths, failed=%d",
+                 validate_paths_ ? "" : "RAW ",
                  depot_label.c_str(), ok, targets.size(), failed);
     }
 
@@ -753,6 +774,7 @@ private:
 
     std::string depot_name_ = "A1";
     int target_slot_ = -1;
+    bool validate_paths_ = true;
     bool animate_ = true;
     double animation_period_ = 0.05;
     double animation_duration_ = 8.0;

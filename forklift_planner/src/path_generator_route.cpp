@@ -58,6 +58,7 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     const int src_corr = corridor_id(src.row_id);
     const int tgt_corr = corridor_id(tgt.row_id);
     const bool target_is_endpoint = tgt.id < 0;
+    const bool debug_row1_target = (tgt.id >= 10 && tgt.id <= 19);
 
     // Turn geometry derives from the shared map parameters.
     const double max_curvature  = mp_.turn_max_curvature();
@@ -112,8 +113,10 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
 
     const double dock_dir_y_for_lane = std::sin(tgt.dock_theta);
     const bool single_row_terminal = (tgt.row_id == 0 || tgt.row_id == 7);
+    const double terminal_rear_stop_y =
+        tgt.dock_y() - mp_.rear_axle_to_center * std::sin(tgt.dock_theta);
     const double forward_terminal_y =
-        single_row_terminal ? tgt.dock_y() : tgt.pre_dock_y;
+        single_row_terminal ? tgt.dock_y() : terminal_rear_stop_y;
     const HDir final_hdir = (target_x >= final_reference_x) ? HDir::RIGHT : HDir::LEFT;
     const HDir far_hdir   = (final_hdir == HDir::RIGHT) ? HDir::LEFT : HDir::RIGHT;
     const double forward_lane_y     = corridor_lane_y(mp_, tgt_corr, final_hdir);
@@ -145,8 +148,21 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
         pp_.terminal_docking_mode != "reverse" &&
         !forward_lane_has_final_space;
     const bool terminal_reverse =
-        (!target_is_endpoint && pp_.terminal_docking_mode == "reverse") ||
-        auto_reverse_terminal;
+        target_is_endpoint &&
+        (pp_.terminal_docking_mode == "reverse" || auto_reverse_terminal);
+    if (debug_row1_target) {
+        ROS_WARN("[planner][row1-debug] src=%d tgt=%d src_corr=%d tgt_corr=%d "
+                 "target=(%.3f,%.3f th=%.1fdeg) mode=%s terminal_reverse=%d "
+                 "near_gap=%.3f far_gap=%.3f horiz=%.3f min_x=%.3f",
+                 src.id, tgt.id, src_corr, tgt_corr,
+                 tgt.pre_dock_x, tgt.pre_dock_y,
+                 tgt.dock_theta * 180.0 / kPi,
+                 pp_.terminal_docking_mode.c_str(),
+                 terminal_reverse ? 1 : 0,
+                 lane_approach_gap(forward_lane_y),
+                 lane_approach_gap(far_lane_y),
+                 horiz_to_ref, 2.0 * R_min_check);
+    }
     if (terminal_reverse && pp_.terminal_docking_mode == "auto") {
         ROS_INFO("[planner] slot %d: forward terminal infeasible "
                  "(near_gap=%.3f far_gap=%.3f min_y=%.3f horiz=%.3f min_x=%.3f)",
@@ -248,6 +264,8 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     TurnCurve initial_reverse_curve;
     Pt initial_reverse_curve_start{src.pre_dock_x, src.pre_dock_y};
     double initial_reverse_motion_heading = 0.0;
+    bool force_first_transition_x = false;
+    double first_transition_x = 0.0;
 
     int current_corr = src_corr;
     double current_x = src.dock_x();
@@ -264,6 +282,20 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
         const bool start_to_right = same_corridor
             ? (tgt.pre_dock_x >= src.pre_dock_x)
             : (start_ref_x >= src.pre_dock_x);
+        if (!same_corridor &&
+            ((src_corr == 1 && tgt_corr == 2) ||
+             (src_corr == 2 && tgt_corr == 1))) {
+            const bool going_down = tgt_corr > src_corr;
+            if (src_corr == 1 && tgt_corr == 2) {
+                first_transition_x =
+                    start_to_right ? row1_right_down_x : row1_left_down_x;
+            } else {
+                first_transition_x =
+                    start_to_right ? row1_right_up_x : row1_left_up_x;
+            }
+            force_first_transition_x = true;
+            (void)going_down;
+        }
         double start_lane_y =
             (src_corr == tgt_corr)
                 ? planned_goal_lane_y
@@ -340,11 +372,13 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
             std::cos(norm_angle(forward_heading + kPi)),
             std::sin(norm_angle(forward_heading + kPi))};
         double direct_reverse_end_x = src.pre_dock_x;
-        if (same_corridor) {
+        if (same_corridor || src_corr != tgt_corr) {
             const double target_dx = std::abs(tgt.pre_dock_x - src.pre_dock_x);
             const bool near_source_target = target_dx < 0.55;
+            const bool cross_corridor_exit = src_corr != tgt_corr;
             const double reserve_x = std::max(
-                final_min_req_x, near_source_target ? 0.36 : 0.12);
+                final_min_req_x,
+                (near_source_target || cross_corridor_exit) ? 0.36 : 0.12);
             direct_reverse_end_x = start_to_right
                 ? std::max(0.04, src.pre_dock_x - reserve_x)
                 : std::min(mp_.field_width - 0.04,
@@ -357,7 +391,30 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
             if (!fit_initial_reverse(direct_reverse_end_dir,
                                      direct_reverse_end_x, true)) {
                 initial_reverse_end = {src.pre_dock_x, start_lane_y};
+                if (debug_row1_target && same_corridor) {
+                    const double alt_lane_y =
+                        std::abs(start_lane_y - forward_lane_y) <
+                                std::abs(start_lane_y - far_lane_y)
+                            ? far_lane_y : forward_lane_y;
+                    initial_reverse_end = {src.pre_dock_x, alt_lane_y};
+                }
             }
+        }
+        if (debug_row1_target) {
+            ROS_WARN("[planner][row1-debug] initial_reverse tgt=%d same_corr=%d "
+                     "start_to_right=%d start_lane_y=%.3f forward_heading=%.1fdeg "
+                     "reverse_end_dir=(%.1fdeg) desired_end_x=%.3f "
+                     "actual_end=(%.3f,%.3f) curve_start=(%.3f,%.3f) "
+                     "curve_pts=%zu direct_ok=%d",
+                     tgt.id, same_corridor ? 1 : 0, start_to_right ? 1 : 0,
+                     start_lane_y, forward_heading * 180.0 / kPi,
+                     std::atan2(direct_reverse_end_dir.y,
+                                direct_reverse_end_dir.x) * 180.0 / kPi,
+                     direct_reverse_end_x,
+                     initial_reverse_end.x, initial_reverse_end.y,
+                     initial_reverse_curve_start.x, initial_reverse_curve_start.y,
+                     initial_reverse_curve.pts.size(),
+                     direct_ok ? 1 : 0);
         }
         push_point(polyline, initial_reverse_end);
         current_x = initial_reverse_end.x;
@@ -369,7 +426,11 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     while (current_corr != tgt_corr) {
         const int next_corr = current_corr + ((tgt_corr > current_corr) ? 1 : -1);
         const double future_x = next_reference_x(next_corr, tgt_corr, current_x, tgt.pre_dock_x);
-        const double connector_x = transition_x(current_corr, next_corr, current_x, future_x);
+        double connector_x = transition_x(current_corr, next_corr, current_x, future_x);
+        if (force_first_transition_x && current_corr == src_corr) {
+            connector_x = first_transition_x;
+            force_first_transition_x = false;
+        }
 
         const bool going_down = next_corr > current_corr;
         double current_lane_y = current_transition_lane_y(current_corr, next_corr);
@@ -537,6 +598,17 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
 
     const std::vector<Pt> simplified = simplify_polyline(polyline);
     if (simplified.empty()) return {};
+    if (debug_row1_target) {
+        ROS_WARN("[planner][row1-debug] skeleton tgt=%d points=%zu "
+                 "terminal_reverse=%d goal_lane_y=%.3f terminal_stop_y=%.3f "
+                 "final_ref_x=%.3f",
+                 tgt.id, simplified.size(), terminal_reverse ? 1 : 0,
+                 goal_lane_y, terminal_stop_y, final_reference_x);
+        for (size_t dbg_i = 0; dbg_i < simplified.size(); ++dbg_i) {
+            ROS_WARN("[planner][row1-debug] skeleton[%zu]=(%.3f,%.3f)",
+                     dbg_i, simplified[dbg_i].x, simplified[dbg_i].y);
+        }
+    }
     if (simplified.size() == 1) {
         return {{simplified.front().x, simplified.front().y,
                  norm_angle(src.dock_theta + kPi), WpType::FORWARD}};
@@ -865,7 +937,8 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     }
     if (!infeasible_turns.empty() &&
         pp_.terminal_docking_mode == "auto" &&
-        !terminal_reverse) {
+        !terminal_reverse &&
+        target_is_endpoint) {
         PlannerParam reverse_pp = pp_;
         reverse_pp.terminal_docking_mode = "reverse";
         PathGenerator reverse_gen(mp_, reverse_pp);

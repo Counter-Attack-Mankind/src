@@ -1,0 +1,15 @@
+<launch>
+  <!-- Shows raw generated paths without task-style validation filtering. -->
+  <arg name="depot" default="A1"/>
+  <arg name="target_slot" default="-1"/>
+  <arg name="animate" default="true"/>
+  <arg name="animation_duration" default="8.0"/>
+
+  <include file="$(find forklift_map)/launch/path_catalog_debug.launch">
+    <arg name="depot" value="$(arg depot)"/>
+    <arg name="target_slot" value="$(arg target_slot)"/>
+    <arg name="validate_paths" value="false"/>
+    <arg name="animate" value="$(arg animate)"/>
+    <arg name="animation_duration" value="$(arg animation_duration)"/>
+  </include>
+</launch>
