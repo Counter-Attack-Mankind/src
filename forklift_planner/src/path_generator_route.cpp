@@ -32,10 +32,12 @@ using namespace forklift_planner::path_internal;
 
 RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
                                   PathGenerationInfo* info) const {
+    // Reset debug info.
     if (info != nullptr) {
         *info = PathGenerationInfo{};
     }
-    //生成“纵向连接通道”的x坐标
+
+    // Longitudinal connector lane x coordinates.
 
     const double row1_lane_off = dual_lane_offset(mp_.row1_left_aisle);
     const double row3_lane_off = dual_lane_offset(mp_.row3_center_aisle);
@@ -52,17 +54,16 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     const double row3_down_x       = spine_x_        - row3_lane_off;
     const double row3_up_x         = spine_x_        + row3_lane_off;
 
-    // 确定起点和终点的货位在哪条走廊上（这里src.row_id 和 tgt.row_id 是货位行号）
+    // Source/target slot corridors.
     const int src_corr = corridor_id(src.row_id);
     const int tgt_corr = corridor_id(tgt.row_id);
     const bool target_is_endpoint = tgt.id < 0;
 
-    // 拐弯几何派生自 MapParam（单一参数源；地图与规划器一致）
+    // Turn geometry derives from the shared map parameters.
     const double max_curvature  = mp_.turn_max_curvature();
     const double steer_ramp_len = mp_.turn_ramp_len();
     const double sample_ds      = mp_.turn_ds();
-    
-    //判断末端是否需要倒库：最后进目标货位时，是前进入库，还是倒车入库
+    // Decide whether the terminal slot needs reverse docking.
     const double final_turn_sign =
         (std::sin(tgt.dock_theta) >= 0.0) ? kPi * 0.5 : -kPi * 0.5;
     const double terminal_margin_y = 0.04;
@@ -134,8 +135,12 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
          horiz_fits_two_turns) ||
         (lane_approach_gap(far_lane_y)    >= final_min_req_y && horiz_fits_two_turns) ||
         near_lane_can_arc_to_slot;
+    // A real slot must be reached with its defined dock_theta: the forks point
+    // into the pallet/slot. If the direct forward terminal lacks space, the
+    // route skeleton must create more approach room before docking; auto
+    // reversing into a real slot would flip the physical operation.
     const bool auto_reverse_terminal =
-        !target_is_endpoint &&
+        target_is_endpoint &&
         pp_.terminal_docking_mode != "forward" &&
         pp_.terminal_docking_mode != "reverse" &&
         !forward_lane_has_final_space;
@@ -152,8 +157,10 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
                  horiz_to_ref,
                  2.0 * R_min_check);
     }
-    const double terminal_heading =
-        terminal_reverse ? norm_angle(tgt.dock_theta + kPi) : tgt.dock_theta;
+    // Terminal body heading is always the slot-defined pose. Reverse docking
+    // changes only the motion direction, not the final body orientation.
+    const double terminal_heading = tgt.dock_theta;
+    const double terminal_reverse_out_heading = norm_angle(tgt.dock_theta + kPi);
     const double terminal_dir_y = std::sin(terminal_heading);
 
     double terminal_stop_y = tgt.pre_dock_y;
@@ -235,6 +242,7 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
         return corridor_lane_y(mp_, current_corr, current_dir);
     };
 
+    // Build the coarse polyline skeleton.
     std::vector<Pt> polyline;
     Pt initial_reverse_end{src.pre_dock_x, src.pre_dock_y};
     TurnCurve initial_reverse_curve;
@@ -245,17 +253,17 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     double current_x = src.dock_x();
     double current_y = src.dock_y();
     if (src.id >= 0) {
-        // 同走廊出库落脚点:正向入库奔 final_reference_x(为正向转弯留位);但倒车入库的
-        // drive_start 在目标另一侧(target ± final_min_req_x),若出库仍奔 final_reference_x
-        // 会落在反侧→出库先往一边、再折返到 drive_start(来回+中段翻转)。倒车入库时改为
-        // 朝目标列出库,从源头单调行进到 drive_start 再倒入,无来回(消除同区域绕路瞬转)。
+        // For a real/virtual source slot, plan the reverse exit landing point.
         const double start_ref_x =
             (src_corr == tgt_corr)
                 ? (terminal_reverse ? tgt.pre_dock_x : final_reference_x)
                 : transition_x(src_corr,
                                src_corr + ((tgt_corr > src_corr) ? 1 : -1),
                                src.pre_dock_x, tgt.pre_dock_x);
-        const bool start_to_right = start_ref_x >= src.pre_dock_x;
+        const bool same_corridor = src_corr == tgt_corr;
+        const bool start_to_right = same_corridor
+            ? (tgt.pre_dock_x >= src.pre_dock_x)
+            : (start_ref_x >= src.pre_dock_x);
         double start_lane_y =
             (src_corr == tgt_corr)
                 ? planned_goal_lane_y
@@ -331,11 +339,23 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
         const Pt direct_reverse_end_dir{
             std::cos(norm_angle(forward_heading + kPi)),
             std::sin(norm_angle(forward_heading + kPi))};
+        double direct_reverse_end_x = src.pre_dock_x;
+        if (same_corridor) {
+            const double target_dx = std::abs(tgt.pre_dock_x - src.pre_dock_x);
+            const bool near_source_target = target_dx < 0.55;
+            const double reserve_x = std::max(
+                final_min_req_x, near_source_target ? 0.36 : 0.12);
+            direct_reverse_end_x = start_to_right
+                ? std::max(0.04, src.pre_dock_x - reserve_x)
+                : std::min(mp_.field_width - 0.04,
+                           src.pre_dock_x + reserve_x);
+        }
         const bool direct_ok =
-            fit_initial_reverse(direct_reverse_end_dir, src.pre_dock_x, false);
+            fit_initial_reverse(direct_reverse_end_dir,
+                                direct_reverse_end_x, false);
         if (!direct_ok) {
-            const Pt inward_reverse_end_dir{start_to_right ? 1.0 : -1.0, 0.0};
-            if (!fit_initial_reverse(inward_reverse_end_dir, start_ref_x, true)) {
+            if (!fit_initial_reverse(direct_reverse_end_dir,
+                                     direct_reverse_end_x, true)) {
                 initial_reverse_end = {src.pre_dock_x, start_lane_y};
             }
         }
@@ -390,7 +410,8 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     bool terminal_reverse_has_curve = false;
     if (terminal_reverse) {
         const double margin = 0.04;
-        const Pt reverse_out{std::cos(tgt.dock_theta), std::sin(tgt.dock_theta)};
+        const Pt reverse_out{std::cos(terminal_reverse_out_heading),
+                             std::sin(terminal_reverse_out_heading)};
         double best_max_tangent = -1.0;
         double best_route_cost = std::numeric_limits<double>::infinity();
         double best_lane_y = goal_lane_y;
@@ -630,31 +651,13 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
             return pts;
         };
 
-        // nose-out(前进)/ nose-in(倒车)两种后轴起点,几何只差直线段起点。
-        const Pt a_fwd{src.dock_x() + d_axle * std::cos(src.dock_theta),
-                       src.dock_y() + d_axle * std::sin(src.dock_theta)};
+        // 起点只要是库位,第一步固定倒车出库:车身保持 dock_theta,
+        // 运动方向为 dock_theta + pi,后轴参考点位于车身后方。
         const Pt a_rev{src.dock_x() - d_axle * std::cos(src.dock_theta),
                        src.dock_y() - d_axle * std::sin(src.dock_theta)};
 
-        // 骨架首段方向(= 骨架首点车身朝向,骨架点存切线)。
-        const double skel_dir = (path.size() >= 2)
-            ? std::atan2(path[1].y - path[0].y, path[1].x - path[0].x)
-            : norm_angle(src.dock_theta + kPi);
-
-        // 出库行进方向(出库末段切线,几何与 a 选择无关,用 a_fwd 估即可)。
-        std::vector<Pt> pts_fwd = build_pts(a_fwd);
-        double arr_dir = skel_dir;
-        if (pts_fwd.size() >= 2) {
-            const Pt& p1 = pts_fwd[pts_fwd.size() - 1];
-            const Pt& p0 = pts_fwd[pts_fwd.size() - 2];
-            if (dist(p0, p1) > 1e-9)
-                arr_dir = std::atan2(p1.y - p0.y, p1.x - p0.x);
-        }
-        // 出库行进方向与路线首段同向 → 前进;反向 → 倒车。
-        const bool forward = std::cos(arr_dir - skel_dir) >= 0.0;
-
-        std::vector<Pt> pts = forward ? std::move(pts_fwd) : build_pts(a_rev);
-        const WpType type = forward ? WpType::FORWARD : WpType::REVERSE;
+        std::vector<Pt> pts = build_pts(a_rev);
+        const WpType type = WpType::REVERSE;
 
         RoughPath prefix;
         prefix.reserve(pts.size() + path.size());
@@ -667,13 +670,12 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
                 motion = std::atan2(nxt.y - pts[k].y, nxt.x - pts[k].x);
             } else if (k > 0) {
                 // 沿用上一点的运动切线(去掉车身朝向里的 ±π 还原回运动方向)。
-                motion = forward ? prefix.back().theta
-                                 : norm_angle(prefix.back().theta + kPi);
+                motion = norm_angle(prefix.back().theta + kPi);
             } else {
                 motion = norm_angle(src.dock_theta + kPi);
             }
             // 车身朝向:前进=运动方向;倒车=运动反向(车头与运动相反)。
-            const double body = forward ? motion : norm_angle(motion + kPi);
+            const double body = norm_angle(motion + kPi);
             prefix.push_back({pts[k].x, pts[k].y, norm_angle(body), type});
         }
         prefix.insert(prefix.end(), path.begin(), path.end());
