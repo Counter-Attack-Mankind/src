@@ -135,7 +135,7 @@ std::array<FootprintPoint, 4> footprintCorners(const RoughWp& pose,
 
 bool footprintInsideField(const RoughWp& pose, const MapParam& mp,
                           double margin) {
-    constexpr double eps = 1e-5;
+    constexpr double eps = 0.02;
     for (const FootprintPoint& c : footprintCorners(pose, mp, margin)) {
         if (c.x < -eps || c.x > mp.field_width + eps ||
             c.y < -eps || c.y > mp.field_height + eps) {

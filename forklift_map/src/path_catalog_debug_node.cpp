@@ -629,6 +629,11 @@ private:
                     continue;
                 }
                 if (!legal_pose_flip_at(i)) {
+                    ROS_WARN("[path_catalog] kink pose jump at i=%zu "
+                             "pose=(%.3f, %.3f) prev_theta=%.1fdeg theta=%.1fdeg",
+                             i, path[i].x, path[i].y,
+                             path[i - 1].theta * 180.0 / kPi,
+                             path[i].theta * 180.0 / kPi);
                     return DebugRejectReason::KINK;
                 }
             }
@@ -660,6 +665,13 @@ private:
                 const bool legal_reverse_cusp =
                     prev_type != type && ang >= cfg_.kink_cusp_angle;
                 if (ang > cfg_.kink_min_angle && !legal_reverse_cusp) {
+                    ROS_WARN("[path_catalog] kink geometry at segment %zu "
+                             "turn=%.1fdeg prev_type=%d type=%d "
+                             "prev_vec=(%.3f, %.3f) vec=(%.3f, %.3f)",
+                             i, ang * 180.0 / kPi,
+                             static_cast<int>(prev_type),
+                             static_cast<int>(type),
+                             prev_dx, prev_dy, dx, dy);
                     return DebugRejectReason::KINK;
                 }
 
@@ -675,6 +687,13 @@ private:
                 const bool body_flip =
                     angleDiffAbs(prev_body, body) > cfg_.kink_min_angle;
                 if (body_flip && !legal_reverse_cusp) {
+                    ROS_WARN("[path_catalog] kink body flip at segment %zu "
+                             "prev_body=%.1fdeg body=%.1fdeg "
+                             "prev_type=%d type=%d",
+                             i, prev_body * 180.0 / kPi,
+                             body * 180.0 / kPi,
+                             static_cast<int>(prev_type),
+                             static_cast<int>(type));
                     return DebugRejectReason::KINK;
                 }
 

@@ -58,7 +58,7 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     const int src_corr = corridor_id(src.row_id);
     const int tgt_corr = corridor_id(tgt.row_id);
     const bool target_is_endpoint = tgt.id < 0;
-    const bool debug_row1_target = (tgt.id >= 10 && tgt.id <= 19);
+    const bool debug_row1_target = (tgt.id >= 10 && tgt.id <= 39);
 
     // Turn geometry derives from the shared map parameters.
     const double max_curvature  = mp_.turn_max_curvature();
@@ -272,23 +272,39 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     double current_y = src.dock_y();
     if (src.id >= 0) {
         // For a real/virtual source slot, plan the reverse exit landing point.
-        const double start_ref_x =
+        double start_ref_x =
             (src_corr == tgt_corr)
                 ? (terminal_reverse ? tgt.pre_dock_x : final_reference_x)
                 : transition_x(src_corr,
                                src_corr + ((tgt_corr > src_corr) ? 1 : -1),
                                src.pre_dock_x, tgt.pre_dock_x);
+        if (src_corr == 1 && tgt_corr > 1 &&
+            (tgt.row_id == 2 || tgt.row_id == 3 || tgt.row_id == 4)) {
+            const double left_outer_x = row1_left_down_x;
+            const double right_outer_x = row1_right_up_x;
+            if (tgt.row_id == 3 || tgt.row_id == 4) {
+                start_ref_x = (tgt.pre_dock_x < spine_x_) ? left_outer_x : right_outer_x;
+            } else {
+                const double left_gap = std::abs(tgt.pre_dock_x - left_outer_x);
+                const double right_gap = std::abs(tgt.pre_dock_x - right_outer_x);
+                start_ref_x = (left_gap >= right_gap) ? left_outer_x : right_outer_x;
+            }
+        }
         const bool same_corridor = src_corr == tgt_corr;
         const bool start_to_right = same_corridor
             ? (tgt.pre_dock_x >= src.pre_dock_x)
             : (start_ref_x >= src.pre_dock_x);
         if (!same_corridor &&
-            ((src_corr == 1 && tgt_corr == 2) ||
+            ((src_corr == 1 && tgt_corr > 1) ||
              (src_corr == 2 && tgt_corr == 1))) {
             const bool going_down = tgt_corr > src_corr;
-            if (src_corr == 1 && tgt_corr == 2) {
-                first_transition_x =
-                    start_to_right ? row1_right_down_x : row1_left_down_x;
+            if (src_corr == 1 && tgt_corr > 1) {
+                if (tgt.row_id == 2 || tgt.row_id == 3 || tgt.row_id == 4) {
+                    first_transition_x = start_ref_x;
+                } else {
+                    first_transition_x =
+                        start_to_right ? row1_right_down_x : row1_left_down_x;
+                }
             } else {
                 first_transition_x =
                     start_to_right ? row1_right_up_x : row1_left_up_x;
@@ -301,6 +317,11 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
                 ? planned_goal_lane_y
                 : current_transition_lane_y(
                       src_corr, src_corr + ((tgt_corr > src_corr) ? 1 : -1));
+        const bool same_corridor_row1_upper =
+            same_corridor && src_corr == 1 && tgt.row_id == 1;
+        if (same_corridor_row1_upper) {
+            start_lane_y = corridor_lane_y(mp_, src_corr, HDir::RIGHT);
+        }
         if (src_corr == tgt_corr && terminal_reverse) {
             const HDir same_corr_drive_dir =
                 (tgt.pre_dock_x >= src.pre_dock_x) ? HDir::RIGHT : HDir::LEFT;
@@ -391,13 +412,6 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
             if (!fit_initial_reverse(direct_reverse_end_dir,
                                      direct_reverse_end_x, true)) {
                 initial_reverse_end = {src.pre_dock_x, start_lane_y};
-                if (debug_row1_target && same_corridor) {
-                    const double alt_lane_y =
-                        std::abs(start_lane_y - forward_lane_y) <
-                                std::abs(start_lane_y - far_lane_y)
-                            ? far_lane_y : forward_lane_y;
-                    initial_reverse_end = {src.pre_dock_x, alt_lane_y};
-                }
             }
         }
         if (debug_row1_target) {
@@ -569,11 +583,28 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     if (terminal_reverse && !terminal_reverse_has_curve) {
         return {};
     }
+    const bool same_corridor_row1_upper =
+        src.id >= 0 && src_corr == tgt_corr && src_corr == 1 && tgt.row_id == 1;
     if (terminal_reverse && terminal_reverse_has_curve) {
         push_point(polyline, {current_x, goal_lane_y});
         push_point(polyline, terminal_reverse_drive_start);
     } else {
-        push_point(polyline, {current_x, goal_lane_y});
+        if (same_corridor_row1_upper &&
+            std::abs(current_y - goal_lane_y) > std::max(sample_ds, 0.02)) {
+            const double target_side = (tgt.pre_dock_x < src.pre_dock_x) ? -1.0 : 1.0;
+            const double lane_shift_run = std::max(final_min_req_x, 0.34);
+            const double preferred_x = std::max(
+                0.04,
+                std::min(mp_.field_width - 0.04,
+                         tgt.pre_dock_x + target_side * lane_shift_run));
+            push_point(polyline, {preferred_x, current_y});
+            push_point(polyline, {preferred_x, goal_lane_y});
+            current_x = preferred_x;
+            current_y = goal_lane_y;
+        } else {
+            push_point(polyline, {current_x, goal_lane_y});
+            current_y = goal_lane_y;
+        }
         const double margin_x = 0.04;
         const double preferred_side = (target_x >= current_x) ? -1.0 : 1.0;
         double approach_x = target_x + preferred_side * final_min_req_x;
@@ -750,6 +781,19 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
             const double body = norm_angle(motion + kPi);
             prefix.push_back({pts[k].x, pts[k].y, norm_angle(body), type});
         }
+        if (!prefix.empty()) {
+            // The reverse exit and the following forward route must meet at a
+            // real cusp: same rear-axle point and continuous body heading, but
+            // a discrete REVERSE -> FORWARD mode change at that exact point.
+            prefix.back().x = b.x;
+            prefix.back().y = b.y;
+            prefix.back().theta = path.front().theta;
+            prefix.back().type = WpType::REVERSE;
+            path.front().x = b.x;
+            path.front().y = b.y;
+            path.front().theta = prefix.back().theta;
+            path.front().type = WpType::FORWARD;
+        }
         prefix.insert(prefix.end(), path.begin(), path.end());
         path.swap(prefix);
     };
@@ -774,7 +818,8 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     }
 
     auto lane_shift_clear = [&](const Pt& b, const Pt& c, const Pt& direction,
-                                double lead_in, double lead_out) {
+                                double lead_in, double lead_out,
+                                bool allow_terminal_shelf) {
         const Pt u = normalize(direction);
         const Pt nrm = left_normal(u);
         const double lateral = dot(c - b, nrm);
@@ -784,7 +829,7 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
         for (int k = 0; k <= steps; ++k) {
             const double t = static_cast<double>(k) / static_cast<double>(steps);
             const Pt p = start + u * (length * t) + nrm * (lateral * quintic_blend(t));
-            if (point_in_shelf(mp_, p)) return false;
+            if (point_in_shelf(mp_, p) && !allow_terminal_shelf) return false;
         }
         return true;
     };
@@ -807,19 +852,29 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     for (size_t j = 1; j + 2 < n; ++j) {
         if (suppress_turn[j] || suppress_turn[j + 1]) continue;
         if (!is_short_parallel_shift(simplified[j - 1], simplified[j],
-                                     simplified[j + 1], simplified[j + 2], 0.22)) {
+                                     simplified[j + 1], simplified[j + 2], 1.20)) {
             continue;
         }
+        const bool terminal_lane_shift =
+            !target_is_endpoint && (j + 2 == n - 1);
         const Pt u = normalize(simplified[j] - simplified[j - 1]);
         const double lateral = std::abs(dot(simplified[j + 1] - simplified[j],
                                             left_normal(u)));
-        const double min_total =
+        double min_total =
             std::max(2.0 * sample_ds,
                      std::sqrt(6.0 * lateral / std::max(max_curvature, kEps)));
         const double avail_in = 0.98 * seg_len[j - 1];
         const double avail_out = 0.98 * seg_len[j + 1];
         if (min_total > avail_in + avail_out) {
-            continue;
+            if (!terminal_lane_shift) {
+                if (debug_row1_target) {
+                    ROS_WARN("[planner][row1-debug] lane_shift too short tgt=%d j=%zu "
+                             "terminal=0 lateral=%.3f need=%.3f avail=%.3f",
+                             tgt.id, j, lateral, min_total, avail_in + avail_out);
+                }
+                continue;
+            }
+            min_total = avail_in + avail_out;
         }
         double lead_in = std::min(avail_in, min_total * 0.5);
         double lead_out = min_total - lead_in;
@@ -827,10 +882,42 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
             lead_out = avail_out;
             lead_in = min_total - lead_out;
         }
+        if (terminal_lane_shift && j > 1) {
+            const Pt prev_u = normalize(simplified[j - 1] - simplified[j - 2]);
+            const Pt in_u = normalize(simplified[j] - simplified[j - 1]);
+            const bool prev_has_turn =
+                std::abs(cross(prev_u, in_u)) >= 1e-4 &&
+                std::abs(dot(prev_u, in_u)) <= 0.99;
+            if (prev_has_turn) {
+                const double turn_reserve =
+                    std::min(0.45 * seg_len[j - 1],
+                             std::max(final_min_req_x, sample_ds));
+                const double max_lead_in =
+                    std::max(sample_ds, seg_len[j - 1] - turn_reserve - sample_ds);
+                if (lead_in > max_lead_in) {
+                    const double extra = lead_in - max_lead_in;
+                    lead_in = max_lead_in;
+                    lead_out = std::min(avail_out, lead_out + extra);
+                }
+            }
+        }
         if (!lane_shift_clear(simplified[j], simplified[j + 1],
                               simplified[j] - simplified[j - 1],
-                              lead_in, lead_out)) {
+                              lead_in, lead_out,
+                              terminal_lane_shift)) {
+            if (debug_row1_target) {
+                ROS_WARN("[planner][row1-debug] lane_shift rejected tgt=%d j=%zu "
+                         "terminal=%d lateral=%.3f lead_in=%.3f lead_out=%.3f",
+                         tgt.id, j, terminal_lane_shift ? 1 : 0,
+                         lateral, lead_in, lead_out);
+            }
             continue;
+        }
+        if (debug_row1_target) {
+            ROS_WARN("[planner][row1-debug] lane_shift accepted tgt=%d j=%zu "
+                     "terminal=%d lateral=%.3f lead_in=%.3f lead_out=%.3f",
+                     tgt.id, j, terminal_lane_shift ? 1 : 0,
+                     lateral, lead_in, lead_out);
         }
         lane_shift_start[j] = true;
         lane_shift_lead_in[j] = lead_in;
@@ -1022,6 +1109,43 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
 
     const Pt last_dir = normalize(simplified.back() - simplified[simplified.size() - 2]);
     push_sample(dense, simplified.back(), std::atan2(last_dir.y, last_dir.x));
+
+    auto remove_micro_reversals = [&]() {
+        std::vector<Sample> cleaned;
+        cleaned.reserve(dense.size());
+        const double max_micro_len = std::max(2.5 * sample_ds, 0.025);
+        for (const Sample& s : dense) {
+            cleaned.push_back(s);
+            while (cleaned.size() >= 3) {
+                const size_t k = cleaned.size() - 1;
+                const Pt a = cleaned[k - 2].p;
+                const Pt b = cleaned[k - 1].p;
+                const Pt c = cleaned[k].p;
+                const Pt ab = b - a;
+                const Pt bc = c - b;
+                const double lab = dist(a, b);
+                const double lbc = dist(b, c);
+                if (lab < kEps || lbc < kEps) {
+                    cleaned.erase(cleaned.end() - 2);
+                    continue;
+                }
+                const double cos_angle = dot(ab, bc) / (lab * lbc);
+                const bool micro_reversal =
+                    cos_angle < -0.98 &&
+                    std::min(lab, lbc) <= max_micro_len &&
+                    dist(a, c) <= std::max(lab, lbc) + sample_ds;
+                if (!micro_reversal) break;
+                if (debug_row1_target) {
+                    ROS_WARN("[planner][row1-debug] remove micro reversal tgt=%d "
+                             "at p=(%.3f,%.3f) len=(%.3f,%.3f)",
+                             tgt.id, b.x, b.y, lab, lbc);
+                }
+                cleaned.erase(cleaned.end() - 2);
+            }
+        }
+        dense.swap(cleaned);
+    };
+    remove_micro_reversals();
 
     RoughPath path;
     path.reserve(dense.size());
