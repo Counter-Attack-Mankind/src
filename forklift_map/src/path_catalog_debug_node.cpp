@@ -290,7 +290,14 @@ public:
         
         //========= 1.2 创建地图对象和路径生成器对象 =========
         map_ = std::make_unique<ForkliftMap>(mp_);
-        generator_ = std::make_unique<PathGenerator>(mp_, pp_);
+        generator_a1_to_b_ = std::make_unique<PathGenerator>(
+            mp_, pp_, PathGeneratorRouteMode::A1_TO_B);
+        generator_b_to_a1_ = std::make_unique<PathGenerator>(
+            mp_, pp_, PathGeneratorRouteMode::B_TO_A1);
+        generator_a2_to_b_ = std::make_unique<PathGenerator>(
+            mp_, pp_, PathGeneratorRouteMode::A2_TO_B);
+        generator_b_to_a2_ = std::make_unique<PathGenerator>(
+            mp_, pp_, PathGeneratorRouteMode::B_TO_A2);
         
         //========  1.3 读取A1,A2，运行参数模式 ===================
         use_exact_midpoints_ = true;
@@ -358,6 +365,15 @@ private:
         return mp_.bottom_shelf_depth * 0.5 + mp_.pre_dock_clearance;
     }
 
+    const PathGenerator& activeGenerator(const std::string& depot_label,
+                                         bool to_depot) const {
+        const bool use_a2 = depot_label == "A2";
+        if (use_a2) {
+            return to_depot ? *generator_b_to_a2_ : *generator_a2_to_b_;
+        }
+        return to_depot ? *generator_b_to_a1_ : *generator_a1_to_b_;
+    }
+
     void publish() {
         const Slot a1 = makeVirtualSlot("A1", 101, 0, a1_x_, a1_y_,
                                         a1_pre_x_, a1_pre_y_, a1_yaw_);
@@ -419,7 +435,7 @@ private:
         const Slot& dst = to_depot ? depot : slot;
         const std::string slot_label = "B" + std::to_string(target_slot_);
         PathGenerationInfo info;
-        selected_path_ = generator_->generate(src, dst, &info);
+        selected_path_ = activeGenerator(label, to_depot).generate(src, dst, &info);
         selected_label_ = to_depot
             ? (slot_label + "_to_" + label)
             : (label + "_to_" + slot_label);
@@ -528,7 +544,8 @@ private:
             const std::string route_label = to_depot
                 ? ("B" + std::to_string(target) + "_to_" + depot_label)
                 : (depot_label + "_to_B" + std::to_string(target));
-            RoughPath path = generator_->generate(src, dst, &info);
+            RoughPath path =
+                activeGenerator(depot_label, to_depot).generate(src, dst, &info);
             if (path.size() < 2) {
                 ++failed;
                 ROS_ERROR("[path_catalog] %s rejected: empty_path",
@@ -844,9 +861,43 @@ private:
                           const Slot& src,
                           const Slot& target,
                           DebugRejectReason reason) const {
+        const bool to_depot_mode = uppercase(direction_) == "TO_DEPOT";
+        const Slot& focus = (to_depot_mode && src.id >= 0) ? src : target;
         const bool focused_target =
-            (target.row_id == 1 || target.row_id == 5);
+            (focus.row_id == 1 || focus.row_id == 5 || to_depot_mode);
         if (!focused_target && target_slot_ < 0) return;
+
+        if (reason == DebugRejectReason::CURVATURE_DISCONTINUITY ||
+            reason == DebugRejectReason::KINK) {
+            RoughWp prev;
+            RoughWp mid;
+            RoughWp next;
+            double angle = 0.0;
+            if (!findSharpestPathPoint(path, &mid, &prev, &next, &angle)) {
+                ROS_WARN("[path_catalog][reject-detail] %s B%d %s: "
+                         "sharp point not found",
+                         label.c_str(), focus.id, rejectReasonName(reason));
+                return;
+            }
+            auto modeName = [](WpType type) {
+                return type == WpType::REVERSE ? "REVERSE" : "FORWARD";
+            };
+            ROS_WARN("[path_catalog][reject-detail] %s B%d row=%d col=%d "
+                     "%s sharp_turn=%.1fdeg "
+                     "prev=(%.3f,%.3f,%.1fdeg,%s) "
+                     "mid=(%.3f,%.3f,%.1fdeg,%s) "
+                     "next=(%.3f,%.3f,%.1fdeg,%s)",
+                     label.c_str(), focus.id, focus.row_id, focus.col,
+                     rejectReasonName(reason), angle * 180.0 / kPi,
+                     prev.x, prev.y, prev.theta * 180.0 / kPi,
+                     modeName(prev.type),
+                     mid.x, mid.y, mid.theta * 180.0 / kPi,
+                     modeName(mid.type),
+                     next.x, next.y, next.theta * 180.0 / kPi,
+                     modeName(next.type));
+            return;
+        }
+
         if (reason != DebugRejectReason::SHELF_COLLISION &&
             reason != DebugRejectReason::FOOTPRINT_OUT_OF_BOUNDS) {
             return;
@@ -860,7 +911,7 @@ private:
                                   &bad_shelf, &segment, &ratio)) {
             ROS_WARN("[path_catalog][reject-detail] %s B%d %s: "
                      "first invalid pose not found",
-                     label.c_str(), target.id, rejectReasonName(reason));
+                     label.c_str(), focus.id, rejectReasonName(reason));
             return;
         }
 
@@ -876,7 +927,7 @@ private:
                      "shelf_collision seg=%zu ratio=%.3f motion=%s "
                      "rear=(%.3f,%.3f,%.1fdeg) body=(%.3f,%.3f) "
                      "shelf=[x %.3f..%.3f y %.3f..%.3f]",
-                     label.c_str(), target.id, target.row_id, target.col,
+                     label.c_str(), focus.id, focus.row_id, focus.col,
                      segment, ratio, motion,
                      bad_pose.x, bad_pose.y, bad_pose.theta * 180.0 / kPi,
                      center.x, center.y,
@@ -887,7 +938,7 @@ private:
                      "footprint_out_of_bounds seg=%zu ratio=%.3f motion=%s "
                      "rear=(%.3f,%.3f,%.1fdeg) body=(%.3f,%.3f) "
                      "field=[0..%.3f, 0..%.3f]",
-                     label.c_str(), target.id, target.row_id, target.col,
+                     label.c_str(), focus.id, focus.row_id, focus.col,
                      segment, ratio, motion,
                      bad_pose.x, bad_pose.y, bad_pose.theta * 180.0 / kPi,
                      center.x, center.y, mp_.field_width, mp_.field_height);
@@ -895,7 +946,7 @@ private:
 
         ROS_WARN("[path_catalog][reject-detail] %s B%d footprint corners: "
                  "(%.3f,%.3f) (%.3f,%.3f) (%.3f,%.3f) (%.3f,%.3f)",
-                 label.c_str(), target.id,
+                 label.c_str(), focus.id,
                  corners[0].x, corners[0].y,
                  corners[1].x, corners[1].y,
                  corners[2].x, corners[2].y,
@@ -1107,7 +1158,10 @@ private:
     PlannerParam pp_;
     forklift_planner::multi_vehicle::MultiVehicleConfig cfg_;
     std::unique_ptr<ForkliftMap> map_;
-    std::unique_ptr<PathGenerator> generator_;
+    std::unique_ptr<PathGenerator> generator_a1_to_b_;
+    std::unique_ptr<PathGenerator> generator_b_to_a1_;
+    std::unique_ptr<PathGenerator> generator_a2_to_b_;
+    std::unique_ptr<PathGenerator> generator_b_to_a2_;
 
     bool use_exact_midpoints_ = true;
     double a1_x_ = 1.25;

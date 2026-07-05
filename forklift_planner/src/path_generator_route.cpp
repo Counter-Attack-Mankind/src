@@ -30,8 +30,8 @@ using namespace forklift_planner::path_internal;
 
 }  // namespace
 
-RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
-                                  PathGenerationInfo* info) const {
+RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
+                                             PathGenerationInfo* info) const {
     // Reset debug info.
     if (info != nullptr) {
         *info = PathGenerationInfo{};
@@ -58,8 +58,17 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     const int src_corr = corridor_id(src.row_id);
     const int tgt_corr = corridor_id(tgt.row_id);
     const bool target_is_endpoint = tgt.id < 0;
+    const char* route_mode_name = "AUTO";
+    switch (route_mode_) {
+        case PathGeneratorRouteMode::A1_TO_B: route_mode_name = "A1_TO_B"; break;
+        case PathGeneratorRouteMode::B_TO_A1: route_mode_name = "B_TO_A1"; break;
+        case PathGeneratorRouteMode::A2_TO_B: route_mode_name = "A2_TO_B"; break;
+        case PathGeneratorRouteMode::B_TO_A2: route_mode_name = "B_TO_A2"; break;
+        case PathGeneratorRouteMode::AUTO: break;
+    }
     const bool debug_row1_target =
-        (tgt.row_id == 1 || tgt.row_id == 5);
+        (tgt.row_id == 1 || tgt.row_id == 5 ||
+         (target_is_endpoint && (src.row_id == 1 || src.row_id == 5)));
 
     // Turn geometry derives from the shared map parameters.
     const double max_curvature  = mp_.turn_max_curvature();
@@ -167,10 +176,10 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
         target_is_endpoint &&
         (pp_.terminal_docking_mode == "reverse" || auto_reverse_terminal);
     if (debug_row1_target) {
-        ROS_WARN("[planner][row1-debug] src=%d tgt=%d src_corr=%d tgt_corr=%d "
+        ROS_WARN("[planner][row1-debug] route=%s src=%d tgt=%d src_corr=%d tgt_corr=%d "
                  "target=(%.3f,%.3f th=%.1fdeg) mode=%s terminal_reverse=%d "
                  "near_gap=%.3f far_gap=%.3f horiz=%.3f min_x=%.3f",
-                 src.id, tgt.id, src_corr, tgt_corr,
+                 route_mode_name, src.id, tgt.id, src_corr, tgt_corr,
                  tgt.pre_dock_x, tgt.pre_dock_y,
                  tgt.dock_theta * 180.0 / kPi,
                  pp_.terminal_docking_mode.c_str(),

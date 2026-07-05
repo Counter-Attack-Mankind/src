@@ -15,7 +15,11 @@
 
 //构造函数传入地图参数与规划参数
 PathGenerator::PathGenerator(const MapParam& mp, const PlannerParam& pp)
-    : mp_(mp), pp_(pp) {
+    : PathGenerator(mp, pp, PathGeneratorRouteMode::AUTO) {}
+
+PathGenerator::PathGenerator(const MapParam& mp, const PlannerParam& pp,
+                             PathGeneratorRouteMode route_mode)
+    : mp_(mp), pp_(pp), route_mode_(route_mode) {
     spine_x_        = mp_.field_width * 0.5;        //计算场地中央通道的x坐标，地图中线
     left_bypass_x_  = mp_.row1_left_aisle * 0.5;    //左侧绕行通道
     const double row1_right = mp_.row1_left_aisle + mp_.row1_shelf_width;

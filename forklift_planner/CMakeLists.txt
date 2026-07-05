@@ -22,10 +22,19 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
-add_executable(planner_node
+set(PATH_GENERATOR_SOURCES
   src/path_generator.cpp
   src/path_generator_internal.cpp
   src/path_generator_route.cpp
+  src/path_generator_routes/path_generator_route_dispatch.cpp
+  src/path_generator_routes/a1_to_b/path_generator_route.cpp
+  src/path_generator_routes/b_to_a1/path_generator_route.cpp
+  src/path_generator_routes/a2_to_b/path_generator_route.cpp
+  src/path_generator_routes/b_to_a2/path_generator_route.cpp
+)
+
+add_executable(planner_node
+  ${PATH_GENERATOR_SOURCES}
   src/planner_node.cpp
 )
 add_dependencies(planner_node ${catkin_EXPORTED_TARGETS})
@@ -34,9 +43,7 @@ target_link_libraries(planner_node
 )
 
 add_executable(two_vehicle_sim_node
-  src/path_generator.cpp
-  src/path_generator_internal.cpp
-  src/path_generator_route.cpp
+  ${PATH_GENERATOR_SOURCES}
   src/two_vehicle_sim_node.cpp
 )
 add_dependencies(two_vehicle_sim_node ${catkin_EXPORTED_TARGETS})
@@ -45,9 +52,7 @@ target_link_libraries(two_vehicle_sim_node
 )
 
 add_executable(multi_vehicle_patrol_node
-  src/path_generator.cpp
-  src/path_generator_internal.cpp
-  src/path_generator_route.cpp
+  ${PATH_GENERATOR_SOURCES}
   src/multi_vehicle/footprint.cpp
   src/multi_vehicle/marker_publisher.cpp
   src/multi_vehicle/multi_vehicle_config.cpp
@@ -67,9 +72,7 @@ target_link_libraries(multi_vehicle_patrol_node
 
 # [DIAG] standalone path-generator probe (no ROS runtime)
 add_executable(path_debug
-  src/path_generator.cpp
-  src/path_generator_internal.cpp
-  src/path_generator_route.cpp
+  ${PATH_GENERATOR_SOURCES}
   src/multi_vehicle/footprint.cpp
   src/path_debug.cpp
 )

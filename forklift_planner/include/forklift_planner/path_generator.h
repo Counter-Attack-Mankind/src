@@ -24,12 +24,22 @@ struct PathGenerationInfo {
     bool used_arc_fallback = false;
 };
 
+enum class PathGeneratorRouteMode {
+    AUTO,
+    A1_TO_B,
+    B_TO_A1,
+    A2_TO_B,
+    B_TO_A2,
+};
+
 // ── PathGenerator ─────────────────────────────────────────────────────────────
 
 class PathGenerator {
 public:
     //构造函数需要（地图信息+规划参数）
     PathGenerator(const MapParam& mp, const PlannerParam& pp);
+    PathGenerator(const MapParam& mp, const PlannerParam& pp,
+                  PathGeneratorRouteMode route_mode);
 
     // Build complete path: dock(src) → pre_dock(src) → corridors → pre_dock(tgt) → dock(tgt)
     //（最重要！！！）这里输入为，起点、终点的slot（slot不仅为货位编号，同样带有坐标、预停靠信息等）
@@ -43,6 +53,17 @@ public:
                                const Slot& tgt, PathGenerationInfo* info) const;
 
 private:
+    RoughPath generateRouteCommon(const Slot& src, const Slot& tgt,
+                                  PathGenerationInfo* info) const;
+    RoughPath generateRouteA1ToB(const Slot& src, const Slot& tgt,
+                                 PathGenerationInfo* info) const;
+    RoughPath generateRouteBToA1(const Slot& src, const Slot& tgt,
+                                 PathGenerationInfo* info) const;
+    RoughPath generateRouteA2ToB(const Slot& src, const Slot& tgt,
+                                 PathGenerationInfo* info) const;
+    RoughPath generateRouteBToA2(const Slot& src, const Slot& tgt,
+                                 PathGenerationInfo* info) const;
+
     //  根据货架行号判断属于第几条走廊
     int corridor_id(int row_id) const;
     
@@ -54,6 +75,7 @@ private:
 
     MapParam   mp_;
     PlannerParam pp_;
+    PathGeneratorRouteMode route_mode_ = PathGeneratorRouteMode::AUTO;
 
     double spine_x_;
     double left_bypass_x_;
