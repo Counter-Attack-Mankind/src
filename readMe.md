@@ -66,15 +66,34 @@
 
 34.最新日志显示arc_fallback回到B46的第一个拐点j=1，原因不是最后入库竖直段，而是非终端lane_shift(j=2)的lead_in过长，占用了从第1走廊下来的竖直段，使前一个90度clothoid没有足够切线长度；现在将“给前一个拐点预留切线长度”的规则从terminal lane_shift扩展到所有lane_shift，必要时压缩lead_in并把长度转移到lead_out，避免换道曲线吃掉前序转弯空间。
 
-35.针对第二走廊下排靠近中心竖线的B25/B27/B29/B31/B33/B35，直接从中心竖线到库位竖线生成一段前进弧线会因为横向距离过短而转向过大；现在为这类目标加入中心调头辅助段：主路径先前进到目标反侧的第三走廊辅助点，再以同姿态倒车退到目标外侧staging点，最后以前进方式完成入库。两个换向点都显式写成同坐标、同车身姿态的FORWARD/REVERSE cusp，避免被普通前进平滑器误拼成连续圆弧。
+35. 针对第二走廊下排靠近中心竖线的B25/B27/B29/B31/B33/B35，直接从中心竖线到库位竖线生成一段前进弧线会因为横向距离过短而转向过大；现在为这类目标加入中心调头辅助段：主路径先前进到目标反侧的第三走廊辅助点，再以同姿态倒车退到目标外侧staging点，最后以前进方式完成入库。两个换向点都显式写成同坐标、同车身姿态的FORWARD/REVERSE cusp，避免被普通前进平滑器误拼成连续圆弧。
 
-36.第4走廊上侧的第7行货位中，B41已经能按原逻辑生成，但B43/B45/B47/B49/B51靠近中心竖线，日志显示失败点集中在入库前的短水平段，两个竖直线之间直接用前进弧线连接会触发clothoid infeasible。现在将同一套中心调头辅助段精确扩展到row_id=6且col=1..5的目标，让它们先到反侧辅助点，再倒车回目标外侧，最后前进入库；B41以及已成功的B53/B55不走该分支。
+36. 第4走廊上侧的第7行货位中，B41已经能按原逻辑生成，但B43/B45/B47/B49/B51靠近中心竖线，日志显示失败点集中在入库前的短水平段，两个竖直线之间直接用前进弧线连接会触发clothoid infeasible。现在将同一套中心调头辅助段精确扩展到row_id=6且col=1..5的目标，让它们先到反侧辅助点，再倒车回目标外侧，最后前进入库；B41以及已成功的B53/B55不走该分支。
 
-37.根据第4走廊上侧第7行的新日志，B49/B51/B53/B55虽然在右侧，却仍被3->4过渡固定拉到row3_down_x左侧车道，导致后续入库横向拼接不自然；现在第3走廊到第4走廊的过渡车道按目标左右侧选择：B41/B43/B45/B47等左侧目标走row3_down_x，B49/B51/B53/B55等右侧目标走row3_up_x，同时第4走廊的终端参考x也使用同一侧车道，避免左右侧目标共用错误竖线。
+37. 根据第4走廊上侧第7行的新日志，B49/B51/B53/B55虽然在右侧，却仍被3->4过渡固定拉到row3_down_x左侧车道，导致后续入库横向拼接不自然；现在第3走廊到第4走廊的过渡车道按目标左右侧选择：B41/B43/B45/B47等左侧目标走row3_down_x，B49/B51/B53/B55等右侧目标走row3_up_x，同时第4走廊的终端参考x也使用同一侧车道，避免左右侧目标共用错误竖线。
 
-38.最新日志显示B41/B55能过而B43/B53曲率不连续，是因为41/55作为最外侧列，终端竖线到库位竖线的水平距离约0.98m，足够放下clothoid；43/53只有约0.74m，仍会在入库前短横向段触发clothoid infeasible。辅助点策略继续覆盖row_id=6的col=1..5，但将反侧辅助点从按两个转弯保守距离布置改为按单侧终端转弯余量布置，aux_run约0.44m、stage_run约0.42m，减少不必要的长距离倒车。
+38. 最新日志显示B41/B55能过而B43/B53曲率不连续，是因为41/55作为最外侧列，终端竖线到库位竖线的水平距离约0.98m，足够放下clothoid；43/53只有约0.74m，仍会在入库前短横向段触发clothoid infeasible。辅助点策略继续覆盖row_id=6的col=1..5，但将反侧辅助点从按两个转弯保守距离布置改为按单侧终端转弯余量布置，aux_run约0.44m、stage_run约0.42m，减少不必要的长距离倒车。
+
 39. B43/B53 的日志显示没有出现 center detour，而是退回旧骨架后在第4走廊入口短横段触发 clothoid infeasible。根因是它们贴近左右边界，按外侧 staging 时最后回旋曲线只剩约0.34m横向空间。现在 row_id=6 的辅助点触发改为按直接终端横向距离判断，且当外侧 staging 被边界压缩时自动翻到靠中心侧进库，同时把反向辅助点拉到另一侧，避免“辅助点成功触发但倒退距离几乎为零”的假换向。
-40. B43/B53 adjustment supersedes the previous center-detour idea for these two slots: they should not use the auxiliary reverse strategy. B43 now enters corridor 4 through the right row3 lane (row3_up_x), and B53 through the left row3 lane (row3_down_x), increasing the final horizontal turn run to roughly the same scale as B41/B55 so the normal clothoid U-turn has enough room.
-41. Row8/B56-B65 debugging: path_catalog_debug_node now prints detailed reject diagnostics for shelf_collision/footprint_out_of_bounds. In all-target catalog mode the extra terminal logs are limited to B56-B65; in single target mode they apply to the selected target. Each log reports segment index, interpolation ratio, rear-axle pose, body center, motion type, colliding shelf rectangle, and vehicle footprint corners.
-42. Row8 first pass: B56-B58 collide near the row3 left shelf while entering corridor4, so their row3->corridor4 terminal reference is moved to the opposite/right row3 lane to increase clearance. Planner skeleton debug is extended through B65 so the next row8 run prints coarse skeleton points and lane-shift decisions together with the existing first-collision footprint diagnostics.
-43. Row8 routing rule: B56-B60 use the right vertical lane of the row3/corridor4 dual-lane transition, while B61-B65 use the left vertical lane, giving the final bottom-row turn more clearance. The row1->row2 first transition for row_id=7 is also forced onto the outer bypass lane; logs showed B59-B65 were colliding much earlier at x=1.865 against the row1 shelf, so the right-side descent must use row1_right_up_x instead of the inner row1_right_down_x.
+
+40. B43/B53 的调整取代​​了此前针对这两个货位采用的“中心绕行”方案；它们不再使用辅助倒车策略。B43 现经由第 3 排右侧车道（row3_up_x）进入第 4 通道，B53 经由第 3 排左侧车道（row3_down_x）进入；此举将最终水平转向段的距离增加至与 B41/B55 大致相当的规模，从而确保标准的回旋曲线（clothoid）U 型转弯拥有足够的空间。
+
+41. 第 8 排/B56-B65 调试：`path_catalog_debug_node` 现针对货架碰撞（shelf_collision）或轮廓越界（footprint_out_of_bounds）输出详细的拒绝原因诊断信息。在“全目标目录模式”（all-target catalog mode）下，额外的终点日志仅限于 B56-B65；在“单目标模式”下，则适用于所选目标。每条日志均包含以下信息：路段索引、插值比例、后轴位姿、车身中心、运动类型、发生碰撞的货架矩形区域以及车辆轮廓顶点坐标。
+
+42. 第 8 排首次试运行：B56-B58 在进入第 4 通道时，于第 3 排左侧货架附近发生碰撞，因此将其“第 3 排至第 4 通道”的终点参考点移至第 3 排右侧车道（即对侧车道）以增加间隙。规划器骨架调试功能已扩展至 B65，以便在下一次第 8 排运行测试中，除了现有的首次碰撞轮廓诊断信息外，还能同时输出粗略骨架点及变道决策信息。
+
+43. 第 8 排路径规划规则：B56-B60 使用第 3 排/第 4 通道双车道过渡区域的右侧纵向车道，而 B61-B65 使用左侧纵向车道，从而为底排的最终转向动作留出更多空间。针对 `row_id=7` 的“第 1 排至第 2 排”首次过渡路径也被强制设定为外侧绕行车道；日志显示 B59-B65 在较早位置（x=1.865）即与第 1 排货架发生碰撞，因此右侧下行路径必须使用 `row1_right_up_x`，而非内侧的 `row1_right_down_x`。
+
+44. 第 2 排上部货位 B10/B12/B14/B16/B18 现采用上侧车道辅助策略。针对同一通道内 `row_id=1` 的初始反向驶出动作，其目标位置设定在通道 1 的上行车道而非下行车道，从而消除了导致回旋曲线（clothoid）规划不可行的 0.28 米垂直换道段。中心绕行辅助功能已进行通用化改进，能够利用目标终点朝向；因此，这些朝南的泊位可以增设一个位于上行车道的辅助（或反向）暂存点，随后以回旋曲线轨迹向前驶入，同时避开 B4/B5 区域。
+
+45. 当前已完成的大部分货架不再输出详细 planner 调试，只保留第2行货位(row_id=1)和第6行货位(row_id=5)的骨架、换道和失败点信息。path_catalog 的 reject-detail 也同步聚焦这两类目标：若第6行仍发生 shelf_collision，会打印首次碰撞的段号、插值比例、后轴位姿、车体中心、车体四角和对应货架矩形，便于直接判断是末端入库扫货架还是中段转弯扫货架。
+
+46. 第6行上排货位(row_id=5，对应 B40/B42/.../B54)的碰撞问题不应继续用“水平贴着货架走到库位竖线，再做两个90度 clothoid”处理。日志中 B52/B54 的末端大横移被 `terminal lane_shift` 阈值 0.55m 主动跳过，导致车辆先横向贴近货架，再急转入库而碰撞。现在将该跳过阈值放宽到 1.25m，让第6行上排优先采用 terminal lane_shift，把横向位移分摊到向下行驶过程中完成，也就是“往下再转弯”，减少末端横向扫掠货架的风险；若仍被拒绝，则根据新的 reject-detail 继续判断是否需要调整下探距离或切线预留。
+
+47. 最新第6行日志表明，放开 terminal lane_shift 后碰撞反而提前到上方货架区域：B40/B42 的首次碰撞点在 y≈2.45，正处于 row2 货架矩形 y=2.009..2.491 内。根因是 lane_shift 的 lead_in 从第3走廊过渡竖直段向上吃了约0.7m，车辆还没下到安全的第3走廊区域就开始横移。因此第6行上排不再用大 terminal lane_shift 提前横移，而是先沿过渡竖直车道继续下探到第3走廊下侧车道(y≈1.55)，再从较低位置做正常转弯入库；同时恢复 row_id=5 大横移 lane_shift 跳过阈值为0.55m，避免再次把横移提前到货架上方。
+
+48. 再次复查第6行日志后确认，单纯压到第3走廊下侧车道(y≈1.55)虽然避开了提前碰撞，但末端从水平转入竖直入库只剩约0.21m直线，B40/B42在最后拐点触发clothoid infeasible；而被fallback逻辑拉回上侧车道(y≈1.83)的右侧目标又继续碰撞。因此第6行上排目标不再强制贴某条车道线，而是使用“安全中间终端线”：`terminal_rear_stop_y + final_min_req_y + 0.03`，再夹在第3走廊上下车道之间，通常约为 y≈1.70。这个高度低于上方货架碰撞区，同时给最后向下入库的90度转弯保留足够切线长度。
+49. 第6行上排货位（row_id=5）继续按“先沿第2到第3走廊的过渡竖直车道下探，再转入库位”的思路处理。最新日志中左侧目标使用 y=1.55 时最后竖直段只有约 0.21m，放不下末端 clothoid；右侧目标使用 y=1.83 时又会扫到上方货架。因此现在在最终骨架生成前再次锁定 row_id=5 的 `goal_lane_y = terminal_rear_stop_y + final_min_req_y + 0.03`，避免被 `current_y_has_turn_space` 重新覆盖回 1.55/1.83 两条车道。同时 row_id=5 的终端平行换道不再由 `lane_shift` 接管，即使横移量只有 0.39m 也跳过，保留“竖直下探 + 两个标准 clothoid 90 度拐弯”的结构，避免横移提前发生在上方货架区域。
+50. 最新日志中 B44/B46/B48/B50 仍失败，但已经不是碰撞，而是统一卡在第6行上排中间列的终端横向段：从过渡竖直线 `x=1.250` 到库位竖线只有 0.393m 或 0.631m，标准 clothoid 在还要预留最终竖直入库距离时放不下。现在将 row_id=5 且 col=2..5 的目标纳入中心辅助换向策略：主路径先到反侧辅助点，再以同姿态倒车到目标外侧 staging 点，最后以前进方式转入库位。这样不再用 `x=1.250 -> 目标x` 的短横段硬拐，而是给最后 90 度前进入库留出接近 B40/B42/B52/B54 的有效横向转弯距离。
+51. 第2行上排货位（row_id=1，对应 B10/B12/B14/B16/B18）的最新失败点不是终端入库，而是初始倒车出库曲线内部：日志显示所有失败都在 `curve_start=(1.250,4.351)` 附近出现 `theta -90deg -> 90deg` 的同一 REVERSE 段姿态跳变。该问题本质上是把“倒车出库转弯”和“后续前进辅助策略”耦合在了同一条倒车曲线里。现在 row_id=1 同走廊上排目标不再拟合初始 reverse clothoid，而是直接倒车到第一走廊上侧辅助点，并在该点显式形成 REVERSE -> FORWARD cusp；后续转弯和入库交给前进主路径处理，避免倒车段内部出现 180 度姿态突变。
+52. 路径目录调试节点新增 `direction` 参数，用于区分 `from_depot`（A1/A2 -> B0..B65）和 `to_depot`（B0..B65 -> A1/A2）。这只是可视化和批量验证入口的方向切换，底层仍使用同一个 `PathGenerator::generate(src, tgt)`，不需要为 A1->货位、货位->A1、A2->货位、货位->A2 分别维护四套生成器。真正需要区分的是“源是真实库位时必须倒车出库”和“目标是真实库位时必须前进入库”这类操作约束，它们应由 `src/tgt` 的属性和少量方向/场景策略决定，而不是复制生成器。

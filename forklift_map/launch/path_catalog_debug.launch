@@ -1,8 +1,9 @@
 <launch>
-  <!-- target_slot=-1 shows the selected depot to all B0..B65 paths.
-       target_slot=5 with depot=A1 animates A1 -> B5.
-       target_slot=65 with depot=A2 animates A2 -> B65. -->
+  <!-- direction=from_depot: selected depot -> B0..B65.
+       direction=to_depot: B0..B65 -> selected depot.
+       target_slot=5 with depot=A1 animates A1 -> B5 or B5 -> A1. -->
   <arg name="depot" default="A1"/>
+  <arg name="direction" default="from_depot"/>
   <arg name="target_slot" default="-1"/>
   <arg name="validate_paths" default="true"/>
   <arg name="visualize_rejections" default="true"/>
@@ -36,6 +37,7 @@
     <param name="a2_yaw" value="-1.57079632679"/>
 
     <param name="depot" type="str" value="$(arg depot)"/>
+    <param name="direction" type="str" value="$(arg direction)"/>
     <param name="target_slot" type="int" value="$(arg target_slot)"/>
     <param name="validate_paths" type="bool" value="$(arg validate_paths)"/>
     <param name="visualize_rejections" type="bool" value="$(arg visualize_rejections)"/>

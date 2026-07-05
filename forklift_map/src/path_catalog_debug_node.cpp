@@ -307,6 +307,7 @@ public:
         nh_.param("a2_pre_y", a2_pre_y_, a2_y_ + virtual_pre_dock_distance());
         nh_.param("a2_yaw", a2_yaw_, -kPi * 0.5);
         nh_.param("depot", depot_name_, depot_name_);
+        nh_.param("direction", direction_, direction_);
         nh_.param("target_slot", target_slot_, target_slot_);
         nh_.param("validate_paths", validate_paths_, validate_paths_);
         nh_.param("visualize_rejections", visualize_rejections_,
@@ -371,12 +372,14 @@ private:
         const bool use_a2 = uppercase(depot_name_) == "A2";
         const Slot& depot = use_a2 ? a2 : a1;
         const std::string label = use_a2 ? "A2" : "A1";
+        const bool to_depot = uppercase(direction_) == "TO_DEPOT";
 
-        ROS_WARN("[path_catalog] selected depot=%s targets B0..B65 (%zu): [%s]",
-                 label.c_str(), all_targets.size(), idsToString(all_targets).c_str());
+        ROS_WARN("[path_catalog] selected depot=%s direction=%s targets B0..B65 (%zu): [%s]",
+                 label.c_str(), to_depot ? "to_depot" : "from_depot",
+                 all_targets.size(), idsToString(all_targets).c_str());
 
         if (target_slot_ >= 0) {
-            publishSinglePath(depot, label);
+            publishSinglePath(depot, label, to_depot);
             return;
         }
 
@@ -389,7 +392,7 @@ private:
         addTargetMarkers(arr, id, all_targets, rgba(1.0f, 1.0f, 1.0f, 0.85f),
                          "all_B_targets");
 
-        buildAndDrawPaths(arr, id, depot, all_targets, label,
+        buildAndDrawPaths(arr, id, depot, all_targets, label, to_depot,
                           use_a2 ? rgba(1.0f, 0.55f, 0.05f, 0.42f)
                                  : rgba(0.15f, 0.75f, 1.0f, 0.42f),
                           0.065);
@@ -400,8 +403,9 @@ private:
                  arr.markers.size());
     }
 
-    void publishSinglePath(const Slot& src,
-                           const std::string& label) {
+    void publishSinglePath(const Slot& depot,
+                           const std::string& label,
+                           bool to_depot) {
         if (target_slot_ < 0 ||
             target_slot_ >= static_cast<int>(map_->slots().size()) ||
             target_slot_ > 65) {
@@ -410,10 +414,15 @@ private:
             return;
         }
 
-        const Slot& dst = map_->slots().at(static_cast<size_t>(target_slot_));
+        const Slot& slot = map_->slots().at(static_cast<size_t>(target_slot_));
+        const Slot& src = to_depot ? slot : depot;
+        const Slot& dst = to_depot ? depot : slot;
+        const std::string slot_label = "B" + std::to_string(target_slot_);
         PathGenerationInfo info;
         selected_path_ = generator_->generate(src, dst, &info);
-        selected_label_ = label + "_to_B" + std::to_string(target_slot_);
+        selected_label_ = to_depot
+            ? (slot_label + "_to_" + label)
+            : (label + "_to_" + slot_label);
         if (selected_path_.size() < 2) {
             ROS_ERROR("[path_catalog] %s rejected: empty_path",
                       selected_label_.c_str());
@@ -433,9 +442,9 @@ private:
                 const std_msgs::ColorRGBA color =
                     use_a2 ? rgba(1.0f, 0.55f, 0.05f, 1.0f)
                            : rgba(0.1f, 0.65f, 1.0f, 1.0f);
-                addDepotMarkers(arr, id, src, label, color);
+                addDepotMarkers(arr, id, depot, label, color);
                 addSphere(arr, pp_.frame_id, "single_target_point", id++,
-                          dst.cx, dst.cy, rgba(1.0f, 1.0f, 1.0f, 1.0f));
+                          slot.cx, slot.cy, rgba(1.0f, 1.0f, 1.0f, 1.0f));
                 addPath(arr, pp_.frame_id, "single_rejected_path", id++,
                         selected_path_, rgba(1.0f, 0.1f, 0.1f, 0.65f), 0.085);
                 addRejectionDiagnostics(arr, id, selected_path_, info, src, dst,
@@ -454,17 +463,17 @@ private:
         const double len = pathLength(selected_path_);
         ROS_WARN("[path_catalog] %ssingle path %s row=%d col=%d wpts=%zu len=%.3f arc=%d animate=%d",
                  validate_paths_ ? "" : "RAW ",
-                 selected_label_.c_str(), dst.row_id, dst.col,
+                 selected_label_.c_str(), slot.row_id, slot.col,
                  selected_path_.size(), len, info.used_arc_fallback ? 1 : 0,
                  animate_ ? 1 : 0);
 
         visualization_msgs::MarkerArray arr;
         int id = 0;
-        addDepotMarkers(arr, id, src, label, color);
-        addSphere(arr, pp_.frame_id, "single_target_point", id++, dst.cx, dst.cy,
+        addDepotMarkers(arr, id, depot, label, color);
+        addSphere(arr, pp_.frame_id, "single_target_point", id++, slot.cx, slot.cy,
                   rgba(1.0f, 1.0f, 1.0f, 1.0f));
-        addText(arr, pp_.frame_id, "single_target_label", id++, dst.cx, dst.cy,
-                0.19, 0.075, "B" + std::to_string(target_slot_),
+        addText(arr, pp_.frame_id, "single_target_label", id++, slot.cx, slot.cy,
+                0.19, 0.075, slot_label,
                 rgba(1.0f, 1.0f, 1.0f, 1.0f));
         addPath(arr, pp_.frame_id, "single_path", id++, selected_path_, color,
                 0.075);
@@ -506,36 +515,40 @@ private:
                            const Slot& depot,
                            const std::vector<int>& targets,
                            const std::string& depot_label,
+                           bool to_depot,
                            const std_msgs::ColorRGBA& color,
                            double z_offset) const {
         int ok = 0;
         int failed = 0;
         for (int target : targets) {
             PathGenerationInfo info;
-            const Slot& dst = map_->slots().at(static_cast<size_t>(target));
-            RoughPath path = generator_->generate(depot, dst, &info);
+            const Slot& slot = map_->slots().at(static_cast<size_t>(target));
+            const Slot& src = to_depot ? slot : depot;
+            const Slot& dst = to_depot ? depot : slot;
+            const std::string route_label = to_depot
+                ? ("B" + std::to_string(target) + "_to_" + depot_label)
+                : (depot_label + "_to_B" + std::to_string(target));
+            RoughPath path = generator_->generate(src, dst, &info);
             if (path.size() < 2) {
                 ++failed;
-                ROS_ERROR("[path_catalog] %s -> B%d rejected: empty_path",
-                          depot_label.c_str(), target);
+                ROS_ERROR("[path_catalog] %s rejected: empty_path",
+                          route_label.c_str());
                 continue;
             }
             if (validate_paths_) {
-                const DebugRejectReason reject = validatePath(path, info, depot, dst);
+                const DebugRejectReason reject = validatePath(path, info, src, dst);
                 if (reject != DebugRejectReason::NONE) {
                     ++failed;
-                    ROS_ERROR("[path_catalog] %s -> B%d rejected: %s",
-                              depot_label.c_str(), target, rejectReasonName(reject));
-                    logRejectDetails(
-                        depot_label + "_to_B" + std::to_string(target),
-                        path, depot, dst, reject);
+                    ROS_ERROR("[path_catalog] %s rejected: %s",
+                              route_label.c_str(), rejectReasonName(reject));
+                    logRejectDetails(route_label, path, src, dst, reject);
                     if (visualize_rejections_) {
                         addPath(arr, pp_.frame_id, depot_label + "_rejected_B",
                                 id++, path, rgba(1.0f, 0.1f, 0.1f, 0.22f),
                                 z_offset + 0.018);
                         addRejectionDiagnostics(
-                            arr, id, path, info, depot, dst, reject,
-                            depot_label + "_to_B" + std::to_string(target));
+                            arr, id, path, info, src, dst, reject,
+                            route_label);
                     }
                     continue;
                 }
@@ -543,9 +556,9 @@ private:
             ++ok;
             addPath(arr, pp_.frame_id, depot_label + "_to_B", id++, path, color,
                     z_offset);
-            ROS_INFO("[path_catalog] %s%s -> B%d row=%d col=%d wpts=%zu len=%.3f arc=%d",
+            ROS_INFO("[path_catalog] %s%s row=%d col=%d wpts=%zu len=%.3f arc=%d",
                      validate_paths_ ? "" : "RAW ",
-                     depot_label.c_str(), target, dst.row_id, dst.col,
+                     route_label.c_str(), slot.row_id, slot.col,
                      path.size(), pathLength(path),
                      info.used_arc_fallback ? 1 : 0);
         }
@@ -831,8 +844,9 @@ private:
                           const Slot& src,
                           const Slot& target,
                           DebugRejectReason reason) const {
-        const bool row8_target = target.id >= 56 && target.id <= 65;
-        if (!row8_target && target_slot_ < 0) return;
+        const bool focused_target =
+            (target.row_id == 1 || target.row_id == 5);
+        if (!focused_target && target_slot_ < 0) return;
         if (reason != DebugRejectReason::SHELF_COLLISION &&
             reason != DebugRejectReason::FOOTPRINT_OUT_OF_BOUNDS) {
             return;
@@ -1108,6 +1122,7 @@ private:
     double a2_yaw_ = -kPi * 0.5;
 
     std::string depot_name_ = "A1";
+    std::string direction_ = "from_depot";
     int target_slot_ = -1;
     bool validate_paths_ = true;
     bool visualize_rejections_ = true;

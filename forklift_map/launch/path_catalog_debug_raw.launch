@@ -1,6 +1,7 @@
 <launch>
   <!-- Shows raw generated paths without task-style validation filtering. -->
   <arg name="depot" default="A1"/>
+  <arg name="direction" default="from_depot"/>
   <arg name="target_slot" default="-1"/>
   <arg name="visualize_rejections" default="true"/>
   <arg name="animate" default="true"/>
@@ -8,6 +9,7 @@
 
   <include file="$(find forklift_map)/launch/path_catalog_debug.launch">
     <arg name="depot" value="$(arg depot)"/>
+    <arg name="direction" value="$(arg direction)"/>
     <arg name="target_slot" value="$(arg target_slot)"/>
     <arg name="validate_paths" value="false"/>
     <arg name="visualize_rejections" value="$(arg visualize_rejections)"/>
