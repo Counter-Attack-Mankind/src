@@ -88,8 +88,15 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     const double final_min_req_y = std::max(0.20, final_turn_min.t_out + 0.02);
     const double final_min_req_x = std::max(0.20, final_turn_min.t_in + 0.02);
     const double target_x = tgt.pre_dock_x;
+    auto row3_terminal_lane_x = [&]() {
+        if (!target_is_endpoint && tgt.row_id == 6) {
+            if (tgt.col == 1) return row3_up_x;
+            if (tgt.col == 6) return row3_down_x;
+        }
+        return (target_x < spine_x_) ? row3_down_x : row3_up_x;
+    };
     const double nominal_terminal_x =
-        target_is_endpoint ? spine_x_ : ((tgt_corr == 4) ? row3_down_x : spine_x_);
+        target_is_endpoint ? spine_x_ : ((tgt_corr == 4) ? row3_terminal_lane_x() : spine_x_);
     const double left_terminal_x = target_x - final_min_req_x;
     const double right_terminal_x = target_x + final_min_req_x;
     double final_reference_x = nominal_terminal_x;
@@ -109,8 +116,6 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
             final_reference_x = right_terminal_x;
         }
     }
-    const double terminal_two_turn_x = 2.0 * final_min_req_x + sample_ds;
-
     const double dock_dir_y_for_lane = std::sin(tgt.dock_theta);
     const bool single_row_terminal = (tgt.row_id == 0 || tgt.row_id == 7);
     const double terminal_rear_stop_y =
@@ -249,7 +254,10 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
         }
         if ((from_corr == 3 && to_corr == 4) || (from_corr == 4 && to_corr == 3)) {
             if (going_down) {
-                return row3_down_x;
+                if (target_is_endpoint) {
+                    return row3_down_x;
+                }
+                return row3_terminal_lane_x();
             }
             return row3_up_x;
         }
@@ -615,27 +623,48 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
         push_point(polyline, terminal_reverse_drive_start);
     } else {
         const bool row2_lower_near_spine =
-            !target_is_endpoint &&
-            src.id >= 0 &&
             tgt.row_id == 4 &&
             std::abs(tgt.pre_dock_x - spine_x_) <= 0.75;
-        if (row2_lower_near_spine) {
-            const double target_side = (tgt.pre_dock_x < spine_x_) ? -1.0 : 1.0;
-            const double aux_side = -target_side;
-            const double aux_run = std::max(0.48, terminal_two_turn_x);
+        const bool row3_lower_near_spine =
+            tgt.row_id == 6 && tgt.col >= 2 && tgt.col <= 5;
+        const bool lower_row_near_spine =
+            !target_is_endpoint &&
+            src.id >= 0 &&
+            (row2_lower_near_spine || row3_lower_near_spine);
+        if (lower_row_near_spine) {
+            const double aux_run =
+                std::max(0.38, final_min_req_x + 0.10);
             const double stage_run =
-                std::max(0.50, final_min_req_x + 0.18);
+                std::max(0.36, final_min_req_x + 0.08);
             auto clamp_x = [&](double x) {
                 return std::max(0.04, std::min(mp_.field_width - 0.04, x));
             };
+            const double target_side = (tgt.pre_dock_x < spine_x_) ? -1.0 : 1.0;
+            const double left_stage_room = tgt.pre_dock_x - 0.04;
+            const double right_stage_room = mp_.field_width - 0.04 - tgt.pre_dock_x;
+            double stage_side = target_side;
+            if (stage_side < 0.0 &&
+                left_stage_room < stage_run - sample_ds &&
+                right_stage_room > left_stage_room) {
+                stage_side = 1.0;
+            } else if (stage_side > 0.0 &&
+                       right_stage_room < stage_run - sample_ds &&
+                       left_stage_room > right_stage_room) {
+                stage_side = -1.0;
+            }
+            const double aux_side = -stage_side;
             center_detour_aux = {
                 clamp_x(spine_x_ + aux_side * aux_run), goal_lane_y};
             center_detour_stage = {
-                clamp_x(tgt.pre_dock_x + target_side * stage_run), goal_lane_y};
-            center_detour_heading = (target_side < 0.0) ? 0.0 : kPi;
+                clamp_x(tgt.pre_dock_x + stage_side * stage_run), goal_lane_y};
+            if (std::abs(center_detour_aux.x - center_detour_stage.x) < 0.25) {
+                center_detour_aux.x =
+                    clamp_x(tgt.pre_dock_x - stage_side * (aux_run + stage_run));
+            }
+            center_detour_heading = (stage_side < 0.0) ? 0.0 : kPi;
 
             const double signed_turn =
-                (target_side < 0.0) ? (kPi * 0.5) : (-kPi * 0.5);
+                (stage_side < 0.0) ? (kPi * 0.5) : (-kPi * 0.5);
             const double available_x =
                 std::abs(tgt.pre_dock_x - center_detour_stage.x);
             const double available_y =
@@ -677,6 +706,15 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
                              center_detour_heading * 180.0 / kPi,
                              center_detour_curve.pts.size());
                 }
+            } else if (debug_row1_target) {
+                ROS_WARN("[planner][row1-debug] center detour failed tgt=%d "
+                         "target_side=%.0f stage_side=%.0f aux=(%.3f,%.3f) "
+                         "stage=(%.3f,%.3f) available=(x %.3f, y %.3f) "
+                         "max_tangent=%.3f",
+                         tgt.id, target_side, stage_side,
+                         center_detour_aux.x, center_detour_aux.y,
+                         center_detour_stage.x, center_detour_stage.y,
+                         available_x, available_y, max_tangent);
             }
         }
         if (!center_detour_active && same_corridor_row1_upper &&

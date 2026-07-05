@@ -68,4 +68,10 @@
 
 35.针对第二走廊下排靠近中心竖线的B25/B27/B29/B31/B33/B35，直接从中心竖线到库位竖线生成一段前进弧线会因为横向距离过短而转向过大；现在为这类目标加入中心调头辅助段：主路径先前进到目标反侧的第三走廊辅助点，再以同姿态倒车退到目标外侧staging点，最后以前进方式完成入库。两个换向点都显式写成同坐标、同车身姿态的FORWARD/REVERSE cusp，避免被普通前进平滑器误拼成连续圆弧。
 
-35.针对从第2走廊到第3走廊时仍可能扫到B29/B31附近货架角的问题，2->3过渡离开第2走廊的位置不再只贴上端车道中心线，而是在上端车道基础上再向走廊外侧抬高约0.08m，并用corridor_max_y-0.04限幅；这样中央spine竖直过渡段更长，转弯发生点更远离货架边角，给车体扫掠留出额外冗余。
+36.第4走廊上侧的第7行货位中，B41已经能按原逻辑生成，但B43/B45/B47/B49/B51靠近中心竖线，日志显示失败点集中在入库前的短水平段，两个竖直线之间直接用前进弧线连接会触发clothoid infeasible。现在将同一套中心调头辅助段精确扩展到row_id=6且col=1..5的目标，让它们先到反侧辅助点，再倒车回目标外侧，最后前进入库；B41以及已成功的B53/B55不走该分支。
+
+37.根据第4走廊上侧第7行的新日志，B49/B51/B53/B55虽然在右侧，却仍被3->4过渡固定拉到row3_down_x左侧车道，导致后续入库横向拼接不自然；现在第3走廊到第4走廊的过渡车道按目标左右侧选择：B41/B43/B45/B47等左侧目标走row3_down_x，B49/B51/B53/B55等右侧目标走row3_up_x，同时第4走廊的终端参考x也使用同一侧车道，避免左右侧目标共用错误竖线。
+
+38.最新日志显示B41/B55能过而B43/B53曲率不连续，是因为41/55作为最外侧列，终端竖线到库位竖线的水平距离约0.98m，足够放下clothoid；43/53只有约0.74m，仍会在入库前短横向段触发clothoid infeasible。辅助点策略继续覆盖row_id=6的col=1..5，但将反侧辅助点从按两个转弯保守距离布置改为按单侧终端转弯余量布置，aux_run约0.44m、stage_run约0.42m，减少不必要的长距离倒车。
+39. B43/B53 的日志显示没有出现 center detour，而是退回旧骨架后在第4走廊入口短横段触发 clothoid infeasible。根因是它们贴近左右边界，按外侧 staging 时最后回旋曲线只剩约0.34m横向空间。现在 row_id=6 的辅助点触发改为按直接终端横向距离判断，且当外侧 staging 被边界压缩时自动翻到靠中心侧进库，同时把反向辅助点拉到另一侧，避免“辅助点成功触发但倒退距离几乎为零”的假换向。
+40. B43/B53 adjustment supersedes the previous center-detour idea for these two slots: they should not use the auxiliary reverse strategy. B43 now enters corridor 4 through the right row3 lane (row3_up_x), and B53 through the left row3 lane (row3_down_x), increasing the final horizontal turn run to roughly the same scale as B41/B55 so the normal clothoid U-turn has enough room.
