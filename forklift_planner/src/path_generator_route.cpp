@@ -58,7 +58,7 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     const int src_corr = corridor_id(src.row_id);
     const int tgt_corr = corridor_id(tgt.row_id);
     const bool target_is_endpoint = tgt.id < 0;
-    const bool debug_row1_target = (tgt.id >= 10 && tgt.id <= 39);
+    const bool debug_row1_target = (tgt.id >= 10 && tgt.id <= 55);
 
     // Turn geometry derives from the shared map parameters.
     const double max_curvature  = mp_.turn_max_curvature();
@@ -185,6 +185,15 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
         planned_goal_lane_y = corridor_lane_y(mp_, tgt_corr, final_hdir);
         terminal_stop_y = planned_goal_lane_y;
     } else {
+        if (!target_is_endpoint && !single_row_terminal) {
+            // For a real double-row slot, choose the corridor lane farther
+            // from the shelf face in Y. This preserves the straight approach
+            // needed before entering the slot and avoids sweeping the shelf
+            // when row3/row4 targets are reached from a lower corridor.
+            planned_goal_lane_y = (dock_dir_y_for_lane < 0.0)
+                ? std::max(forward_lane_y, far_lane_y)
+                : std::min(forward_lane_y, far_lane_y);
+        }
         const bool lane_has_final_space =
             (dock_dir_y_for_lane < 0.0)
                 ? (planned_goal_lane_y - forward_terminal_y >= final_min_req_y)
@@ -254,6 +263,9 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     };
     auto current_transition_lane_y = [&](int current_corr, int next_corr) {
         const bool going_down = next_corr > current_corr;
+        if (current_corr == 2 && next_corr == 3) {
+            return corridor_lane_y(mp_, current_corr, HDir::LEFT);
+        }
         const HDir current_dir = going_down ? HDir::RIGHT : HDir::LEFT;
         return corridor_lane_y(mp_, current_corr, current_dir);
     };
@@ -279,10 +291,12 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
                                src_corr + ((tgt_corr > src_corr) ? 1 : -1),
                                src.pre_dock_x, tgt.pre_dock_x);
         if (src_corr == 1 && tgt_corr > 1 &&
-            (tgt.row_id == 2 || tgt.row_id == 3 || tgt.row_id == 4)) {
+            (tgt.row_id == 2 || tgt.row_id == 3 || tgt.row_id == 4 ||
+             tgt.row_id == 5 || tgt.row_id == 6)) {
             const double left_outer_x = row1_left_down_x;
             const double right_outer_x = row1_right_up_x;
-            if (tgt.row_id == 3 || tgt.row_id == 4) {
+            if (tgt.row_id == 3 || tgt.row_id == 4 ||
+                tgt.row_id == 5 || tgt.row_id == 6) {
                 start_ref_x = (tgt.pre_dock_x < spine_x_) ? left_outer_x : right_outer_x;
             } else {
                 const double left_gap = std::abs(tgt.pre_dock_x - left_outer_x);
@@ -299,7 +313,8 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
              (src_corr == 2 && tgt_corr == 1))) {
             const bool going_down = tgt_corr > src_corr;
             if (src_corr == 1 && tgt_corr > 1) {
-                if (tgt.row_id == 2 || tgt.row_id == 3 || tgt.row_id == 4) {
+                if (tgt.row_id == 2 || tgt.row_id == 3 || tgt.row_id == 4 ||
+                    tgt.row_id == 5 || tgt.row_id == 6) {
                     first_transition_x = start_ref_x;
                 } else {
                     first_transition_x =
@@ -860,6 +875,14 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
         const Pt u = normalize(simplified[j] - simplified[j - 1]);
         const double lateral = std::abs(dot(simplified[j + 1] - simplified[j],
                                             left_normal(u)));
+        if (terminal_lane_shift && tgt.row_id == 5 && lateral > 0.55) {
+            if (debug_row1_target) {
+                ROS_WARN("[planner][row1-debug] lane_shift skipped tgt=%d j=%zu "
+                         "terminal=1 lateral=%.3f: use two clothoid turns",
+                         tgt.id, j, lateral);
+            }
+            continue;
+        }
         double min_total =
             std::max(2.0 * sample_ds,
                      std::sqrt(6.0 * lateral / std::max(max_curvature, kEps)));
@@ -882,7 +905,7 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
             lead_out = avail_out;
             lead_in = min_total - lead_out;
         }
-        if (terminal_lane_shift && j > 1) {
+        if (j > 1) {
             const Pt prev_u = normalize(simplified[j - 1] - simplified[j - 2]);
             const Pt in_u = normalize(simplified[j] - simplified[j - 1]);
             const bool prev_has_turn =
@@ -899,6 +922,18 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
                     lead_in = max_lead_in;
                     lead_out = std::min(avail_out, lead_out + extra);
                 }
+            }
+        }
+        if (terminal_lane_shift && tgt.row_id == 5) {
+            const double final_straight_reserve =
+                std::max(0.02, final_min_req_y * 0.05);
+            const double max_lead_out = std::max(
+                sample_ds,
+                seg_len[j + 1] - final_straight_reserve - sample_ds);
+            if (lead_out > max_lead_out) {
+                const double extra = lead_out - max_lead_out;
+                lead_out = max_lead_out;
+                lead_in = std::min(avail_in, lead_in + extra);
             }
         }
         if (!lane_shift_clear(simplified[j], simplified[j + 1],
@@ -1043,12 +1078,23 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
         // 供调用方按需取舍)。运行期脱困会对许多候选位反复调 generate → 这两条若用裸 WARN
         // 会刷屏(实测 180min 达 24.8 万条)。改 THROTTLE 限流:保留信号、不再洪水。
         for (size_t j : infeasible_turns) {
-            ROS_WARN_THROTTLE(5.0,
-                     "[planner] slot %d: clothoid turn infeasible at skeleton point %zu; "
-                     "p=(%.3f, %.3f), prev_len=%.3f, next_len=%.3f, "
-                     "limit=%.3f, route skeleton needs adjustment",
-                     tgt.id, j, simplified[j].x, simplified[j].y,
-                     seg_len[j - 1], seg_len[j], turn_limits[j]);
+            if (debug_row1_target) {
+                ROS_WARN("[planner][row1-debug] clothoid infeasible tgt=%d "
+                         "j=%zu p=(%.3f, %.3f) prev=(%.3f, %.3f) "
+                         "next=(%.3f, %.3f) prev_len=%.3f next_len=%.3f "
+                         "limit=%.3f",
+                         tgt.id, j, simplified[j].x, simplified[j].y,
+                         simplified[j - 1].x, simplified[j - 1].y,
+                         simplified[j + 1].x, simplified[j + 1].y,
+                         seg_len[j - 1], seg_len[j], turn_limits[j]);
+            } else {
+                ROS_WARN_THROTTLE(5.0,
+                         "[planner] slot %d: clothoid turn infeasible at skeleton point %zu; "
+                         "p=(%.3f, %.3f), prev_len=%.3f, next_len=%.3f, "
+                         "limit=%.3f, route skeleton needs adjustment",
+                         tgt.id, j, simplified[j].x, simplified[j].y,
+                         seg_len[j - 1], seg_len[j], turn_limits[j]);
+            }
         }
         ROS_WARN_THROTTLE(5.0,
                  "[planner] slot %d: using arc fallback; curvature continuity is not satisfied",

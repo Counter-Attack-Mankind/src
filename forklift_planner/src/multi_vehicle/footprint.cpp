@@ -148,11 +148,14 @@ bool footprintInsideField(const RoughWp& pose, const MapParam& mp,
 bool footprintIntersectsShelf(const RoughWp& pose, const ShelfBlock& shelf,
                               const MapParam& mp, double margin) {
     const auto fp = footprintCorners(pose, mp, margin);
+    constexpr double shelf_length_inset = 0.02;
+    const double x0 = shelf.x + std::min(shelf_length_inset, shelf.w * 0.25);
+    const double x1 = shelf.x_max() - std::min(shelf_length_inset, shelf.w * 0.25);
     const std::array<FootprintPoint, 4> rect = {
-        FootprintPoint{shelf.x, shelf.y},
-        FootprintPoint{shelf.x_max(), shelf.y},
-        FootprintPoint{shelf.x_max(), shelf.y_max()},
-        FootprintPoint{shelf.x, shelf.y_max()}};
+        FootprintPoint{x0, shelf.y},
+        FootprintPoint{x1, shelf.y},
+        FootprintPoint{x1, shelf.y_max()},
+        FootprintPoint{x0, shelf.y_max()}};
 
     const double c = std::cos(pose.theta);
     const double s = std::sin(pose.theta);

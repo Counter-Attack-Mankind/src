@@ -134,6 +134,25 @@ void addPath(visualization_msgs::MarkerArray& arr,
     arr.markers.push_back(m);
 }
 
+void addLineStrip(visualization_msgs::MarkerArray& arr,
+                  const std::string& frame,
+                  const std::string& ns,
+                  int id,
+                  const std::vector<geometry_msgs::Point>& points,
+                  const std_msgs::ColorRGBA& color,
+                  double width,
+                  double z_offset) {
+    auto m = baseMarker(frame, ns, id);
+    m.type = visualization_msgs::Marker::LINE_STRIP;
+    m.scale.x = width;
+    m.color = color;
+    m.points = points;
+    for (geometry_msgs::Point& p : m.points) {
+        p.z = z_offset;
+    }
+    arr.markers.push_back(m);
+}
+
 double pathLength(const RoughPath& path) {
     double len = 0.0;
     for (size_t i = 1; i < path.size(); ++i) {
@@ -289,6 +308,8 @@ public:
         nh_.param("depot", depot_name_, depot_name_);
         nh_.param("target_slot", target_slot_, target_slot_);
         nh_.param("validate_paths", validate_paths_, validate_paths_);
+        nh_.param("visualize_rejections", visualize_rejections_,
+                  visualize_rejections_);
         nh_.param("animate", animate_, animate_);
         nh_.param("animation_period", animation_period_, animation_period_);
         nh_.param("animation_duration", animation_duration_, animation_duration_);
@@ -404,7 +425,22 @@ private:
             if (reject != DebugRejectReason::NONE) {
                 ROS_ERROR("[path_catalog] %s rejected by task-style validation: %s",
                           selected_label_.c_str(), rejectReasonName(reject));
-                selected_path_.clear();
+                visualization_msgs::MarkerArray arr;
+                int id = 0;
+                const bool use_a2 = label == "A2";
+                const std_msgs::ColorRGBA color =
+                    use_a2 ? rgba(1.0f, 0.55f, 0.05f, 1.0f)
+                           : rgba(0.1f, 0.65f, 1.0f, 1.0f);
+                addDepotMarkers(arr, id, src, label, color);
+                addSphere(arr, pp_.frame_id, "single_target_point", id++,
+                          dst.cx, dst.cy, rgba(1.0f, 1.0f, 1.0f, 1.0f));
+                addPath(arr, pp_.frame_id, "single_rejected_path", id++,
+                        selected_path_, rgba(1.0f, 0.1f, 0.1f, 0.65f), 0.085);
+                addRejectionDiagnostics(arr, id, selected_path_, info, src, dst,
+                                        reject, selected_label_);
+                static_markers_ = arr;
+                pub_.publish(arr);
+                if (!visualize_rejections_) selected_path_.clear();
                 return;
             }
         }
@@ -488,6 +524,14 @@ private:
                     ++failed;
                     ROS_ERROR("[path_catalog] %s -> B%d rejected: %s",
                               depot_label.c_str(), target, rejectReasonName(reject));
+                    if (visualize_rejections_) {
+                        addPath(arr, pp_.frame_id, depot_label + "_rejected_B",
+                                id++, path, rgba(1.0f, 0.1f, 0.1f, 0.22f),
+                                z_offset + 0.018);
+                        addRejectionDiagnostics(
+                            arr, id, path, info, depot, dst, reject,
+                            depot_label + "_to_B" + std::to_string(target));
+                    }
                     continue;
                 }
             }
@@ -722,6 +766,205 @@ private:
         return validatePose(path.back(), src, target);
     }
 
+    bool collidingShelfAtPose(const RoughWp& pose,
+                              const Slot& src,
+                              const Slot& target,
+                              ShelfBlock* out_shelf) const {
+        if (poseInSlotSweep(pose, src) || poseInSlotSweep(pose, target)) {
+            return false;
+        }
+        for (const ShelfBlock& shelf : map_->shelf_blocks()) {
+            if (forklift_planner::multi_vehicle::footprintIntersectsShelf(
+                    pose, shelf, mp_, 0.0)) {
+                if (out_shelf != nullptr) *out_shelf = shelf;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool findFirstInvalidPose(const RoughPath& path,
+                              const Slot& src,
+                              const Slot& target,
+                              DebugRejectReason reason,
+                              RoughWp* out_pose,
+                              ShelfBlock* out_shelf) const {
+        const double check_ds = std::max(0.005, cfg_.path_validation_step);
+        for (size_t i = 0; i + 1 < path.size(); ++i) {
+            const double seg_len = std::hypot(path[i + 1].x - path[i].x,
+                                              path[i + 1].y - path[i].y);
+            const int steps =
+                std::max(1, static_cast<int>(std::ceil(seg_len / check_ds)));
+            for (int k = 0; k <= steps; ++k) {
+                const double ratio =
+                    static_cast<double>(k) / static_cast<double>(steps);
+                const RoughWp pose = interpolatePose(path[i], path[i + 1], ratio);
+                if (reason == DebugRejectReason::FOOTPRINT_OUT_OF_BOUNDS &&
+                    !forklift_planner::multi_vehicle::footprintInsideField(
+                        pose, mp_, 0.0)) {
+                    if (out_pose != nullptr) *out_pose = pose;
+                    return true;
+                }
+                if (reason == DebugRejectReason::SHELF_COLLISION &&
+                    collidingShelfAtPose(pose, src, target, out_shelf)) {
+                    if (out_pose != nullptr) *out_pose = pose;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    bool findSharpestPathPoint(const RoughPath& path,
+                               RoughWp* out_pose,
+                               RoughWp* out_prev,
+                               RoughWp* out_next,
+                               double* out_angle) const {
+        if (path.size() < 3) return false;
+        bool have_prev = false;
+        RoughWp prev_a = path.front();
+        double prev_dx = 0.0;
+        double prev_dy = 0.0;
+        double prev_len = 0.0;
+        WpType prev_type = path.front().type;
+        double best_ang = -1.0;
+        RoughWp best_prev = path.front();
+        RoughWp best_mid = path.front();
+        RoughWp best_next = path.front();
+
+        for (size_t i = 0; i + 1 < path.size(); ++i) {
+            const double dx = path[i + 1].x - path[i].x;
+            const double dy = path[i + 1].y - path[i].y;
+            const double len = std::hypot(dx, dy);
+            if (len < 1e-4) continue;
+
+            const WpType type = path[i + 1].type;
+            if (have_prev) {
+                double c = (prev_dx * dx + prev_dy * dy) / (prev_len * len);
+                c = std::max(-1.0, std::min(1.0, c));
+                const double ang = std::acos(c);
+                const bool legal_reverse_cusp =
+                    prev_type != type && ang >= cfg_.kink_cusp_angle;
+                if (!legal_reverse_cusp && ang > best_ang) {
+                    best_ang = ang;
+                    best_prev = prev_a;
+                    best_mid = path[i];
+                    best_next = path[i + 1];
+                }
+            }
+
+            prev_a = path[i];
+            prev_dx = dx;
+            prev_dy = dy;
+            prev_len = len;
+            prev_type = type;
+            have_prev = true;
+        }
+        if (best_ang < 0.0) return false;
+        if (out_pose != nullptr) *out_pose = best_mid;
+        if (out_prev != nullptr) *out_prev = best_prev;
+        if (out_next != nullptr) *out_next = best_next;
+        if (out_angle != nullptr) *out_angle = best_ang;
+        return true;
+    }
+
+    void addFootprintBox(visualization_msgs::MarkerArray& arr,
+                         int& id,
+                         const std::string& ns,
+                         const RoughWp& pose,
+                         const std_msgs::ColorRGBA& color,
+                         double z_offset) const {
+        const auto corners =
+            forklift_planner::multi_vehicle::footprintCorners(pose, mp_, 0.0);
+        std::vector<geometry_msgs::Point> pts;
+        pts.reserve(5);
+        for (const auto& c : corners) {
+            pts.push_back(point(c.x, c.y, z_offset));
+        }
+        pts.push_back(point(corners.front().x, corners.front().y, z_offset));
+        addLineStrip(arr, pp_.frame_id, ns, id++, pts, color, 0.018, z_offset);
+    }
+
+    void addShelfBox(visualization_msgs::MarkerArray& arr,
+                     int& id,
+                     const std::string& ns,
+                     const ShelfBlock& shelf,
+                     const std_msgs::ColorRGBA& color,
+                     double z_offset) const {
+        addLineStrip(arr, pp_.frame_id, ns, id++,
+                     {point(shelf.x, shelf.y, z_offset),
+                      point(shelf.x_max(), shelf.y, z_offset),
+                      point(shelf.x_max(), shelf.y_max(), z_offset),
+                      point(shelf.x, shelf.y_max(), z_offset),
+                      point(shelf.x, shelf.y, z_offset)},
+                     color, 0.022, z_offset);
+    }
+
+    void addRejectionDiagnostics(visualization_msgs::MarkerArray& arr,
+                                 int& id,
+                                 const RoughPath& path,
+                                 const PathGenerationInfo& info,
+                                 const Slot& src,
+                                 const Slot& target,
+                                 DebugRejectReason reason,
+                                 const std::string& label) const {
+        if (!visualize_rejections_ || path.size() < 2) return;
+        const double z = 0.145;
+
+        if (reason == DebugRejectReason::SHELF_COLLISION ||
+            reason == DebugRejectReason::FOOTPRINT_OUT_OF_BOUNDS) {
+            RoughWp bad_pose;
+            ShelfBlock bad_shelf;
+            const bool found =
+                findFirstInvalidPose(path, src, target, reason,
+                                     &bad_pose, &bad_shelf);
+            if (!found) return;
+            addSphere(arr, pp_.frame_id, "reject_pose", id++,
+                      bad_pose.x, bad_pose.y, rgba(1.0f, 0.0f, 0.0f, 0.95f));
+            addFootprintBox(arr, id, "reject_footprint",
+                            bad_pose, rgba(1.0f, 0.0f, 0.0f, 0.95f), z);
+            if (reason == DebugRejectReason::SHELF_COLLISION) {
+                addShelfBox(arr, id, "reject_shelf",
+                            bad_shelf, rgba(1.0f, 0.9f, 0.0f, 0.95f), z + 0.012);
+            }
+            addText(arr, pp_.frame_id, "reject_label", id++,
+                    bad_pose.x, bad_pose.y, z + 0.07, 0.055,
+                    label + " " + rejectReasonName(reason),
+                    rgba(1.0f, 0.1f, 0.1f, 1.0f));
+            return;
+        }
+
+        if (reason == DebugRejectReason::CURVATURE_DISCONTINUITY ||
+            reason == DebugRejectReason::KINK) {
+            RoughWp prev;
+            RoughWp mid;
+            RoughWp next;
+            double angle = 0.0;
+            if (!findSharpestPathPoint(path, &mid, &prev, &next, &angle)) return;
+            const std_msgs::ColorRGBA color =
+                reason == DebugRejectReason::CURVATURE_DISCONTINUITY
+                    ? rgba(0.95f, 0.1f, 1.0f, 0.95f)
+                    : rgba(1.0f, 0.55f, 0.0f, 0.95f);
+            addLineStrip(arr, pp_.frame_id, "reject_sharp_segment", id++,
+                         {point(prev.x, prev.y, z),
+                          point(mid.x, mid.y, z),
+                          point(next.x, next.y, z)},
+                         color, 0.028, z);
+            addSphere(arr, pp_.frame_id, "reject_sharp_point", id++,
+                      mid.x, mid.y, color);
+            std::ostringstream ss;
+            ss << label << " " << rejectReasonName(reason);
+            if (reason == DebugRejectReason::CURVATURE_DISCONTINUITY &&
+                info.used_arc_fallback) {
+                ss << " arc_fallback";
+            }
+            ss << " turn=" << std::fixed << std::setprecision(0)
+               << angle * 180.0 / kPi << "deg";
+            addText(arr, pp_.frame_id, "reject_label", id++,
+                    mid.x, mid.y, z + 0.07, 0.052, ss.str(), color);
+        }
+    }
+
     void onAnimationTimer(const ros::TimerEvent&) {
         if (selected_path_.empty()) return;
         const double len = pathLength(selected_path_);
@@ -794,6 +1037,7 @@ private:
     std::string depot_name_ = "A1";
     int target_slot_ = -1;
     bool validate_paths_ = true;
+    bool visualize_rejections_ = true;
     bool animate_ = true;
     double animation_period_ = 0.05;
     double animation_duration_ = 8.0;
