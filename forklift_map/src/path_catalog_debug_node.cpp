@@ -2,6 +2,7 @@
 #include <visualization_msgs/MarkerArray.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <iomanip>
@@ -425,6 +426,7 @@ private:
             if (reject != DebugRejectReason::NONE) {
                 ROS_ERROR("[path_catalog] %s rejected by task-style validation: %s",
                           selected_label_.c_str(), rejectReasonName(reject));
+                logRejectDetails(selected_label_, selected_path_, src, dst, reject);
                 visualization_msgs::MarkerArray arr;
                 int id = 0;
                 const bool use_a2 = label == "A2";
@@ -524,6 +526,9 @@ private:
                     ++failed;
                     ROS_ERROR("[path_catalog] %s -> B%d rejected: %s",
                               depot_label.c_str(), target, rejectReasonName(reject));
+                    logRejectDetails(
+                        depot_label + "_to_B" + std::to_string(target),
+                        path, depot, dst, reject);
                     if (visualize_rejections_) {
                         addPath(arr, pp_.frame_id, depot_label + "_rejected_B",
                                 id++, path, rgba(1.0f, 0.1f, 0.1f, 0.22f),
@@ -788,7 +793,9 @@ private:
                               const Slot& target,
                               DebugRejectReason reason,
                               RoughWp* out_pose,
-                              ShelfBlock* out_shelf) const {
+                              ShelfBlock* out_shelf,
+                              size_t* out_segment = nullptr,
+                              double* out_ratio = nullptr) const {
         const double check_ds = std::max(0.005, cfg_.path_validation_step);
         for (size_t i = 0; i + 1 < path.size(); ++i) {
             const double seg_len = std::hypot(path[i + 1].x - path[i].x,
@@ -803,16 +810,82 @@ private:
                     !forklift_planner::multi_vehicle::footprintInsideField(
                         pose, mp_, 0.0)) {
                     if (out_pose != nullptr) *out_pose = pose;
+                    if (out_segment != nullptr) *out_segment = i;
+                    if (out_ratio != nullptr) *out_ratio = ratio;
                     return true;
                 }
                 if (reason == DebugRejectReason::SHELF_COLLISION &&
                     collidingShelfAtPose(pose, src, target, out_shelf)) {
                     if (out_pose != nullptr) *out_pose = pose;
+                    if (out_segment != nullptr) *out_segment = i;
+                    if (out_ratio != nullptr) *out_ratio = ratio;
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    void logRejectDetails(const std::string& label,
+                          const RoughPath& path,
+                          const Slot& src,
+                          const Slot& target,
+                          DebugRejectReason reason) const {
+        const bool row8_target = target.id >= 56 && target.id <= 65;
+        if (!row8_target && target_slot_ < 0) return;
+        if (reason != DebugRejectReason::SHELF_COLLISION &&
+            reason != DebugRejectReason::FOOTPRINT_OUT_OF_BOUNDS) {
+            return;
+        }
+
+        RoughWp bad_pose;
+        ShelfBlock bad_shelf;
+        size_t segment = 0;
+        double ratio = 0.0;
+        if (!findFirstInvalidPose(path, src, target, reason, &bad_pose,
+                                  &bad_shelf, &segment, &ratio)) {
+            ROS_WARN("[path_catalog][reject-detail] %s B%d %s: "
+                     "first invalid pose not found",
+                     label.c_str(), target.id, rejectReasonName(reason));
+            return;
+        }
+
+        const RoughWp center =
+            forklift_planner::multi_vehicle::bodyCenterPose(bad_pose, mp_);
+        const auto corners =
+            forklift_planner::multi_vehicle::footprintCorners(bad_pose, mp_, 0.0);
+        const char* motion =
+            bad_pose.type == WpType::REVERSE ? "REVERSE" : "FORWARD";
+
+        if (reason == DebugRejectReason::SHELF_COLLISION) {
+            ROS_WARN("[path_catalog][reject-detail] %s B%d row=%d col=%d "
+                     "shelf_collision seg=%zu ratio=%.3f motion=%s "
+                     "rear=(%.3f,%.3f,%.1fdeg) body=(%.3f,%.3f) "
+                     "shelf=[x %.3f..%.3f y %.3f..%.3f]",
+                     label.c_str(), target.id, target.row_id, target.col,
+                     segment, ratio, motion,
+                     bad_pose.x, bad_pose.y, bad_pose.theta * 180.0 / kPi,
+                     center.x, center.y,
+                     bad_shelf.x, bad_shelf.x_max(),
+                     bad_shelf.y, bad_shelf.y_max());
+        } else {
+            ROS_WARN("[path_catalog][reject-detail] %s B%d row=%d col=%d "
+                     "footprint_out_of_bounds seg=%zu ratio=%.3f motion=%s "
+                     "rear=(%.3f,%.3f,%.1fdeg) body=(%.3f,%.3f) "
+                     "field=[0..%.3f, 0..%.3f]",
+                     label.c_str(), target.id, target.row_id, target.col,
+                     segment, ratio, motion,
+                     bad_pose.x, bad_pose.y, bad_pose.theta * 180.0 / kPi,
+                     center.x, center.y, mp_.field_width, mp_.field_height);
+        }
+
+        ROS_WARN("[path_catalog][reject-detail] %s B%d footprint corners: "
+                 "(%.3f,%.3f) (%.3f,%.3f) (%.3f,%.3f) (%.3f,%.3f)",
+                 label.c_str(), target.id,
+                 corners[0].x, corners[0].y,
+                 corners[1].x, corners[1].y,
+                 corners[2].x, corners[2].y,
+                 corners[3].x, corners[3].y);
     }
 
     bool findSharpestPathPoint(const RoughPath& path,

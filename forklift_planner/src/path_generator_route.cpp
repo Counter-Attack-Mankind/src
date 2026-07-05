@@ -58,7 +58,7 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
     const int src_corr = corridor_id(src.row_id);
     const int tgt_corr = corridor_id(tgt.row_id);
     const bool target_is_endpoint = tgt.id < 0;
-    const bool debug_row1_target = (tgt.id >= 10 && tgt.id <= 55);
+    const bool debug_row1_target = (tgt.id >= 10 && tgt.id <= 65);
 
     // Turn geometry derives from the shared map parameters.
     const double max_curvature  = mp_.turn_max_curvature();
@@ -92,6 +92,9 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
         if (!target_is_endpoint && tgt.row_id == 6) {
             if (tgt.col == 1) return row3_up_x;
             if (tgt.col == 6) return row3_down_x;
+        }
+        if (!target_is_endpoint && tgt.row_id == 7) {
+            return (tgt.col <= 4) ? row3_up_x : row3_down_x;
         }
         return (target_x < spine_x_) ? row3_down_x : row3_up_x;
     };
@@ -300,11 +303,11 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
                                src.pre_dock_x, tgt.pre_dock_x);
         if (src_corr == 1 && tgt_corr > 1 &&
             (tgt.row_id == 2 || tgt.row_id == 3 || tgt.row_id == 4 ||
-             tgt.row_id == 5 || tgt.row_id == 6)) {
+             tgt.row_id == 5 || tgt.row_id == 6 || tgt.row_id == 7)) {
             const double left_outer_x = row1_left_down_x;
             const double right_outer_x = row1_right_up_x;
             if (tgt.row_id == 3 || tgt.row_id == 4 ||
-                tgt.row_id == 5 || tgt.row_id == 6) {
+                tgt.row_id == 5 || tgt.row_id == 6 || tgt.row_id == 7) {
                 start_ref_x = (tgt.pre_dock_x < spine_x_) ? left_outer_x : right_outer_x;
             } else {
                 const double left_gap = std::abs(tgt.pre_dock_x - left_outer_x);
@@ -322,7 +325,7 @@ RoughPath PathGenerator::generate(const Slot& src, const Slot& tgt,
             const bool going_down = tgt_corr > src_corr;
             if (src_corr == 1 && tgt_corr > 1) {
                 if (tgt.row_id == 2 || tgt.row_id == 3 || tgt.row_id == 4 ||
-                    tgt.row_id == 5 || tgt.row_id == 6) {
+                    tgt.row_id == 5 || tgt.row_id == 6 || tgt.row_id == 7) {
                     first_transition_x = start_ref_x;
                 } else {
                     first_transition_x =
