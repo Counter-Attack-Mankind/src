@@ -6,9 +6,6 @@
 
 4. 同走廊且靠近起点两侧的库位（如B3/B4与B5/B6）不单独硬编码，而是采用共通规则：在共享倒车尖点后继续水平倒车一段更长距离，先留出横向转弯空间，再前进/转向接入目标库位。
 
-5. 终端倒车入库时，最终车身姿态仍必须等于目标库位的dock_theta；倒车只改变运动方向，不能把终点姿态改成dock_theta+pi，否则会出现180度反向入库。
-
-6. 真实库位终端不再自动切换为reverse docking；如果正向入库空间不足，应由前段路径先倒车/前进创造接入空间，再按库位dock_theta前进入库，而不是用倒车终端把操作方向翻掉。
 
 7. A1到B10-B19这类从上方取货点进入下一排货架的路径，问题来自跨走廊首个骨架拐点空间过短以及失败后递归切到终端倒车兜底；现在跨走廊出库也会先水平倒车预留转弯距离，同时真实库位不再使用强制reverse docking兜底，避免生成与库位姿态相反的入库段。
 
@@ -104,3 +101,4 @@
 53. 根据返航调试需求，路径目录调试节点现在实际创建四个独立的 `PathGenerator` 实例：`A1_TO_B`、`B_TO_A1`、`A2_TO_B`、`B_TO_A2`。四个实例共享基础算法代码，但各自携带 `route_mode_`，后续针对某一方向加入特殊库位策略时，只在对应 route mode 分支内修改，避免 A1->B 的调通逻辑误伤 B->A1 或 A2 相关路径。
 54. 路由实现已拆成“一个分发入口 + 四个方向文件”：`src/path_generator_routes/path_generator_route_dispatch.cpp` 只负责按 `route_mode_` 分派；`src/path_generator_routes/a1_to_b/path_generator_route.cpp`、`b_to_a1/path_generator_route.cpp`、`a2_to_b/path_generator_route.cpp`、`b_to_a2/path_generator_route.cpp` 分别承载四个方向的专属策略。原 `src/path_generator_route.cpp` 暂时作为共用基础实现 `generateRouteCommon()`，后续要做 B->A1 独属绕行或辅助点时，只改 `b_to_a1` 子目录里的文件。
 55. 第2行货位（row_id=1，对应 B10/B12/B14/B16/B18）最新调试结论：本轮日志中 `kink geometry at segment 1 turn=179.2deg` 不是末端进库闪回 A1，而是初始倒车出库前缀内部出现了毫米级反向小段。典型点为 `(1.250,4.301)->(1.250,4.306)->(1.250,4.296)`，同一个 REVERSE 段先向上约 4mm 再向下约 10mm，因此几何方向接近 180 度回头并被验证器判为 kink。现在 `prepend_initial_reverse` 在生成有 `initial_reverse_curve` 的出库前缀时，会检查曲线前导直线相对倒车运动方向的投影；只有该前导段确实沿倒车方向时才保留，若只是反向/毫米级修正，则直接从回旋曲线起点开始，避免同一倒车段内部产生微小回头。
+56. 路径生成器最终按“4 个方向各自一份完整 cpp”隔离：`src/path_generator_routes/a1_to_b/path_generator_route.cpp`、`b_to_a1/path_generator_route.cpp`、`a2_to_b/path_generator_route.cpp`、`b_to_a2/path_generator_route.cpp` 都已经从原 `generateRouteCommon()` 机械复制为完整实现，分别定义 `generateRouteA1ToB/BToA1/A2ToB/BToA2`。`src/path_generator_route.cpp` 中的 `generateRouteCommon()` 仅保留给 AUTO/兜底路径使用，不再作为四个方向的黑箱主逻辑。A1->B 文件内 `use_a1_to_b_rules=true`，其余三个方向文件中该开关固定为 false；后续调某个方向时，直接进入对应目录的 cpp 修改该方向自己的骨架、辅助点、车道选择和终端拼接规则，避免 A1->B 的特殊策略继续误伤 B->A1/A2->B/B->A2。

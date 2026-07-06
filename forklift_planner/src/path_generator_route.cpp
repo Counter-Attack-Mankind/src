@@ -1,4 +1,4 @@
-#include "forklift_planner/path_generator.h"
+﻿#include "forklift_planner/path_generator.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,14 +10,7 @@
 #include "forklift_planner/common/geometry2d.h"
 #include "forklift_planner/path_generator_internal.h"
 
-//路径生成的大致思路如下所示：
-/*
-    1. 根据起点/终点 Slot 判断起终点走廊
-    2. 决定走哪条连接通道
-    3. 先生成一条粗折线 polyline
-    4. 把粗折线的直角拐弯变成 clothoid 平滑曲线
-    5. 输出 RoughPath
-*/
+
 namespace {
 
 using forklift_planner::geometry2d::Pt;
@@ -28,36 +21,35 @@ using forklift_planner::geometry2d::left_normal;
 using forklift_planner::geometry2d::normalize;
 using namespace forklift_planner::path_internal;
 
-}  // namespace
+}
 
 RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
                                              PathGenerationInfo* info) const {
-    // Reset debug info.
     if (info != nullptr) {
         *info = PathGenerationInfo{};
     }
 
-    // Longitudinal connector lane x coordinates.
 
     const double row1_lane_off = dual_lane_offset(mp_.row1_left_aisle);
     const double row3_lane_off = dual_lane_offset(mp_.row3_center_aisle);
 
-    //左侧绕行通道的上下行车道
     const double row1_left_down_x  = left_bypass_x_  - row1_lane_off;
     const double row1_left_up_x    = left_bypass_x_  + row1_lane_off;
 
-    //右侧绕行通道的上下行车道
     const double row1_right_down_x = right_bypass_x_ - row1_lane_off;
     const double row1_right_up_x   = right_bypass_x_ + row1_lane_off;
 
-    //中央双车道的上下行车道
     const double row3_down_x       = spine_x_        - row3_lane_off;
     const double row3_up_x         = spine_x_        + row3_lane_off;
 
-    // Source/target slot corridors.
     const int src_corr = corridor_id(src.row_id);
     const int tgt_corr = corridor_id(tgt.row_id);
     const bool target_is_endpoint = tgt.id < 0;
+    const bool route_auto = route_mode_ == PathGeneratorRouteMode::AUTO;
+    const bool inferred_a1_to_b =
+        route_auto && src.id == 101 && src.id >= 0 && tgt.id >= 0;
+    const bool use_a1_to_b_rules =
+        route_mode_ == PathGeneratorRouteMode::A1_TO_B || inferred_a1_to_b;
     const char* route_mode_name = "AUTO";
     switch (route_mode_) {
         case PathGeneratorRouteMode::A1_TO_B: route_mode_name = "A1_TO_B"; break;
@@ -70,11 +62,9 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
         (tgt.row_id == 1 || tgt.row_id == 5 ||
          (target_is_endpoint && (src.row_id == 1 || src.row_id == 5)));
 
-    // Turn geometry derives from the shared map parameters.
     const double max_curvature  = mp_.turn_max_curvature();
     const double steer_ramp_len = mp_.turn_ramp_len();
     const double sample_ds      = mp_.turn_ds();
-    // Decide whether the terminal slot needs reverse docking.
     const double final_turn_sign =
         (std::sin(tgt.dock_theta) >= 0.0) ? kPi * 0.5 : -kPi * 0.5;
     const double terminal_margin_y = 0.04;
@@ -99,11 +89,11 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
     const double final_min_req_x = std::max(0.20, final_turn_min.t_in + 0.02);
     const double target_x = tgt.pre_dock_x;
     auto row3_terminal_lane_x = [&]() {
-        if (!target_is_endpoint && tgt.row_id == 6) {
+        if (use_a1_to_b_rules && !target_is_endpoint && tgt.row_id == 6) {
             if (tgt.col == 1) return row3_up_x;
             if (tgt.col == 6) return row3_down_x;
         }
-        if (!target_is_endpoint && tgt.row_id == 7) {
+        if (use_a1_to_b_rules && !target_is_endpoint && tgt.row_id == 7) {
             return (tgt.col <= 4) ? row3_up_x : row3_down_x;
         }
         return (target_x < spine_x_) ? row3_down_x : row3_up_x;
@@ -163,10 +153,6 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
          horiz_fits_two_turns) ||
         (lane_approach_gap(far_lane_y)    >= final_min_req_y && horiz_fits_two_turns) ||
         near_lane_can_arc_to_slot;
-    // A real slot must be reached with its defined dock_theta: the forks point
-    // into the pallet/slot. If the direct forward terminal lacks space, the
-    // route skeleton must create more approach room before docking; auto
-    // reversing into a real slot would flip the physical operation.
     const bool auto_reverse_terminal =
         target_is_endpoint &&
         pp_.terminal_docking_mode != "forward" &&
@@ -198,8 +184,6 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
                  horiz_to_ref,
                  2.0 * R_min_check);
     }
-    // Terminal body heading is always the slot-defined pose. Reverse docking
-    // changes only the motion direction, not the final body orientation.
     const double terminal_heading = tgt.dock_theta;
     const double terminal_reverse_out_heading = norm_angle(tgt.dock_theta + kPi);
     const double terminal_dir_y = std::sin(terminal_heading);
@@ -211,14 +195,10 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
         terminal_stop_y = planned_goal_lane_y;
     } else {
         if (!target_is_endpoint && !single_row_terminal) {
-            // For a real double-row slot, choose the corridor lane farther
-            // from the shelf face in Y. This preserves the straight approach
-            // needed before entering the slot and avoids sweeping the shelf
-            // when row3/row4 targets are reached from a lower corridor.
             planned_goal_lane_y = (dock_dir_y_for_lane < 0.0)
                 ? std::max(forward_lane_y, far_lane_y)
                 : std::min(forward_lane_y, far_lane_y);
-            if (tgt.row_id == 5) {
+            if (use_a1_to_b_rules && tgt.row_id == 5) {
                 planned_goal_lane_y = row5_safe_terminal_y();
             }
         }
@@ -244,7 +224,7 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
                 }
             }
         }
-        if (!target_is_endpoint && tgt.row_id == 5) {
+        if (use_a1_to_b_rules && !target_is_endpoint && tgt.row_id == 5) {
             planned_goal_lane_y = row5_safe_terminal_y();
         }
     }
@@ -297,14 +277,13 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
     };
     auto current_transition_lane_y = [&](int current_corr, int next_corr) {
         const bool going_down = next_corr > current_corr;
-        if (current_corr == 2 && next_corr == 3) {
+        if (use_a1_to_b_rules && current_corr == 2 && next_corr == 3) {
             return corridor_lane_y(mp_, current_corr, HDir::LEFT);
         }
         const HDir current_dir = going_down ? HDir::RIGHT : HDir::LEFT;
         return corridor_lane_y(mp_, current_corr, current_dir);
     };
 
-    // Build the coarse polyline skeleton.
     std::vector<Pt> polyline;
     Pt initial_reverse_end{src.pre_dock_x, src.pre_dock_y};
     TurnCurve initial_reverse_curve;
@@ -317,14 +296,13 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
     double current_x = src.dock_x();
     double current_y = src.dock_y();
     if (src.id >= 0) {
-        // For a real/virtual source slot, plan the reverse exit landing point.
         double start_ref_x =
             (src_corr == tgt_corr)
                 ? (terminal_reverse ? tgt.pre_dock_x : final_reference_x)
                 : transition_x(src_corr,
                                src_corr + ((tgt_corr > src_corr) ? 1 : -1),
                                src.pre_dock_x, tgt.pre_dock_x);
-        if (src_corr == 1 && tgt_corr > 1 &&
+        if (use_a1_to_b_rules && src_corr == 1 && tgt_corr > 1 &&
             (tgt.row_id == 2 || tgt.row_id == 3 || tgt.row_id == 4 ||
              tgt.row_id == 5 || tgt.row_id == 6 || tgt.row_id == 7)) {
             const double left_outer_x = row1_left_down_x;
@@ -347,8 +325,9 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
              (src_corr == 2 && tgt_corr == 1))) {
             const bool going_down = tgt_corr > src_corr;
             if (src_corr == 1 && tgt_corr > 1) {
-                if (tgt.row_id == 2 || tgt.row_id == 3 || tgt.row_id == 4 ||
-                    tgt.row_id == 5 || tgt.row_id == 6 || tgt.row_id == 7) {
+                if (use_a1_to_b_rules &&
+                    (tgt.row_id == 2 || tgt.row_id == 3 || tgt.row_id == 4 ||
+                     tgt.row_id == 5 || tgt.row_id == 6 || tgt.row_id == 7)) {
                     first_transition_x = start_ref_x;
                 } else {
                     first_transition_x =
@@ -367,8 +346,8 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
                 : current_transition_lane_y(
                       src_corr, src_corr + ((tgt_corr > src_corr) ? 1 : -1));
         const bool same_corridor_row1_upper =
-            route_mode_ == PathGeneratorRouteMode::A1_TO_B &&
-            same_corridor && src_corr == 1 && tgt.row_id == 1;
+            use_a1_to_b_rules && same_corridor && src_corr == 1 &&
+            tgt.row_id == 1;
         if (same_corridor_row1_upper) {
             const double upper_lane_y = corridor_lane_y(mp_, src_corr, HDir::LEFT);
             const double lower_lane_y = corridor_lane_y(mp_, src_corr, HDir::RIGHT);
@@ -567,7 +546,8 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
     if (src.id >= 0 && current_y_has_turn_space) {
         goal_lane_y = current_y;
     }
-    if (!target_is_endpoint && tgt.row_id == 5 && !terminal_reverse) {
+    if (use_a1_to_b_rules && !target_is_endpoint && tgt.row_id == 5 &&
+        !terminal_reverse) {
         goal_lane_y = row5_safe_terminal_y();
     }
     TurnCurve terminal_reverse_curve;
@@ -688,8 +668,8 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
         return {};
     }
     const bool same_corridor_row1_upper =
-        route_mode_ == PathGeneratorRouteMode::A1_TO_B &&
-        src.id >= 0 && src_corr == tgt_corr && src_corr == 1 && tgt.row_id == 1;
+        use_a1_to_b_rules && src.id >= 0 && src_corr == tgt_corr &&
+        src_corr == 1 && tgt.row_id == 1;
     if (same_corridor_row1_upper) {
         goal_lane_y = current_y;
     }
@@ -705,6 +685,7 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
         const bool row3_lower_near_spine =
             tgt.row_id == 6 && tgt.col >= 2 && tgt.col <= 5;
         const bool center_detour_needed =
+            use_a1_to_b_rules &&
             !target_is_endpoint &&
             src.id >= 0 &&
             (row2_lower_near_spine ||
@@ -967,12 +948,6 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
         if (src.id < 0 || path.empty()) return;
         const double d_axle = mp_.rear_axle_to_center;
         const Pt b = initial_reverse_end;
-        // 出库朝向自由(车头进/出都合法)。沿用原出库几何(直线段+回旋曲线+直尾段),
-        // 但按「出库行进方向与路线首段方向是否一致」决定 前进出库 / 倒车出库:
-        //  · 一致 → FORWARD,车身朝向=运动切线(车头朝外开出);
-        //  · 相反 → REVERSE,车身朝向=切线+π(车头朝里、倒着出,合法出库 cusp)。
-        // 两者都使「出库段末点车身朝向 = 骨架首点朝向」连续,根除接缝处原地 180° 瞬转。
-        // 后轴参考点按所选车身朝向放置,保证车身中心始终落在库位 dock。
         auto build_pts = [&](const Pt& a) {
             const double reverse_len = dist(a, b);
             const int steps =
@@ -1013,8 +988,6 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
             return pts;
         };
 
-        // 起点只要是库位,第一步固定倒车出库:车身保持 dock_theta,
-        // 运动方向为 dock_theta + pi,后轴参考点位于车身后方。
         const Pt a_rev{src.dock_x() - d_axle * std::cos(src.dock_theta),
                        src.dock_y() - d_axle * std::sin(src.dock_theta)};
 
@@ -1102,19 +1075,14 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
             if (dist(pts[k], nxt) > 1e-9) {
                 motion = std::atan2(nxt.y - pts[k].y, nxt.x - pts[k].x);
             } else if (k > 0) {
-                // 沿用上一点的运动切线(去掉车身朝向里的 ±π 还原回运动方向)。
                 motion = norm_angle(prefix.back().theta + kPi);
             } else {
                 motion = norm_angle(src.dock_theta + kPi);
             }
-            // 车身朝向:前进=运动方向;倒车=运动反向(车头与运动相反)。
             const double body = norm_angle(motion + kPi);
             prefix.push_back({pts[k].x, pts[k].y, norm_angle(body), type});
         }
         if (!prefix.empty()) {
-            // The reverse exit and the following forward route must meet at a
-            // real cusp: same rear-axle point and continuous body heading, but
-            // a discrete REVERSE -> FORWARD mode change at that exact point.
             prefix.back().x = b.x;
             prefix.back().y = b.y;
             prefix.back().theta = path.front().theta;
@@ -1191,7 +1159,7 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
         const Pt u = normalize(simplified[j] - simplified[j - 1]);
         const double lateral = std::abs(dot(simplified[j + 1] - simplified[j],
                                             left_normal(u)));
-        if (terminal_lane_shift && tgt.row_id == 5) {
+        if (use_a1_to_b_rules && terminal_lane_shift && tgt.row_id == 5) {
             if (debug_row1_target) {
                 ROS_WARN("[planner][row1-debug] lane_shift skipped tgt=%d j=%zu "
                          "terminal=1 lateral=%.3f: row5 keeps transition-lane turn",
@@ -1240,7 +1208,7 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
                 }
             }
         }
-        if (terminal_lane_shift && tgt.row_id == 5) {
+        if (use_a1_to_b_rules && terminal_lane_shift && tgt.row_id == 5) {
             const double final_straight_reserve =
                 std::max(0.02, final_min_req_y * 0.05);
             const double max_lead_out = std::max(
@@ -1390,9 +1358,6 @@ RoughPath PathGenerator::generateRouteCommon(const Slot& src, const Slot& tgt,
         }
     }
     if (!infeasible_turns.empty()) {
-        // arc fallback 是已知良性回退(路径仍生成,只是曲率不连续,used_arc_fallback 已置位
-        // 供调用方按需取舍)。运行期脱困会对许多候选位反复调 generate → 这两条若用裸 WARN
-        // 会刷屏(实测 180min 达 24.8 万条)。改 THROTTLE 限流:保留信号、不再洪水。
         for (size_t j : infeasible_turns) {
             if (debug_row1_target) {
                 ROS_WARN("[planner][row1-debug] clothoid infeasible tgt=%d "
