@@ -149,7 +149,7 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
         !target_is_depot_a1 &&
         (pp_.terminal_docking_mode == "reverse" || auto_reverse_terminal);
     if (debug_row1_target) {
-        ROS_WARN("[planner][row1-debug] route=%s debug_rev=row4_spine_transition_v2 "
+        ROS_WARN("[planner][row1-debug] route=%s debug_rev=row5_free_slots_v1 "
                  "src=%d tgt=%d src_corr=%d tgt_corr=%d "
                  "target=(%.3f,%.3f th=%.1fdeg) mode=%s terminal_reverse=%d "
                  "near_gap=%.3f far_gap=%.3f horiz=%.3f min_x=%.3f",
@@ -294,6 +294,10 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
         target_is_depot_a1 && src.row_id == 4 && src.col <= 4;
     const bool row2_lower_right_to_a1 =
         target_is_depot_a1 && src.row_id == 4 && src.col >= 5;
+    const bool row3_upper_left_to_a1 =
+        target_is_depot_a1 && src.row_id == 5 && src.col <= 3;
+    const bool row3_upper_right_to_a1 =
+        target_is_depot_a1 && src.row_id == 5 && src.col >= 4;
 
     int current_corr = src_corr;
     double current_x = src.dock_x();
@@ -316,6 +320,10 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
         } else if (row2_lower_left_to_a1) {
             start_to_right = false;
         } else if (row2_lower_right_to_a1) {
+            start_to_right = true;
+        } else if (row3_upper_left_to_a1) {
+            start_to_right = false;
+        } else if (row3_upper_right_to_a1) {
             start_to_right = true;
         }
         const bool row0_left_outer_to_a1 =
@@ -368,6 +376,8 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
             start_lane_y = corridor_lane_y(mp_, src_corr, HDir::RIGHT);
         } else if (row2_lower_left_to_a1 || row2_lower_right_to_a1) {
             start_lane_y = corridor_lane_y(mp_, src_corr, HDir::RIGHT);
+        } else if (row3_upper_left_to_a1 || row3_upper_right_to_a1) {
+            start_lane_y = corridor_lane_y(mp_, src_corr, HDir::LEFT);
         }
         if (src_corr == tgt_corr && terminal_reverse) {
             const HDir same_corr_drive_dir =
@@ -513,6 +523,19 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
                     std::min(mp_.field_width - 0.04,
                              spine_x_ + min_exit_run));
             } else if (row2_lower_right_to_a1) {
+                const double min_exit_run =
+                    std::max(0.48, final_min_req_x + 0.14);
+                direct_reverse_end_x = std::min(
+                    direct_reverse_end_x,
+                    std::max(0.04, spine_x_ - min_exit_run));
+            } else if (row3_upper_left_to_a1) {
+                const double min_exit_run =
+                    std::max(0.48, final_min_req_x + 0.14);
+                direct_reverse_end_x = std::max(
+                    direct_reverse_end_x,
+                    std::min(mp_.field_width - 0.04,
+                             spine_x_ + min_exit_run));
+            } else if (row3_upper_right_to_a1) {
                 const double min_exit_run =
                     std::max(0.48, final_min_req_x + 0.14);
                 direct_reverse_end_x = std::min(
