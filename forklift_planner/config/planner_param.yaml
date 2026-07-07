@@ -96,7 +96,7 @@ forklift_planner:
 
     # 路径与任务过滤
     skip_arc_fallback_paths: true
-    reject_curvature_discontinuity: true
+    reject_curvature_discontinuity: false
     reject_boundary_violations: true
     reject_shelf_collisions: true
     reject_path_kinks: true
