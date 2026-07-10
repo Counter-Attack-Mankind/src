@@ -16,6 +16,7 @@
 #include "forklift_map/forklift_map.h"
 #include "forklift_map/map_param.h"
 #include "forklift_map/map_types.h"
+#include "forklift_map/path_debug_visualizer.h"
 #include "forklift_planner/multi_vehicle/footprint.h"
 #include "forklift_planner/multi_vehicle/multi_vehicle_config.h"
 #include "forklift_planner/path_generator.h"
@@ -319,6 +320,10 @@ public:
         nh_.param("validate_paths", validate_paths_, validate_paths_);
         nh_.param("visualize_rejections", visualize_rejections_,
                   visualize_rejections_);
+        nh_.param("visualize_path_layers", visualize_path_layers_,
+                  visualize_path_layers_);
+        nh_.param("visualize_turn_types", visualize_turn_types_,
+                  visualize_turn_types_);
         nh_.param("animate", animate_, animate_);
         nh_.param("animation_period", animation_period_, animation_period_);
         nh_.param("animation_duration", animation_duration_, animation_duration_);
@@ -463,6 +468,8 @@ private:
                           slot.cx, slot.cy, rgba(1.0f, 1.0f, 1.0f, 1.0f));
                 addPath(arr, pp_.frame_id, "single_rejected_path", id++,
                         selected_path_, rgba(1.0f, 0.1f, 0.1f, 0.65f), 0.085);
+                addPathLayerDiagnostics(arr, id, selected_path_, info,
+                                        selected_label_);
                 addRejectionDiagnostics(arr, id, selected_path_, info, src, dst,
                                         reject, selected_label_);
                 static_markers_ = arr;
@@ -493,6 +500,7 @@ private:
                 rgba(1.0f, 1.0f, 1.0f, 1.0f));
         addPath(arr, pp_.frame_id, "single_path", id++, selected_path_, color,
                 0.075);
+        addPathLayerDiagnostics(arr, id, selected_path_, info, selected_label_);
         addText(arr, pp_.frame_id, "single_path_label", id++,
                 midpoint(src.cx, dst.cx), midpoint(src.cy, dst.cy), 0.22,
                 0.07, selected_label_, color);
@@ -1103,6 +1111,21 @@ private:
         }
     }
 
+    void addPathLayerDiagnostics(visualization_msgs::MarkerArray& arr,
+                                 int& id,
+                                 const RoughPath& path,
+                                 const PathGenerationInfo& info,
+                                 const std::string& label) const {
+        if (!visualize_path_layers_) return;
+        forklift_map::path_debug::PathDebugVisualOptions options;
+        options.show_layers = true;
+        options.show_turn_types = visualize_turn_types_;
+        options.show_corner_labels = true;
+        options.z_offset = 0.135;
+        forklift_map::path_debug::addPathDebugLayers(
+            arr, id, pp_.frame_id, "single_path", path, info, label, options);
+    }
+
     void onAnimationTimer(const ros::TimerEvent&) {
         if (selected_path_.empty()) return;
         const double len = pathLength(selected_path_);
@@ -1180,6 +1203,8 @@ private:
     int target_slot_ = -1;
     bool validate_paths_ = true;
     bool visualize_rejections_ = true;
+    bool visualize_path_layers_ = false;
+    bool visualize_turn_types_ = true;
     bool animate_ = true;
     double animation_period_ = 0.05;
     double animation_duration_ = 8.0;

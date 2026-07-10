@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "forklift_map/map_param.h"
@@ -48,6 +49,19 @@ double normalize_angle(double a);
 void push_point(std::vector<Pt>& polyline, const Pt& p);
 void push_sample(std::vector<Sample>& samples, const Pt& p, double theta);
 std::vector<Pt> simplify_polyline(const std::vector<Pt>& in);
+void record_debug_layer(PathGenerationInfo* info,
+                        DebugPathLayerType type,
+                        const std::string& label,
+                        const std::vector<Pt>& pts);
+void record_debug_layer_from_samples(PathGenerationInfo* info,
+                                     DebugPathLayerType type,
+                                     const std::string& label,
+                                     const std::vector<Sample>& samples,
+                                     size_t begin);
+void record_debug_layer_from_path(PathGenerationInfo* info,
+                                  DebugPathLayerType type,
+                                  const std::string& label,
+                                  const RoughPath& path);
 
 double curvature_at(double s, double total_len, double ramp_len,
                     double hold_len, double peak_k);

@@ -7,6 +7,8 @@
   <arg name="target_slot" default="-1"/>
   <arg name="validate_paths" default="true"/>
   <arg name="visualize_rejections" default="true"/>
+  <arg name="visualize_path_layers" default="false"/>
+  <arg name="visualize_turn_types" default="true"/>
   <arg name="animate" default="true"/>
   <arg name="animation_duration" default="8.0"/>
 
@@ -41,6 +43,8 @@
     <param name="target_slot" type="int" value="$(arg target_slot)"/>
     <param name="validate_paths" type="bool" value="$(arg validate_paths)"/>
     <param name="visualize_rejections" type="bool" value="$(arg visualize_rejections)"/>
+    <param name="visualize_path_layers" type="bool" value="$(arg visualize_path_layers)"/>
+    <param name="visualize_turn_types" type="bool" value="$(arg visualize_turn_types)"/>
     <param name="animate" type="bool" value="$(arg animate)"/>
     <param name="animation_duration" type="double" value="$(arg animation_duration)"/>
     <param name="animation_period" type="double" value="0.05"/>

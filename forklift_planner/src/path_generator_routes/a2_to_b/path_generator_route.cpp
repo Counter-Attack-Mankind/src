@@ -816,6 +816,8 @@ RoughPath PathGenerator::generateRouteA2ToB(const Slot& src, const Slot& tgt,
 
     const std::vector<Pt> simplified = simplify_polyline(polyline);
     if (simplified.empty()) return {};
+    record_debug_layer(info, DebugPathLayerType::SKELETON,
+                       "route_skeleton", simplified);
     if (debug_row1_target) {
         ROS_WARN("[planner][row1-debug] skeleton tgt=%d points=%zu "
                  "terminal_reverse=%d goal_lane_y=%.3f terminal_stop_y=%.3f "
@@ -1099,6 +1101,8 @@ RoughPath PathGenerator::generateRouteA2ToB(const Slot& src, const Slot& tgt,
             info->used_arc_fallback = true;
         }
         RoughPath path = build_arc_path(simplified, pp_, src, max_curvature, sample_ds);
+        record_debug_layer_from_path(info, DebugPathLayerType::ARC_FALLBACK,
+                                     "arc_fallback", path);
         append_center_detour(path);
         prepend_initial_reverse(path);
         append_terminal_reverse(path);
@@ -1349,6 +1353,7 @@ RoughPath PathGenerator::generateRouteA2ToB(const Slot& src, const Slot& tgt,
         if (!reverse_path.empty()) {
             if (info != nullptr) {
                 info->used_arc_fallback = reverse_info.used_arc_fallback;
+                info->debug_layers = reverse_info.debug_layers;
             }
             return reverse_path;
         }
@@ -1380,6 +1385,8 @@ RoughPath PathGenerator::generateRouteA2ToB(const Slot& src, const Slot& tgt,
             info->used_arc_fallback = true;
         }
         RoughPath fallback = build_arc_path(simplified, pp_, src, max_curvature, sample_ds);
+        record_debug_layer_from_path(info, DebugPathLayerType::ARC_FALLBACK,
+                                     "arc_fallback", fallback);
         prepend_initial_reverse(fallback);
         append_terminal_reverse(fallback);
         warn_if_reverse_segments(fallback);
@@ -1396,9 +1403,12 @@ RoughPath PathGenerator::generateRouteA2ToB(const Slot& src, const Slot& tgt,
         const Pt& c = simplified[i + 1];
 
         if (lane_shift_start[i]) {
+            const size_t debug_begin = dense.size();
             append_lane_shift(dense, b, c, b - simplified[i - 1],
                               lane_shift_lead_in[i], lane_shift_lead_out[i],
                               sample_ds);
+            record_debug_layer_from_samples(info, DebugPathLayerType::LANE_SHIFT,
+                                            "lane_shift", dense, debug_begin);
             i += 2;
             continue;
         }
@@ -1419,6 +1429,7 @@ RoughPath PathGenerator::generateRouteA2ToB(const Slot& src, const Slot& tgt,
             }
             push_sample(dense, p, theta);
         };
+        const size_t debug_begin = dense.size();
         push_progress_sample(planned[i].start, planned[i].heading);
         for (size_t j = 0; j < planned[i].curve.pts.size(); ++j) {
             const Pt rotated = rotate_to_heading(planned[i].curve.pts[j],
@@ -1427,6 +1438,8 @@ RoughPath PathGenerator::generateRouteA2ToB(const Slot& src, const Slot& tgt,
                 planned[i].start + rotated,
                 norm_angle(planned[i].heading + planned[i].curve.headings[j]));
         }
+        record_debug_layer_from_samples(info, DebugPathLayerType::CLOTHOID,
+                                        "clothoid", dense, debug_begin);
         ++i;
     }
 

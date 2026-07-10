@@ -1,6 +1,7 @@
 #pragma once
-#include <vector>
 #include <cmath>
+#include <string>
+#include <vector>
 #include "forklift_map/map_param.h"
 #include "forklift_map/map_types.h"
 #include "forklift_planner/planner_param.h"
@@ -19,9 +20,28 @@ struct RoughWp {
 // 因此一条完整的参考路径，由容器中一系列路径点结构体组成(注意！这里只是纯几何路径，不带有时间戳的轨迹！)
 using RoughPath = std::vector<RoughWp>;
 
+struct DebugPathPoint {
+    double x = 0.0;
+    double y = 0.0;
+};
+
+enum class DebugPathLayerType {
+    SKELETON,
+    CLOTHOID,
+    LANE_SHIFT,
+    ARC_FALLBACK,
+};
+
+struct DebugPathLayer {
+    DebugPathLayerType type = DebugPathLayerType::SKELETON;
+    std::string label;
+    std::vector<DebugPathPoint> points;
+};
+
 //用于记录路径生成附加的额外信息（使用曲率连续转弯，或使用的是arc圆弧路径？）
 struct PathGenerationInfo {
     bool used_arc_fallback = false;
+    std::vector<DebugPathLayer> debug_layers;
 };
 
 enum class PathGeneratorRouteMode {

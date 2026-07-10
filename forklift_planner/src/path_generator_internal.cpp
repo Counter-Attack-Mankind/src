@@ -149,6 +149,62 @@ std::vector<Pt> simplify_polyline(const std::vector<Pt>& in) {
     return simplified;
 }
 
+void record_debug_layer(PathGenerationInfo* info,
+                        DebugPathLayerType type,
+                        const std::string& label,
+                        const std::vector<Pt>& pts) {
+    if (info == nullptr || pts.size() < 2) return;
+    DebugPathLayer layer;
+    layer.type = type;
+    layer.label = label;
+    layer.points.reserve(pts.size());
+    for (const Pt& p : pts) {
+        if (!layer.points.empty()) {
+            const DebugPathPoint& prev = layer.points.back();
+            if (std::hypot(prev.x - p.x, prev.y - p.y) <= 1e-5) continue;
+        }
+        layer.points.push_back({p.x, p.y});
+    }
+    if (layer.points.size() >= 2) {
+        info->debug_layers.push_back(std::move(layer));
+    }
+}
+
+void record_debug_layer_from_samples(PathGenerationInfo* info,
+                                     DebugPathLayerType type,
+                                     const std::string& label,
+                                     const std::vector<Sample>& samples,
+                                     size_t begin) {
+    if (info == nullptr || begin >= samples.size()) return;
+    std::vector<Pt> pts;
+    pts.reserve(samples.size() - begin);
+    for (size_t i = begin; i < samples.size(); ++i) {
+        pts.push_back(samples[i].p);
+    }
+    record_debug_layer(info, type, label, pts);
+}
+
+void record_debug_layer_from_path(PathGenerationInfo* info,
+                                  DebugPathLayerType type,
+                                  const std::string& label,
+                                  const RoughPath& path) {
+    if (info == nullptr || path.size() < 2) return;
+    DebugPathLayer layer;
+    layer.type = type;
+    layer.label = label;
+    layer.points.reserve(path.size());
+    for (const RoughWp& wp : path) {
+        if (!layer.points.empty()) {
+            const DebugPathPoint& prev = layer.points.back();
+            if (std::hypot(prev.x - wp.x, prev.y - wp.y) <= 1e-5) continue;
+        }
+        layer.points.push_back({wp.x, wp.y});
+    }
+    if (layer.points.size() >= 2) {
+        info->debug_layers.push_back(std::move(layer));
+    }
+}
+
 double curvature_at(double s, double total_len, double ramp_len,
                     double hold_len, double peak_k) {
     return forklift_geom::curvature_at(s, total_len, ramp_len, hold_len, peak_k);
