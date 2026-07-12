@@ -327,6 +327,7 @@ public:
         nh_.param("depot", depot_name_, depot_name_);
         nh_.param("direction", direction_, direction_);
         nh_.param("target_slot", target_slot_, target_slot_);
+        nh_.param("target_row", target_row_, target_row_);
         nh_.param("validate_paths", validate_paths_, validate_paths_);
         nh_.param("visualize_rejections", visualize_rejections_,
                   visualize_rejections_);
@@ -399,7 +400,9 @@ private:
 
         std::vector<int> all_targets;
         for (const Slot& s : map_->slots()) {
-            if (s.id >= 0 && s.id <= 65) all_targets.push_back(s.id);
+            if (s.id < 0 || s.id > 65) continue;
+            if (target_row_ >= 0 && s.row_id != target_row_) continue;
+            all_targets.push_back(s.id);
         }
 
         const bool use_a2 = uppercase(depot_name_) == "A2";
@@ -407,9 +410,11 @@ private:
         const std::string label = use_a2 ? "A2" : "A1";
         const bool to_depot = uppercase(direction_) == "TO_DEPOT";
 
-        ROS_WARN("[path_catalog] selected depot=%s direction=%s targets B0..B65 (%zu): [%s]",
+        ROS_WARN("[path_catalog] selected depot=%s direction=%s target_row=%d "
+                 "targets (%zu): [%s]",
                  label.c_str(), to_depot ? "to_depot" : "from_depot",
-                 all_targets.size(), idsToString(all_targets).c_str());
+                 target_row_, all_targets.size(),
+                 idsToString(all_targets).c_str());
 
         if (target_slot_ >= 0) {
             publishSinglePath(depot, label, to_depot);
@@ -681,6 +686,9 @@ private:
         }
 
         if (cfg_.reject_path_kinks) {
+            const double kink_min_angle = info.used_arc_fallback
+                ? std::max(cfg_.kink_min_angle, kPi / 3.0)
+                : cfg_.kink_min_angle;
             auto legal_pose_flip_at = [&](size_t idx) {
                 bool have_prev_seg = false;
                 bool have_next_seg = false;
@@ -729,7 +737,7 @@ private:
 
             for (size_t i = 1; i < path.size(); ++i) {
                 if (angleDiffAbs(path[i - 1].theta, path[i].theta) <=
-                    cfg_.kink_min_angle) {
+                    kink_min_angle) {
                     continue;
                 }
                 if (!legal_pose_flip_at(i)) {
@@ -768,7 +776,7 @@ private:
                 const double ang = std::acos(c);
                 const bool legal_reverse_cusp =
                     prev_type != type && ang >= cfg_.kink_cusp_angle;
-                if (ang > cfg_.kink_min_angle && !legal_reverse_cusp) {
+                if (ang > kink_min_angle && !legal_reverse_cusp) {
                     ROS_WARN("[path_catalog] kink geometry at segment %zu "
                              "turn=%.1fdeg prev_type=%d type=%d "
                              "prev_vec=(%.3f, %.3f) vec=(%.3f, %.3f)",
@@ -789,7 +797,7 @@ private:
                 const double body =
                     type == WpType::REVERSE ? normAngle(motion + kPi) : motion;
                 const bool body_flip =
-                    angleDiffAbs(prev_body, body) > cfg_.kink_min_angle;
+                    angleDiffAbs(prev_body, body) > kink_min_angle;
                 if (body_flip && !legal_reverse_cusp) {
                     ROS_WARN("[path_catalog] kink body flip at segment %zu "
                              "prev_body=%.1fdeg body=%.1fdeg "
@@ -1238,6 +1246,7 @@ private:
     std::string depot_name_ = "A1";
     std::string direction_ = "from_depot";
     int target_slot_ = -1;
+    int target_row_ = -1;
     bool validate_paths_ = true;
     bool visualize_rejections_ = true;
     bool visualize_path_layers_ = false;

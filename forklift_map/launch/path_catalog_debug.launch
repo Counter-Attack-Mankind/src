@@ -1,10 +1,12 @@
 <launch>
   <!-- direction=from_depot: selected depot -> B0..B65.
        direction=to_depot: B0..B65 -> selected depot.
-       target_slot=5 with depot=A1 animates A1 -> B5 or B5 -> A1. -->
+       target_slot=5 with depot=A1 animates A1 -> B5 or B5 -> A1.
+       target_row=7 with target_slot=-1 draws only slots in row_id 7. -->
   <arg name="depot" default="A1"/>
   <arg name="direction" default="from_depot"/>
   <arg name="target_slot" default="-1"/>
+  <arg name="target_row" default="-1"/>
   <arg name="validate_paths" default="true"/>
   <arg name="visualize_rejections" default="true"/>
   <arg name="visualize_path_layers" default="false"/>
@@ -42,6 +44,7 @@
     <param name="depot" type="str" value="$(arg depot)"/>
     <param name="direction" type="str" value="$(arg direction)"/>
     <param name="target_slot" type="int" value="$(arg target_slot)"/>
+    <param name="target_row" type="int" value="$(arg target_row)"/>
     <param name="validate_paths" type="bool" value="$(arg validate_paths)"/>
     <param name="visualize_rejections" type="bool" value="$(arg visualize_rejections)"/>
     <param name="visualize_path_layers" type="bool" value="$(arg visualize_path_layers)"/>

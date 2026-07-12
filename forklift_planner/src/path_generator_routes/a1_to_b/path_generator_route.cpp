@@ -127,12 +127,8 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
     const HDir far_hdir   = (final_hdir == HDir::RIGHT) ? HDir::LEFT : HDir::RIGHT;
     const double forward_lane_y     = corridor_lane_y(mp_, tgt_corr, final_hdir);
     const double far_lane_y         = corridor_lane_y(mp_, tgt_corr, far_hdir);
-    auto row5_safe_terminal_y = [&]() {
-        const double lower_lane_y = std::min(forward_lane_y, far_lane_y);
-        const double upper_lane_y = std::max(forward_lane_y, far_lane_y);
-        const double safe_turn_y =
-            forward_terminal_y + final_min_req_y + 0.03;
-        return std::max(lower_lane_y, std::min(upper_lane_y, safe_turn_y));
+    auto row5_terminal_lane_y = [&]() {
+        return corridor_lane_y(mp_, tgt_corr, HDir::LEFT);
     };
     auto lane_approach_gap = [&](double lane_y) {
         return (dock_dir_y_for_lane < 0.0)
@@ -197,7 +193,7 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
                 ? std::max(forward_lane_y, far_lane_y)
                 : std::min(forward_lane_y, far_lane_y);
             if (use_a1_to_b_rules && tgt.row_id == 5) {
-                planned_goal_lane_y = row5_safe_terminal_y();
+                planned_goal_lane_y = row5_terminal_lane_y();
             }
         }
         const bool lane_has_final_space =
@@ -223,7 +219,7 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
             }
         }
         if (use_a1_to_b_rules && !target_is_endpoint && tgt.row_id == 5) {
-            planned_goal_lane_y = row5_safe_terminal_y();
+            planned_goal_lane_y = row5_terminal_lane_y();
         }
     }
 
@@ -546,7 +542,7 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
     }
     if (use_a1_to_b_rules && !target_is_endpoint && tgt.row_id == 5 &&
         !terminal_reverse) {
-        goal_lane_y = row5_safe_terminal_y();
+        goal_lane_y = row5_terminal_lane_y();
     }
     TurnCurve terminal_reverse_curve;
     Pt terminal_reverse_start{tgt.pre_dock_x, goal_lane_y};

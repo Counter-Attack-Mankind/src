@@ -98,7 +98,7 @@ forklift_planner:
     skip_arc_fallback_paths: true
     reject_curvature_discontinuity: false
     reject_boundary_violations: true
-    reject_shelf_collisions: true
+    reject_shelf_collisions: false
     reject_path_kinks: true
     kink_min_angle: 0.61    # rad，约 35deg；小于该角度视为平滑转弯
     kink_cusp_angle: 2.53   # rad，约 145deg；大于该角度视为正常换向尖点
