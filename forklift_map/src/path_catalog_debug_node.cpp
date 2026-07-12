@@ -273,6 +273,16 @@ const char* rejectReasonName(DebugRejectReason reason) {
     return "unknown";
 }
 
+const char* debugLayerTypeName(DebugPathLayerType type) {
+    switch (type) {
+        case DebugPathLayerType::SKELETON: return "skeleton";
+        case DebugPathLayerType::CLOTHOID: return "clothoid";
+        case DebugPathLayerType::LANE_SHIFT: return "lane_shift";
+        case DebugPathLayerType::ARC_FALLBACK: return "arc_fallback";
+    }
+    return "unknown";
+}
+
 }  // namespace
 
 //===================（1.构造函数初始化）=========================
@@ -324,6 +334,8 @@ public:
                   visualize_path_layers_);
         nh_.param("visualize_turn_types", visualize_turn_types_,
                   visualize_turn_types_);
+        nh_.param("verbose_batch_paths", verbose_batch_paths_,
+                  verbose_batch_paths_);
         nh_.param("animate", animate_, animate_);
         nh_.param("animation_period", animation_period_, animation_period_);
         nh_.param("animation_duration", animation_duration_, animation_duration_);
@@ -444,6 +456,7 @@ private:
         selected_label_ = to_depot
             ? (slot_label + "_to_" + label)
             : (label + "_to_" + slot_label);
+        logPathGenerationDebug(selected_label_, info);
         if (selected_path_.size() < 2) {
             ROS_ERROR("[path_catalog] %s rejected: empty_path",
                       selected_label_.c_str());
@@ -566,7 +579,9 @@ private:
                     ++failed;
                     ROS_ERROR("[path_catalog] %s rejected: %s",
                               route_label.c_str(), rejectReasonName(reject));
-                    logRejectDetails(route_label, path, src, dst, reject);
+                    if (verbose_batch_paths_) {
+                        logRejectDetails(route_label, path, src, dst, reject);
+                    }
                     if (visualize_rejections_) {
                         addPath(arr, pp_.frame_id, depot_label + "_rejected_B",
                                 id++, path, rgba(1.0f, 0.1f, 0.1f, 0.22f),
@@ -581,11 +596,13 @@ private:
             ++ok;
             addPath(arr, pp_.frame_id, depot_label + "_to_B", id++, path, color,
                     z_offset);
-            ROS_INFO("[path_catalog] %s%s row=%d col=%d wpts=%zu len=%.3f arc=%d",
-                     validate_paths_ ? "" : "RAW ",
-                     route_label.c_str(), slot.row_id, slot.col,
-                     path.size(), pathLength(path),
-                     info.used_arc_fallback ? 1 : 0);
+            if (verbose_batch_paths_) {
+                ROS_INFO("[path_catalog] %s%s row=%d col=%d wpts=%zu len=%.3f arc=%d",
+                         validate_paths_ ? "" : "RAW ",
+                         route_label.c_str(), slot.row_id, slot.col,
+                         path.size(), pathLength(path),
+                         info.used_arc_fallback ? 1 : 0);
+            }
         }
         ROS_WARN("[path_catalog] %s%s generated %d/%zu paths, failed=%d",
                  validate_paths_ ? "" : "RAW ",
@@ -1126,6 +1143,26 @@ private:
             arr, id, pp_.frame_id, "single_path", path, info, label, options);
     }
 
+    void logPathGenerationDebug(const std::string& label,
+                                const PathGenerationInfo& info) const {
+        if (target_slot_ < 0) return;
+        ROS_WARN("[path_catalog][debug-layers] %s layers=%zu arc=%d",
+                 label.c_str(), info.debug_layers.size(),
+                 info.used_arc_fallback ? 1 : 0);
+        for (size_t i = 0; i < info.debug_layers.size(); ++i) {
+            const DebugPathLayer& layer = info.debug_layers[i];
+            ROS_WARN("[path_catalog][debug-layers] layer[%zu] type=%s label=%s pts=%zu",
+                     i, debugLayerTypeName(layer.type),
+                     layer.label.c_str(), layer.points.size());
+            if (layer.type != DebugPathLayerType::SKELETON) continue;
+            for (size_t j = 0; j < layer.points.size(); ++j) {
+                const DebugPathPoint& p = layer.points[j];
+                ROS_WARN("[path_catalog][debug-layers] S%zu=(%.3f,%.3f)",
+                         j, p.x, p.y);
+            }
+        }
+    }
+
     void onAnimationTimer(const ros::TimerEvent&) {
         if (selected_path_.empty()) return;
         const double len = pathLength(selected_path_);
@@ -1205,6 +1242,7 @@ private:
     bool visualize_rejections_ = true;
     bool visualize_path_layers_ = false;
     bool visualize_turn_types_ = true;
+    bool verbose_batch_paths_ = false;
     bool animate_ = true;
     double animation_period_ = 0.05;
     double animation_duration_ = 8.0;

@@ -149,7 +149,7 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
         !target_is_depot_a1 &&
         (pp_.terminal_docking_mode == "reverse" || auto_reverse_terminal);
     if (debug_row1_target) {
-        ROS_WARN("[planner][row1-debug] route=%s debug_rev=row5_free_slots_v1 "
+        ROS_WARN("[planner][row1-debug] route=%s debug_rev=row6_to_a1_lane_v2 "
                  "src=%d tgt=%d src_corr=%d tgt_corr=%d "
                  "target=(%.3f,%.3f th=%.1fdeg) mode=%s terminal_reverse=%d "
                  "near_gap=%.3f far_gap=%.3f horiz=%.3f min_x=%.3f",
@@ -241,6 +241,9 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
             return spine_x_;
         }
         if ((from_corr == 3 && to_corr == 4) || (from_corr == 4 && to_corr == 3)) {
+            if (!going_down && target_is_depot_a1 && src.row_id == 6) {
+                return (src.col <= 3) ? row3_down_x : row3_up_x;
+            }
             if (going_down) {
                 if (target_is_endpoint) {
                     return row3_down_x;
@@ -261,6 +264,14 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
         if (target_is_depot_a1 && src.row_id == 4 &&
             current_corr == 3 && next_corr == 2) {
             return corridor_lane_y(mp_, current_corr, HDir::RIGHT);
+        }
+        if (target_is_depot_a1 && src.row_id == 6 &&
+            current_corr == 4 && next_corr == 3) {
+            return corridor_lane_y(mp_, current_corr, HDir::RIGHT);
+        }
+        if (target_is_depot_a1 && src.row_id == 6 &&
+            current_corr == 3 && next_corr == 2) {
+            return corridor_lane_y(mp_, current_corr, HDir::LEFT);
         }
         if (target_is_depot_a1 && src.row_id == 2 &&
             current_corr == 2 && next_corr == 1) {
@@ -298,6 +309,10 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
         target_is_depot_a1 && src.row_id == 5 && src.col <= 3;
     const bool row3_upper_right_to_a1 =
         target_is_depot_a1 && src.row_id == 5 && src.col >= 4;
+    const bool row3_lower_left_to_a1 =
+        target_is_depot_a1 && src.row_id == 6 && src.col <= 3;
+    const bool row3_lower_right_to_a1 =
+        target_is_depot_a1 && src.row_id == 6 && src.col >= 4;
 
     int current_corr = src_corr;
     double current_x = src.dock_x();
@@ -324,6 +339,10 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
         } else if (row3_upper_left_to_a1) {
             start_to_right = false;
         } else if (row3_upper_right_to_a1) {
+            start_to_right = true;
+        } else if (row3_lower_left_to_a1) {
+            start_to_right = false;
+        } else if (row3_lower_right_to_a1) {
             start_to_right = true;
         }
         const bool row0_left_outer_to_a1 =
@@ -378,6 +397,8 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
             start_lane_y = corridor_lane_y(mp_, src_corr, HDir::RIGHT);
         } else if (row3_upper_left_to_a1 || row3_upper_right_to_a1) {
             start_lane_y = corridor_lane_y(mp_, src_corr, HDir::LEFT);
+        } else if (row3_lower_left_to_a1 || row3_lower_right_to_a1) {
+            start_lane_y = corridor_lane_y(mp_, src_corr, HDir::RIGHT);
         }
         if (src_corr == tgt_corr && terminal_reverse) {
             const HDir same_corr_drive_dir =
@@ -541,6 +562,17 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
                 direct_reverse_end_x = std::min(
                     direct_reverse_end_x,
                     std::max(0.04, spine_x_ - min_exit_run));
+            } else if (row3_lower_left_to_a1) {
+                const double min_exit_run =
+                    std::max(0.36, final_min_req_x + 0.06);
+                direct_reverse_end_x =
+                    std::min(mp_.field_width - 0.04,
+                             row3_down_x + min_exit_run);
+            } else if (row3_lower_right_to_a1) {
+                const double min_exit_run =
+                    std::max(0.36, final_min_req_x + 0.06);
+                direct_reverse_end_x =
+                    std::max(0.04, row3_up_x - min_exit_run);
             }
             if (row0_outer_to_a1) {
                 direct_reverse_end_x = row0_outer_exit_x;
