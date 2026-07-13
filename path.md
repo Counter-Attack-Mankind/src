@@ -1,0 +1,1 @@
+2026-07-13：将单车/多车任务路径接入 A1-cycle 模式：新增 `/forklift_planner/multi_vehicle/use_a1_cycle` 开关，打开后普通 B->B 任务在 `TaskAllocator` 内部拆成 `B->A1` 与 `A1->B` 两段，分别使用显式 `B_TO_A1`、`A1_TO_B` 生成器并拼接成完整 track；`single_vehicle_patrol.launch` 默认改为单车 `B17->A1->B24` 实验入口，后续可通过扩展 start/target 数组推广到多车。

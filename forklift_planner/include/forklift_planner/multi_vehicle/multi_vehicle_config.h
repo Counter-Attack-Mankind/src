@@ -103,6 +103,7 @@ struct MultiVehicleConfig {
     // 简单测试版(eight-veh-sim):每车选「路径最短且全程前进(无 REVERSE 段=无尖点)」的目标,
     // 一把开进去、走得近。覆盖默认的跨排/分散选靶逻辑。仅用于实车链路冒烟测试。
     bool simple_forward_demo = false;
+    bool use_a1_cycle = false;  // true: every B->B task is generated as B->A1->B
 
     int recent_target_memory = 5;
     int recent_row_memory = 4;

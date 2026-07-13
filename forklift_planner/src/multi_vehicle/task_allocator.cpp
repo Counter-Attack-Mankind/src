@@ -37,7 +37,13 @@ TaskAllocator::TaskAllocator(const MapParam& mp, const PlannerParam& pp,
                              const MultiVehicleConfig& cfg,
                              const ForkliftMap& map,
                              PathGenerator& generator)
-    : mp_(mp), pp_(pp), cfg_(cfg), map_(map), generator_(generator)
+    : mp_(mp),
+      pp_(pp),
+      cfg_(cfg),
+      map_(map),
+      generator_(generator),
+      generator_a1_to_b_(mp, pp, PathGeneratorRouteMode::A1_TO_B),
+      generator_b_to_a1_(mp, pp, PathGeneratorRouteMode::B_TO_A1)
 {
     const int n = static_cast<int>(map_.slots().size());
     target_visit_counts_.assign(n, 0);
@@ -209,7 +215,57 @@ TaskRejectReason TaskAllocator::validatePose(const RoughWp& pose,
 
 //===============================================（任务生成）=============================
 
+Slot TaskAllocator::makeA1DepotSlot() const {
+    Slot a1;
+    a1.id = 101;
+    a1.row_id = 0;
+    a1.col = -1;
+    a1.occupied = false;
+    if (map_.slots().size() > 5) {
+        const Slot& b4 = map_.slots().at(4);
+        const Slot& b5 = map_.slots().at(5);
+        a1.cx = 0.5 * (b4.cx + b5.cx);
+        a1.cy = 0.5 * (b4.cy + b5.cy);
+        a1.pre_dock_x = 0.5 * (b4.pre_dock_x + b5.pre_dock_x);
+        a1.pre_dock_y = 0.5 * (b4.pre_dock_y + b5.pre_dock_y);
+    } else {
+        a1.cx = mp_.field_width * 0.5;
+        a1.cy = mp_.field_height - 0.125;
+        a1.pre_dock_x = a1.cx;
+        a1.pre_dock_y = std::max(0.0, a1.cy - 0.275);
+    }
+    a1.dock_theta = kPi * 0.5;
+    return a1;
+}
+
+RoughPath TaskAllocator::concatPaths(const RoughPath& first,
+                                     const RoughPath& second) const {
+    RoughPath out = first;
+    out.reserve(first.size() + second.size());
+    out.insert(out.end(), second.begin(), second.end());
+    return out;
+}
+
 TaskPlanCache TaskAllocator::makeTaskPlan(int src_id, int target_id) const {
+    TaskPlanCache out;
+    if (src_id == target_id) {
+        out.reject_reason = TaskRejectReason::SAME_SLOT;
+        return out;
+    }
+    if (cfg_.use_a1_cycle) {
+        return makeA1CycleTaskPlan(src_id, target_id);
+    }
+
+    const Slot& src = map_.slots().at(src_id);
+    const Slot& target = map_.slots().at(target_id);
+    out.path = generator_.generate(src, target, &out.info);
+    out.reject_reason = validatePath(out.path, out.info, src, target);
+    out.valid = out.reject_reason == TaskRejectReason::NONE;
+    return out;
+}
+
+TaskPlanCache TaskAllocator::makeA1CycleTaskPlan(int src_id,
+                                                 int target_id) const {
     TaskPlanCache out;
     if (src_id == target_id) {
         out.reject_reason = TaskRejectReason::SAME_SLOT;
@@ -218,7 +274,30 @@ TaskPlanCache TaskAllocator::makeTaskPlan(int src_id, int target_id) const {
 
     const Slot& src = map_.slots().at(src_id);
     const Slot& target = map_.slots().at(target_id);
-    out.path = generator_.generate(src, target, &out.info);
+    const Slot a1 = makeA1DepotSlot();
+
+    PathGenerationInfo to_a1_info;
+    PathGenerationInfo from_a1_info;
+    const RoughPath to_a1 =
+        generator_b_to_a1_.generate(src, a1, &to_a1_info);
+    if (to_a1.empty()) {
+        out.reject_reason = TaskRejectReason::EMPTY_PATH;
+        return out;
+    }
+    const RoughPath from_a1 =
+        generator_a1_to_b_.generate(a1, target, &from_a1_info);
+    if (from_a1.empty()) {
+        out.reject_reason = TaskRejectReason::EMPTY_PATH;
+        return out;
+    }
+
+    out.path = concatPaths(to_a1, from_a1);
+    out.info.used_arc_fallback =
+        to_a1_info.used_arc_fallback || from_a1_info.used_arc_fallback;
+    out.info.debug_layers = to_a1_info.debug_layers;
+    out.info.debug_layers.insert(out.info.debug_layers.end(),
+                                 from_a1_info.debug_layers.begin(),
+                                 from_a1_info.debug_layers.end());
     out.reject_reason = validatePath(out.path, out.info, src, target);
     out.valid = out.reject_reason == TaskRejectReason::NONE;
     return out;

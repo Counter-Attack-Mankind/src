@@ -70,7 +70,10 @@ public:
 
 private:
     TaskPlanCache makeTaskPlan(int src_id, int target_id) const;
+    TaskPlanCache makeA1CycleTaskPlan(int src_id, int target_id) const;
     TaskPlanCache makeTaskPlanFromPose(const VehicleAgent& vehicle, int target_id) const;
+    Slot makeA1DepotSlot() const;
+    RoughPath concatPaths(const RoughPath& first, const RoughPath& second) const;
     TaskRejectReason validatePath(const RoughPath& path,
                                   const PathGenerationInfo& info,
                                   const Slot& src,
@@ -112,6 +115,8 @@ private:
     const MultiVehicleConfig& cfg_;
     const ForkliftMap& map_;
     PathGenerator& generator_;
+    PathGenerator generator_a1_to_b_;
+    PathGenerator generator_b_to_a1_;
 
     std::vector<TaskPlanCache> task_cache_;
     std::vector<int> target_visit_counts_;

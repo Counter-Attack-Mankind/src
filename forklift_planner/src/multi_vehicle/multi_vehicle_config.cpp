@@ -83,6 +83,7 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     nh.param(ns + "enable_deadlock_recovery", c.enable_deadlock_recovery,
              c.enable_deadlock_recovery);
     nh.param(ns + "simple_forward_demo", c.simple_forward_demo, c.simple_forward_demo);
+    nh.param(ns + "use_a1_cycle", c.use_a1_cycle, c.use_a1_cycle);
     nh.param(ns + "show_paths", c.show_paths, c.show_paths);
     nh.param(ns + "show_prediction_conflicts", c.show_prediction_conflicts,
              c.show_prediction_conflicts);
