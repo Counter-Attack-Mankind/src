@@ -104,6 +104,8 @@ struct MultiVehicleConfig {
     // 一把开进去、走得近。覆盖默认的跨排/分散选靶逻辑。仅用于实车链路冒烟测试。
     bool simple_forward_demo = false;
     bool use_a1_cycle = false;  // true: every B->B task is generated as B->A1->B
+    std::string a1_cycle_catalog_file;
+    bool save_a1_cycle_catalog = true;
 
     int recent_target_memory = 5;
     int recent_row_memory = 4;

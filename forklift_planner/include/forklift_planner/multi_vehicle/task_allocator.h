@@ -30,6 +30,12 @@ struct TaskPlanCache {
     PathGenerationInfo info;
 };
 
+struct DepotLegCache {
+    bool ready = false;
+    RoughPath path;
+    PathGenerationInfo info;
+};
+
 class TaskAllocator {
 public:
     TaskAllocator(const MapParam& mp, const PlannerParam& pp,
@@ -72,6 +78,10 @@ private:
     TaskPlanCache makeTaskPlan(int src_id, int target_id) const;
     TaskPlanCache makeA1CycleTaskPlan(int src_id, int target_id) const;
     TaskPlanCache makeTaskPlanFromPose(const VehicleAgent& vehicle, int target_id) const;
+    void ensureA1LegCache() const;
+    bool loadA1LegCacheFromFile() const;
+    bool saveA1LegCacheToFile() const;
+    void buildA1LegCacheFromGenerator() const;
     Slot makeA1DepotSlot() const;
     RoughPath concatPaths(const RoughPath& first, const RoughPath& second) const;
     TaskRejectReason validatePath(const RoughPath& path,
@@ -117,6 +127,9 @@ private:
     PathGenerator& generator_;
     PathGenerator generator_a1_to_b_;
     PathGenerator generator_b_to_a1_;
+    mutable bool a1_leg_cache_ready_ = false;
+    mutable std::vector<DepotLegCache> a1_to_b_leg_cache_;
+    mutable std::vector<DepotLegCache> b_to_a1_leg_cache_;
 
     std::vector<TaskPlanCache> task_cache_;
     std::vector<int> target_visit_counts_;

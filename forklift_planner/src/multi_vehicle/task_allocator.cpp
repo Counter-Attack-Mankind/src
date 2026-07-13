@@ -3,8 +3,13 @@
 #include <ros/console.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <fstream>
+#include <iomanip>
 #include <limits>
+#include <sstream>
+#include <string>
 #include <utility>
 
 #include "forklift_planner/multi_vehicle/footprint.h"
@@ -15,6 +20,8 @@ namespace multi_vehicle {
 namespace {
 
 constexpr double kPi = M_PI;
+constexpr const char* kA1CatalogFormat =
+    "forklift_a1_cycle_path_catalog_v1";
 
 double normAngle(double a) {
     while (a > kPi) a -= 2.0 * kPi;
@@ -27,6 +34,34 @@ std::string slotLabel(const ForkliftMap& map, int id) {
     return "slot " + std::to_string(s.id) +
            " row=" + std::to_string(s.row_id) +
            " col=" + std::to_string(s.col);
+}
+
+std::string trim(const std::string& s) {
+    size_t b = 0;
+    while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
+    size_t e = s.size();
+    while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
+    return s.substr(b, e - b);
+}
+
+bool startsWith(const std::string& s, const char* prefix) {
+    const std::string p(prefix);
+    return s.size() >= p.size() && s.compare(0, p.size(), p) == 0;
+}
+
+void writeLegSection(std::ostream& os, const char* name,
+                     const std::vector<DepotLegCache>& legs) {
+    os << "section: " << name << "\n";
+    for (size_t id = 0; id < legs.size(); ++id) {
+        const DepotLegCache& leg = legs[id];
+        os << "leg: " << id
+           << " arc " << (leg.info.used_arc_fallback ? 1 : 0)
+           << " points " << leg.path.size() << "\n";
+        for (const RoughWp& wp : leg.path) {
+            os << "p: " << wp.x << ' ' << wp.y << ' ' << wp.theta
+               << ' ' << static_cast<int>(wp.type) << "\n";
+        }
+    }
 }
 
 }  // namespace
@@ -51,6 +86,8 @@ TaskAllocator::TaskAllocator(const MapParam& mp, const PlannerParam& pp,
     row_visit_counts_.assign(8, 0);
     outbound_valid_counts_.assign(n, 0);
     outbound_cross_row_counts_.assign(n, 0);
+    a1_to_b_leg_cache_.assign(n, DepotLegCache{});
+    b_to_a1_leg_cache_.assign(n, DepotLegCache{});
 }
 
 const char* TaskAllocator::rejectReasonName(TaskRejectReason reason) const {
@@ -246,6 +283,229 @@ RoughPath TaskAllocator::concatPaths(const RoughPath& first,
     return out;
 }
 
+void TaskAllocator::buildA1LegCacheFromGenerator() const {
+    const int n = static_cast<int>(map_.slots().size());
+    a1_to_b_leg_cache_.assign(n, DepotLegCache{});
+    b_to_a1_leg_cache_.assign(n, DepotLegCache{});
+
+    const Slot a1 = makeA1DepotSlot();
+    int to_a1_ok = 0;
+    int from_a1_ok = 0;
+    int to_a1_arc = 0;
+    int from_a1_arc = 0;
+    for (int id = 0; id < n; ++id) {
+        const Slot& slot = map_.slots().at(id);
+
+        DepotLegCache to_a1;
+        to_a1.path = generator_b_to_a1_.generate(slot, a1, &to_a1.info);
+        to_a1.ready = true;
+        if (!to_a1.path.empty()) {
+            ++to_a1_ok;
+            if (to_a1.info.used_arc_fallback) ++to_a1_arc;
+        }
+        b_to_a1_leg_cache_[id] = std::move(to_a1);
+
+        DepotLegCache from_a1;
+        from_a1.path = generator_a1_to_b_.generate(a1, slot, &from_a1.info);
+        from_a1.ready = true;
+        if (!from_a1.path.empty()) {
+            ++from_a1_ok;
+            if (from_a1.info.used_arc_fallback) ++from_a1_arc;
+        }
+        a1_to_b_leg_cache_[id] = std::move(from_a1);
+    }
+
+    ROS_INFO("[multi_patrol] A1 leg cache built: slots=%d "
+             "B->A1 ok=%d arc=%d, A1->B ok=%d arc=%d",
+             n, to_a1_ok, to_a1_arc, from_a1_ok, from_a1_arc);
+}
+
+bool TaskAllocator::loadA1LegCacheFromFile() const {
+    if (cfg_.a1_cycle_catalog_file.empty()) return false;
+
+    std::ifstream in(cfg_.a1_cycle_catalog_file);
+    if (!in.is_open()) {
+        ROS_WARN("[multi_patrol] A1 leg catalog not found: %s",
+                 cfg_.a1_cycle_catalog_file.c_str());
+        return false;
+    }
+
+    const int n = static_cast<int>(map_.slots().size());
+    std::vector<DepotLegCache> b_to_a1(n);
+    std::vector<DepotLegCache> a1_to_b(n);
+    std::vector<DepotLegCache>* current_section = nullptr;
+    bool format_ok = false;
+    bool slot_count_ok = false;
+    bool a1_ok = false;
+    int current_leg = -1;
+    std::string line;
+    int line_no = 0;
+    const Slot a1 = makeA1DepotSlot();
+
+    while (std::getline(in, line)) {
+        ++line_no;
+        line = trim(line);
+        if (line.empty() || line[0] == '#') continue;
+
+        if (startsWith(line, "format:")) {
+            format_ok = trim(line.substr(7)) == kA1CatalogFormat;
+            continue;
+        }
+        if (startsWith(line, "slot_count:")) {
+            int count = -1;
+            std::istringstream ss(trim(line.substr(11)));
+            ss >> count;
+            slot_count_ok = count == n;
+            continue;
+        }
+        if (startsWith(line, "a1:")) {
+            double cx = 0.0, cy = 0.0, pre_x = 0.0, pre_y = 0.0, theta = 0.0;
+            std::istringstream ss(trim(line.substr(3)));
+            ss >> cx >> cy >> pre_x >> pre_y >> theta;
+            a1_ok = ss && std::abs(cx - a1.cx) < 1e-3 &&
+                    std::abs(cy - a1.cy) < 1e-3 &&
+                    std::abs(pre_x - a1.pre_dock_x) < 1e-3 &&
+                    std::abs(pre_y - a1.pre_dock_y) < 1e-3 &&
+                    std::abs(normAngle(theta - a1.dock_theta)) < 1e-3;
+            continue;
+        }
+        if (startsWith(line, "section:")) {
+            const std::string section = trim(line.substr(8));
+            if (section == "b_to_a1") {
+                current_section = &b_to_a1;
+            } else if (section == "a1_to_b") {
+                current_section = &a1_to_b;
+            } else {
+                ROS_WARN("[multi_patrol] A1 leg catalog has unknown section "
+                         "'%s' at line %d",
+                         section.c_str(), line_no);
+                return false;
+            }
+            current_leg = -1;
+            continue;
+        }
+        if (startsWith(line, "leg:")) {
+            if (current_section == nullptr) return false;
+            std::string tag;
+            std::string arc_label;
+            std::string points_label;
+            int id = -1;
+            int arc = 0;
+            int points = 0;
+            std::istringstream ss(line);
+            ss >> tag >> id >> arc_label >> arc >> points_label >> points;
+            if (!ss || id < 0 || id >= n || arc_label != "arc" ||
+                points_label != "points" || points < 0) {
+                ROS_WARN("[multi_patrol] A1 leg catalog bad leg header at "
+                         "line %d: %s",
+                         line_no, line.c_str());
+                return false;
+            }
+            current_leg = id;
+            (*current_section)[id] = DepotLegCache{};
+            (*current_section)[id].ready = true;
+            (*current_section)[id].info.used_arc_fallback = (arc != 0);
+            continue;
+        }
+        if (startsWith(line, "p:")) {
+            if (current_section == nullptr || current_leg < 0) return false;
+            std::string tag;
+            int type = 0;
+            RoughWp wp;
+            std::istringstream ss(line);
+            ss >> tag >> wp.x >> wp.y >> wp.theta >> type;
+            if (!ss) {
+                ROS_WARN("[multi_patrol] A1 leg catalog bad waypoint at "
+                         "line %d: %s",
+                         line_no, line.c_str());
+                return false;
+            }
+            wp.type = static_cast<WpType>(type);
+            (*current_section)[current_leg].path.push_back(wp);
+            continue;
+        }
+    }
+
+    if (!format_ok || !slot_count_ok || !a1_ok) {
+        ROS_WARN("[multi_patrol] A1 leg catalog version/map mismatch: "
+                 "format=%d slot_count=%d a1=%d file=%s",
+                 format_ok ? 1 : 0, slot_count_ok ? 1 : 0, a1_ok ? 1 : 0,
+                 cfg_.a1_cycle_catalog_file.c_str());
+        return false;
+    }
+
+    int to_a1_ok = 0;
+    int from_a1_ok = 0;
+    int to_a1_arc = 0;
+    int from_a1_arc = 0;
+    for (int id = 0; id < n; ++id) {
+        if (!b_to_a1[id].ready || b_to_a1[id].path.empty() ||
+            !a1_to_b[id].ready || a1_to_b[id].path.empty()) {
+            ROS_WARN("[multi_patrol] A1 leg catalog missing slot %d; "
+                     "will regenerate",
+                     id);
+            return false;
+        }
+        ++to_a1_ok;
+        ++from_a1_ok;
+        if (b_to_a1[id].info.used_arc_fallback) ++to_a1_arc;
+        if (a1_to_b[id].info.used_arc_fallback) ++from_a1_arc;
+    }
+
+    b_to_a1_leg_cache_.swap(b_to_a1);
+    a1_to_b_leg_cache_.swap(a1_to_b);
+    ROS_INFO("[multi_patrol] A1 leg catalog loaded: %s slots=%d "
+             "B->A1 ok=%d arc=%d, A1->B ok=%d arc=%d",
+             cfg_.a1_cycle_catalog_file.c_str(), n,
+             to_a1_ok, to_a1_arc, from_a1_ok, from_a1_arc);
+    return true;
+}
+
+bool TaskAllocator::saveA1LegCacheToFile() const {
+    if (cfg_.a1_cycle_catalog_file.empty()) return false;
+
+    std::ofstream out(cfg_.a1_cycle_catalog_file);
+    if (!out.is_open()) {
+        ROS_WARN("[multi_patrol] failed to save A1 leg catalog: %s",
+                 cfg_.a1_cycle_catalog_file.c_str());
+        return false;
+    }
+
+    const Slot a1 = makeA1DepotSlot();
+    out << std::setprecision(12);
+    out << "format: " << kA1CatalogFormat << "\n";
+    out << "slot_count: " << map_.slots().size() << "\n";
+    out << "a1: " << a1.cx << ' ' << a1.cy << ' '
+        << a1.pre_dock_x << ' ' << a1.pre_dock_y << ' '
+        << a1.dock_theta << "\n";
+    writeLegSection(out, "b_to_a1", b_to_a1_leg_cache_);
+    writeLegSection(out, "a1_to_b", a1_to_b_leg_cache_);
+
+    if (!out.good()) {
+        ROS_WARN("[multi_patrol] failed while writing A1 leg catalog: %s",
+                 cfg_.a1_cycle_catalog_file.c_str());
+        return false;
+    }
+    ROS_INFO("[multi_patrol] A1 leg catalog saved: %s",
+             cfg_.a1_cycle_catalog_file.c_str());
+    return true;
+}
+
+void TaskAllocator::ensureA1LegCache() const {
+    if (a1_leg_cache_ready_) return;
+
+    if (loadA1LegCacheFromFile()) {
+        a1_leg_cache_ready_ = true;
+        return;
+    }
+
+    buildA1LegCacheFromGenerator();
+    a1_leg_cache_ready_ = true;
+    if (cfg_.save_a1_cycle_catalog) {
+        saveA1LegCacheToFile();
+    }
+}
+
 TaskPlanCache TaskAllocator::makeTaskPlan(int src_id, int target_id) const {
     TaskPlanCache out;
     if (src_id == target_id) {
@@ -274,30 +534,27 @@ TaskPlanCache TaskAllocator::makeA1CycleTaskPlan(int src_id,
 
     const Slot& src = map_.slots().at(src_id);
     const Slot& target = map_.slots().at(target_id);
-    const Slot a1 = makeA1DepotSlot();
-
-    PathGenerationInfo to_a1_info;
-    PathGenerationInfo from_a1_info;
-    const RoughPath to_a1 =
-        generator_b_to_a1_.generate(src, a1, &to_a1_info);
-    if (to_a1.empty()) {
+    ensureA1LegCache();
+    if (src_id < 0 || src_id >= static_cast<int>(b_to_a1_leg_cache_.size()) ||
+        target_id < 0 || target_id >= static_cast<int>(a1_to_b_leg_cache_.size())) {
         out.reject_reason = TaskRejectReason::EMPTY_PATH;
         return out;
     }
-    const RoughPath from_a1 =
-        generator_a1_to_b_.generate(a1, target, &from_a1_info);
-    if (from_a1.empty()) {
+    const DepotLegCache& to_a1 = b_to_a1_leg_cache_[src_id];
+    const DepotLegCache& from_a1 = a1_to_b_leg_cache_[target_id];
+    if (!to_a1.ready || !from_a1.ready ||
+        to_a1.path.empty() || from_a1.path.empty()) {
         out.reject_reason = TaskRejectReason::EMPTY_PATH;
         return out;
     }
 
-    out.path = concatPaths(to_a1, from_a1);
+    out.path = concatPaths(to_a1.path, from_a1.path);
     out.info.used_arc_fallback =
-        to_a1_info.used_arc_fallback || from_a1_info.used_arc_fallback;
-    out.info.debug_layers = to_a1_info.debug_layers;
+        to_a1.info.used_arc_fallback || from_a1.info.used_arc_fallback;
+    out.info.debug_layers = to_a1.info.debug_layers;
     out.info.debug_layers.insert(out.info.debug_layers.end(),
-                                 from_a1_info.debug_layers.begin(),
-                                 from_a1_info.debug_layers.end());
+                                 from_a1.info.debug_layers.begin(),
+                                 from_a1.info.debug_layers.end());
     out.reject_reason = validatePath(out.path, out.info, src, target);
     out.valid = out.reject_reason == TaskRejectReason::NONE;
     return out;
@@ -328,6 +585,9 @@ TaskPlanCache TaskAllocator::makeTaskPlanFromPose(const VehicleAgent& vehicle,
 
 void TaskAllocator::buildCache() {
     const int n = static_cast<int>(map_.slots().size());
+    if (cfg_.use_a1_cycle) {
+        ensureA1LegCache();
+    }
     task_cache_.assign(n * n, TaskPlanCache{});
     std::fill(outbound_valid_counts_.begin(), outbound_valid_counts_.end(), 0);
     std::fill(outbound_cross_row_counts_.begin(),

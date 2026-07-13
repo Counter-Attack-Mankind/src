@@ -6,6 +6,9 @@
   <arg name="target_slot" default="24"/>
   <arg name="one_shot" default="true"/>
   <arg name="use_a1_cycle" default="true"/>
+  <arg name="precompute_task_filter" default="false"/>
+  <arg name="a1_cycle_catalog_file" default="$(find forklift_planner)/config/a1_cycle_path_catalog.yaml"/>
+  <arg name="save_a1_cycle_catalog" default="true"/>
   <arg name="show_paths" default="true"/>
 
   <param name="/use_sim_time" value="false"/>
@@ -18,6 +21,9 @@
   <param name="/forklift_planner/multi_vehicle/show_paths" value="$(arg show_paths)"/>
   <param name="/forklift_planner/multi_vehicle/simple_forward_demo" value="false"/>
   <param name="/forklift_planner/multi_vehicle/use_a1_cycle" value="$(arg use_a1_cycle)"/>
+  <param name="/forklift_planner/multi_vehicle/precompute_task_filter" value="$(arg precompute_task_filter)"/>
+  <param name="/forklift_planner/multi_vehicle/a1_cycle_catalog_file" value="$(arg a1_cycle_catalog_file)"/>
+  <param name="/forklift_planner/multi_vehicle/save_a1_cycle_catalog" value="$(arg save_a1_cycle_catalog)"/>
   <rosparam param="/forklift_planner/multi_vehicle/start_slots">[$(arg start_slot)]</rosparam>
   <rosparam param="/forklift_planner/multi_vehicle/target_slots">[$(arg target_slot)]</rosparam>
   <param name="/forklift_planner/multi_vehicle/real_mode" value="false"/>
