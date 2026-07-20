@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <random>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -840,52 +841,20 @@ int TaskAllocator::chooseNextTarget(const VehicleAgent& vehicle,
                                     const std::vector<VehicleAgent>& all,
                                     bool require_no_arc) const {
     const int n = static_cast<int>(map_.slots().size());
-    const Slot& current = map_.slots().at(vehicle.current_slot);
-    int best_target = -1;
-    double best_score = -std::numeric_limits<double>::infinity();
+    std::vector<int> candidates;
+    candidates.reserve(static_cast<size_t>(n));
 
-    for (int pass = 0; pass < 2; ++pass) {
-        const bool allow_same_row = pass == 1;
-        for (int target = 0; target < n; ++target) {
-            if (!planAvailable(vehicle, target, require_no_arc)) continue;
-            if (!hasValidOutbound(target)) continue;
-            if (slotReservedByOther(vehicle, all, target)) continue;
-
-            const Slot& dst = map_.slots().at(target);
-            if (!allow_same_row && dst.row_id == current.row_id) continue;
-            const int row = std::max(0, std::min(dst.row_id, 7));
-            const int edge_idx = vehicle.current_slot * n + target;
-            const int row_visits =
-                row < static_cast<int>(row_visit_counts_.size())
-                    ? row_visit_counts_[row] : 0;
-
-            double score = 0.0;
-            score += 8.0 * std::abs(dst.row_id - current.row_id);
-            score += 1.5 * std::abs(dst.col - current.col);
-            if (target < static_cast<int>(outbound_cross_row_counts_.size())) {
-                score += 2.0 * outbound_cross_row_counts_[target];
-                score += 0.4 * outbound_valid_counts_[target];
-                if (outbound_cross_row_counts_[target] == 0) score -= 35.0;
-            }
-            score -= 18.0 * target_visit_counts_[target];
-            score -= 14.0 * row_visits;
-            score -= 25.0 * edge_visit_counts_[edge_idx];
-            if (containsRecent(vehicle.recent_targets, target)) score -= 80.0;
-            if (containsRecent(vehicle.recent_rows, dst.row_id)) score -= 24.0;
-            if (dst.row_id == 7) score += 55.0;
-            if (dst.row_id == 0) score += 18.0;
-
-            score -= 12.0 * activeTargetCount(vehicle, all, target);
-            score += deterministicJitter(vehicle, target) * 6.0;
-
-            if (score > best_score) {
-                best_score = score;
-                best_target = target;
-            }
-        }
-        if (best_target >= 0) break;
+    for (int target = 0; target < n; ++target) {
+        if (!planAvailable(vehicle, target, require_no_arc)) continue;
+        if (!hasValidOutbound(target)) continue;
+        if (slotReservedByOther(vehicle, all, target)) continue;
+        candidates.push_back(target);
     }
-    return best_target;
+    if (candidates.empty()) return -1;
+
+    std::random_device rd;
+    std::uniform_int_distribution<size_t> pick(0, candidates.size() - 1);
+    return candidates[pick(rd)];
 }
 
 void TaskAllocator::rememberTask(VehicleAgent& vehicle, int target) {

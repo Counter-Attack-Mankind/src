@@ -95,7 +95,7 @@ forklift_planner:
     following_min_distance: 0.13
 
     # 路径与任务过滤
-    skip_arc_fallback_paths: true
+    skip_arc_fallback_paths: false
     reject_curvature_discontinuity: false
     reject_boundary_violations: true
     reject_shelf_collisions: false

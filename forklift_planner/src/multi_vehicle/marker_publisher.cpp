@@ -2,6 +2,7 @@
 
 #include <geometry_msgs/Point.h>
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 
@@ -41,12 +42,28 @@ RoughWp displayPose(const VehicleAgent& v) {
     return v.track.poseAtS(v.path_s);
 }
 
+void shelfCellY(const MapParam& p, int row_id, double& y0, double& y1) {
+    constexpr double kSlotGapHalf = 0.012;
+    const double g = kSlotGapHalf;
+    switch (row_id) {
+        case 0: y0 = p.y8();                  y1 = p.field_height;          break;
+        case 1: y0 = (p.y6()+p.y7())*0.5 + g; y1 = p.y7();                  break;
+        case 2: y0 = p.y6();                  y1 = (p.y6()+p.y7())*0.5 - g; break;
+        case 3: y0 = (p.y4()+p.y5())*0.5 + g; y1 = p.y5();                  break;
+        case 4: y0 = p.y4();                  y1 = (p.y4()+p.y5())*0.5 - g; break;
+        case 5: y0 = (p.y2()+p.y3())*0.5 + g; y1 = p.y3();                  break;
+        case 6: y0 = p.y2();                  y1 = (p.y2()+p.y3())*0.5 - g; break;
+        default:y0 = 0.0;                     y1 = p.bottom_shelf_depth;    break;
+    }
+}
+
 }  // namespace
 
 MarkerPublisher::MarkerPublisher(ros::NodeHandle& nh, const MapParam& mp,
                                  const PlannerParam& pp,
+                                 const std::vector<Slot>& slots,
                                  const MultiVehicleConfig& cfg)
-    : mp_(mp), pp_(pp), cfg_(cfg) {
+    : mp_(mp), pp_(pp), slots_(slots), cfg_(cfg) {
     pub_ = nh.advertise<visualization_msgs::MarkerArray>(
         "/forklift_planner/markers", 10);
 }
@@ -182,6 +199,36 @@ void MarkerPublisher::addLabelMarker(visualization_msgs::MarkerArray& arr,
     arr.markers.push_back(m);
 }
 
+void MarkerPublisher::addVisitedSlotMarkers(
+    visualization_msgs::MarkerArray& arr,
+    const std::vector<bool>& visited_slots) const {
+    const size_t n = std::min(visited_slots.size(), slots_.size());
+    for (size_t i = 0; i < n; ++i) {
+        if (!visited_slots[i]) continue;
+        const Slot& s = slots_[i];
+        double y0 = 0.0;
+        double y1 = 0.0;
+        shelfCellY(mp_, s.row_id, y0, y1);
+
+        visualization_msgs::Marker m;
+        m.header.frame_id = pp_.frame_id;
+        m.header.stamp = ros::Time::now();
+        m.ns = "visited_slots";
+        m.id = static_cast<int>(i);
+        m.type = visualization_msgs::Marker::CUBE;
+        m.action = visualization_msgs::Marker::ADD;
+        m.pose.position.x = s.cx;
+        m.pose.position.y = 0.5 * (y0 + y1);
+        m.pose.position.z = 0.018;
+        m.pose.orientation.w = 1.0;
+        m.scale.x = mp_.vehicle_width;
+        m.scale.y = y1 - y0;
+        m.scale.z = 0.004;
+        m.color = rgba(1.0f, 0.88f, 0.05f, 0.92f);
+        arr.markers.push_back(m);
+    }
+}
+
 void MarkerPublisher::addConflictMarkers(
     visualization_msgs::MarkerArray& arr,
     const std::vector<ConflictMarker>& conflicts) const {
@@ -276,9 +323,11 @@ void MarkerPublisher::addOriginAxes(visualization_msgs::MarkerArray& arr) const 
 
 void MarkerPublisher::publish(
     const std::vector<VehicleAgent>& vehicles,
+    const std::vector<bool>& visited_slots,
     const std::vector<ConflictMarker>& conflicts) const {
     ++publish_seq_;
     visualization_msgs::MarkerArray arr;
+    addVisitedSlotMarkers(arr, visited_slots);
     addOriginAxes(arr);  // 地图原点+XY正方向(标定核对用)
     for (const VehicleAgent& v : vehicles) {
         addPathMarker(arr, v);

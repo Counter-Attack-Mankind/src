@@ -82,7 +82,7 @@ public:
             mp_, cfg_);
         rule_engine_->setResourceMap(resource_map_.get());
         marker_pub_ = std::make_unique<forklift_planner::multi_vehicle::MarkerPublisher>(
-            nh_, mp_, pp_, cfg_);
+            nh_, mp_, pp_, map_->slots(), cfg_);
         // A方案:仿真也画每车完整轨迹。real 模式 setupRealIO 会再 advertise(同topic,无害)。
         horizon_marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>(
             "/forklift_planner/markers", 10);
@@ -91,6 +91,7 @@ public:
             allocator_->buildCache();
         }
         initAgents();
+        visited_slots_.assign(map_->slots().size(), false);
         one_shot_done_.assign(agents_.size(), false);
         dumpResourceSpans();  // Phase 1.3 验证:打印各车路径经过的资源占用区间
 
@@ -1060,6 +1061,10 @@ private:
 
             if (v.path_s >= v.track.length() - 1e-9) {
                 v.current_slot = v.target_slot;
+                if (v.current_slot >= 0 &&
+                    v.current_slot < static_cast<int>(visited_slots_.size())) {
+                    visited_slots_[static_cast<size_t>(v.current_slot)] = true;
+                }
                 ++v.task_count;
                 v.mode = VehicleMode::DWELL;
                 v.action = VehicleAction::STOP;
@@ -1179,7 +1184,7 @@ private:
         // 1. 实车模式---未摆放好姿态模式
         if (cfg_.real_mode) {
             if (!rb_started_) {
-                marker_pub_->publish(agents_, rule_engine_->conflicts());   //发布车辆、地图
+                marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());   //发布车辆、地图
                 publishRealTrailMarkers();  //发布真实车身尾迹
                 logPlacementStatus();       //打印摆车状态
                 return;
@@ -1198,7 +1203,7 @@ private:
                 }
                 realAdvance(dt);        //根据真实车身位置重新定位
                 logAgentStatus();
-                marker_pub_->publish(agents_, rule_engine_->conflicts());
+                marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());
                 publishRealTrailMarkers();
                 return;
             }
@@ -1210,7 +1215,7 @@ private:
             if (tick_count_ % 5 == 0) runDeadlockRecovery();        //5*0.1=0.5s进行一次死锁检测
             if (tick_count_ % rb_horizon_refresh_ == 0) publishHorizon();   //20*0.1=2s发布新的轨迹
             publishRealOutputs(dt);
-            marker_pub_->publish(agents_, rule_engine_->conflicts());
+            marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());
             publishRealTrailMarkers();
             return;
         }
@@ -1239,7 +1244,7 @@ private:
 
         logAgentStatus();
         logStuckDiagnostics();
-        marker_pub_->publish(agents_, rule_engine_->conflicts());
+        marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());
     }
     
     //===========================================================================
@@ -1716,6 +1721,7 @@ private:
     std::unique_ptr<forklift_planner::multi_vehicle::MarkerPublisher> marker_pub_;
     std::unique_ptr<forklift_planner::multi_vehicle::TrafficResourceMap> resource_map_;
     std::vector<VehicleAgent> agents_;
+    std::vector<bool> visited_slots_;
     int target_only_ = -1;  // realbridge debug: -1 = all vehicles, otherwise control only this id
 
     // ── 实车模式(real_mode)I/O ──────────────────────────────────────────────
