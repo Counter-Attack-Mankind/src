@@ -58,7 +58,8 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
         case PathGeneratorRouteMode::AUTO: break;
     }
     const bool debug_row1_target =
-        (tgt.row_id == 1 || tgt.row_id == 5 || tgt.row_id == 7 ||
+        (tgt.row_id == 1 || tgt.row_id == 3 ||
+         tgt.row_id == 5 || tgt.row_id == 7 ||
          (target_is_endpoint && (src.row_id == 1 || src.row_id == 5)));
 
     const double max_curvature  = mp_.turn_max_curvature();
@@ -306,8 +307,12 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
              tgt.row_id == 5 || tgt.row_id == 6 || tgt.row_id == 7)) {
             const double left_outer_x = row1_left_down_x;
             const double right_outer_x = row1_right_up_x;
-            if (tgt.row_id == 3 || tgt.row_id == 4 ||
-                tgt.row_id == 5 || tgt.row_id == 6 || tgt.row_id == 7) {
+            if (tgt.row_id == 3) {
+                start_ref_x = (tgt.pre_dock_x < spine_x_)
+                    ? row1_right_down_x
+                    : row1_left_up_x;
+            } else if (tgt.row_id == 4 ||
+                       tgt.row_id == 5 || tgt.row_id == 6 || tgt.row_id == 7) {
                 start_ref_x = (tgt.pre_dock_x < spine_x_) ? left_outer_x : right_outer_x;
             } else {
                 const double left_gap = std::abs(tgt.pre_dock_x - left_outer_x);
@@ -1181,6 +1186,17 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
         const bool row7_inner_terminal_keep_turn =
             use_a1_to_b_rules && terminal_lane_shift &&
             tgt.row_id == 7 && tgt.col >= 1 && tgt.col <= 8;
+        const bool row3_terminal_keep_turn =
+            use_a1_to_b_rules && terminal_lane_shift && tgt.row_id == 3;
+        if (row3_terminal_keep_turn) {
+            if (debug_row1_target) {
+                ROS_WARN("[planner][row1-debug] lane_shift skipped tgt=%d j=%zu "
+                         "terminal=1 lateral=%.3f: row3 keeps aisle turn "
+                         "into slot",
+                         tgt.id, j, lateral);
+            }
+            continue;
+        }
         if (use_a1_to_b_rules && terminal_lane_shift && tgt.row_id == 5) {
             if (debug_row1_target) {
                 ROS_WARN("[planner][row1-debug] lane_shift skipped tgt=%d j=%zu "

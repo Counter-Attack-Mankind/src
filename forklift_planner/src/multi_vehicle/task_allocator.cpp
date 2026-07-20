@@ -21,7 +21,7 @@ namespace {
 
 constexpr double kPi = M_PI;
 constexpr const char* kA1CatalogFormat =
-    "forklift_a1_cycle_path_catalog_v7";
+    "forklift_a1_cycle_path_catalog_v8";
 
 double normAngle(double a) {
     while (a > kPi) a -= 2.0 * kPi;
