@@ -19,6 +19,7 @@ using forklift_planner::geometry2d::dist;
 using forklift_planner::geometry2d::dot;
 using forklift_planner::geometry2d::left_normal;
 using forklift_planner::geometry2d::normalize;
+using forklift_planner::geometry2d::right_normal;
 using namespace forklift_planner::path_internal;
 
 }
@@ -57,7 +58,7 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
         case PathGeneratorRouteMode::AUTO: break;
     }
     const bool debug_row1_target =
-        (tgt.row_id == 1 || tgt.row_id == 5 ||
+        (tgt.row_id == 1 || tgt.row_id == 5 || tgt.row_id == 7 ||
          (target_is_endpoint && (src.row_id == 1 || src.row_id == 5)));
 
     const double max_curvature  = mp_.turn_max_curvature();
@@ -220,6 +221,10 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
         }
         if (use_a1_to_b_rules && !target_is_endpoint && tgt.row_id == 5) {
             planned_goal_lane_y = row5_terminal_lane_y();
+        }
+        if (use_a1_to_b_rules && !target_is_endpoint && tgt.row_id == 7 &&
+            tgt.col >= 3 && tgt.col <= 6) {
+            planned_goal_lane_y = corridor_lane_y(mp_, tgt_corr, HDir::LEFT);
         }
     }
 
@@ -678,18 +683,25 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
             tgt.row_id == 5 && tgt.col >= 2 && tgt.col <= 5;
         const bool row3_lower_near_spine =
             tgt.row_id == 6 && tgt.col >= 2 && tgt.col <= 5;
+        const bool row4_bottom_middle_to_first_lane =
+            tgt.row_id == 7 && tgt.col >= 3 && tgt.col <= 6;
         const bool center_detour_needed =
             use_a1_to_b_rules &&
             !target_is_endpoint &&
             src.id >= 0 &&
             (row2_lower_near_spine ||
              row3_upper_near_spine ||
-             row3_lower_near_spine);
+             row3_lower_near_spine ||
+             row4_bottom_middle_to_first_lane);
         if (center_detour_needed) {
-            const double aux_run =
+            double aux_run =
                 std::max(0.38, final_min_req_x + 0.10);
-            const double stage_run =
+            double stage_run =
                 std::max(0.36, final_min_req_x + 0.08);
+            if (row4_bottom_middle_to_first_lane) {
+                aux_run = std::max(aux_run, 0.82);
+                stage_run = std::max(stage_run, 0.46);
+            }
             auto clamp_x = [&](double x) {
                 return std::max(0.04, std::min(mp_.field_width - 0.04, x));
             };
@@ -714,6 +726,15 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
             if (std::abs(center_detour_aux.x - center_detour_stage.x) < 0.25) {
                 center_detour_aux.x =
                     clamp_x(tgt.pre_dock_x - stage_side * (aux_run + stage_run));
+            }
+            if (row4_bottom_middle_to_first_lane) {
+                const double min_aux_gap = 0.68;
+                const double aux_dir =
+                    (center_detour_aux.x >= current_x) ? 1.0 : -1.0;
+                if (std::abs(center_detour_aux.x - current_x) < min_aux_gap) {
+                    center_detour_aux.x =
+                        clamp_x(current_x + aux_dir * min_aux_gap);
+                }
             }
             center_detour_heading = (stage_side < 0.0) ? 0.0 : kPi;
 
@@ -1157,10 +1178,22 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
         const Pt u = normalize(simplified[j] - simplified[j - 1]);
         const double lateral = std::abs(dot(simplified[j + 1] - simplified[j],
                                             left_normal(u)));
+        const bool row7_inner_terminal_keep_turn =
+            use_a1_to_b_rules && terminal_lane_shift &&
+            tgt.row_id == 7 && tgt.col >= 1 && tgt.col <= 8;
         if (use_a1_to_b_rules && terminal_lane_shift && tgt.row_id == 5) {
             if (debug_row1_target) {
                 ROS_WARN("[planner][row1-debug] lane_shift skipped tgt=%d j=%zu "
                          "terminal=1 lateral=%.3f: row5 keeps transition-lane turn",
+                         tgt.id, j, lateral);
+            }
+            continue;
+        }
+        if (row7_inner_terminal_keep_turn) {
+            if (debug_row1_target) {
+                ROS_WARN("[planner][row1-debug] lane_shift skipped tgt=%d j=%zu "
+                         "terminal=1 lateral=%.3f: row7 keeps first-lane "
+                         "terminal turn",
                          tgt.id, j, lateral);
             }
             continue;
@@ -1371,24 +1404,18 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
                 ROS_WARN_THROTTLE(5.0,
                          "[planner] slot %d: clothoid turn infeasible at skeleton point %zu; "
                          "p=(%.3f, %.3f), prev_len=%.3f, next_len=%.3f, "
-                         "limit=%.3f, route skeleton needs adjustment",
+                         "limit=%.3f, using local arc at this point",
                          tgt.id, j, simplified[j].x, simplified[j].y,
                          seg_len[j - 1], seg_len[j], turn_limits[j]);
             }
         }
-        ROS_WARN_THROTTLE(5.0,
-                 "[planner] slot %d: using arc fallback; curvature continuity is not satisfied",
-                 tgt.id);
         if (info != nullptr) {
             info->used_arc_fallback = true;
         }
-        RoughPath fallback = build_arc_path(simplified, pp_, src, max_curvature, sample_ds);
-        record_debug_layer_from_path(info, DebugPathLayerType::ARC_FALLBACK,
-                                     "arc_fallback", fallback);
-        prepend_initial_reverse(fallback);
-        append_terminal_reverse(fallback);
-        warn_if_reverse_segments(fallback);
-        return fallback;
+        ROS_WARN_THROTTLE(5.0,
+                 "[planner] slot %d: using local arc fallback only at infeasible turns; "
+                 "accepted lane shifts and clothoids are preserved",
+                 tgt.id);
     }
 
     std::vector<Sample> dense;
@@ -1412,6 +1439,81 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
         }
 
         if (!planned[i].active) {
+            if (active_turn[i]) {
+                const size_t debug_begin = dense.size();
+                const Pt& a = simplified[i - 1];
+                const double len1 = dist(a, b);
+                const double len2 = dist(b, c);
+                const Pt u1 = normalize(b - a);
+                const Pt u2 = normalize(c - b);
+                const double bend = cross(u1, u2);
+                const double cos_angle = dot(u1, u2);
+                const double min_radius = 1.0 / std::max(max_curvature, kEps);
+                double max_local_radius = 0.45 * std::min(len1, len2);
+                const double neighbor_gap = std::max(sample_ds, 0.015);
+                if (i > 0 && planned[i - 1].active) {
+                    max_local_radius = std::min(
+                        max_local_radius,
+                        len1 - planned[i - 1].curve.t_out - neighbor_gap);
+                }
+                if (i + 1 < planned.size() && planned[i + 1].active) {
+                    max_local_radius = std::min(
+                        max_local_radius,
+                        len2 - planned[i + 1].curve.t_in - neighbor_gap);
+                }
+                const double local_radius =
+                    std::min(min_radius, max_local_radius);
+                if (len1 >= kEps && len2 >= kEps &&
+                    std::abs(bend) >= 1e-4 &&
+                    std::abs(cos_angle) <= 0.99 &&
+                    local_radius >= 1e-3) {
+                    const Pt t1 = b - u1 * local_radius;
+                    const Pt t2 = b + u2 * local_radius;
+                    push_sample(dense, t1, std::atan2(u1.y, u1.x));
+
+                    const Pt normal =
+                        (bend > 0.0) ? left_normal(u1) : right_normal(u1);
+                    const Pt center = t1 + normal * local_radius;
+                    double a0 = std::atan2(t1.y - center.y,
+                                           t1.x - center.x);
+                    double a1 = std::atan2(t2.y - center.y,
+                                           t2.x - center.x);
+                    if (bend > 0.0) {
+                        while (a1 <= a0) a1 += 2.0 * kPi;
+                    } else {
+                        while (a1 >= a0) a1 -= 2.0 * kPi;
+                    }
+                    const double arc_angle = std::abs(a1 - a0);
+                    const double arc_len = arc_angle * local_radius;
+                    const int steps = std::max({2,
+                        static_cast<int>(std::ceil(arc_len / sample_ds)),
+                        static_cast<int>(std::ceil(arc_angle / 0.04))});
+                    for (int s = 1; s < steps; ++s) {
+                        const double ratio =
+                            static_cast<double>(s) / static_cast<double>(steps);
+                        const double ang = a0 + (a1 - a0) * ratio;
+                        const Pt p{center.x + local_radius * std::cos(ang),
+                                   center.y + local_radius * std::sin(ang)};
+                        const double theta = norm_angle(
+                            ang + ((bend > 0.0) ? kPi * 0.5 : -kPi * 0.5));
+                        push_sample(dense, p, theta);
+                    }
+                    push_sample(dense, t2, std::atan2(u2.y, u2.x));
+                    record_debug_layer_from_samples(
+                        info, DebugPathLayerType::ARC_FALLBACK,
+                        "local_arc_fallback", dense, debug_begin);
+                    if (debug_row1_target) {
+                        ROS_WARN("[planner][row1-debug] local arc fallback "
+                                 "tgt=%d j=%zu radius=%.3f max_radius=%.3f "
+                                 "pts=%zu",
+                                 tgt.id, i, local_radius,
+                                 max_local_radius,
+                                 dense.size() - debug_begin);
+                    }
+                    ++i;
+                    continue;
+                }
+            }
             const Pt u2 = normalize(c - b);
             push_sample(dense, b, std::atan2(u2.y, u2.x));
             ++i;
