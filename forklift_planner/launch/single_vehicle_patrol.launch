@@ -9,7 +9,7 @@
   <arg name="precompute_task_filter" default="false"/>
   <arg name="a1_cycle_catalog_file" default="$(find forklift_planner)/config/a1_cycle_path_catalog.yaml"/>
   <arg name="save_a1_cycle_catalog" default="true"/>
-  <arg name="show_paths" default="true"/>
+  <arg name="show_paths" default="false"/>
 
   <param name="/use_sim_time" value="false"/>
 

@@ -424,7 +424,7 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
                 : current_transition_lane_y(
                       src_corr, src_corr + ((tgt_corr > src_corr) ? 1 : -1));
         if (row1_upper_to_a1) {
-            start_lane_y = row1_upper_aux_lane_y();
+            start_lane_y = corridor_lane_y(mp_, src_corr, HDir::LEFT);
             if (debug_row1_target) {
                 const double upper_lane_y =
                     corridor_lane_y(mp_, src_corr, HDir::LEFT);
@@ -433,8 +433,8 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
                 const double source_rear_y =
                     src.dock_y() -
                     mp_.rear_axle_to_center * std::sin(src.dock_theta);
-                ROS_WARN("[planner][row1-debug] row1-upper aux lane to A1 "
-                         "src=%d lower=%.3f upper=%.3f aux_y=%.3f "
+                ROS_WARN("[planner][row1-debug] row1-upper first lane to A1 "
+                         "src=%d lower=%.3f upper=%.3f start_lane_y=%.3f "
                          "source_rear_y=%.3f",
                          src.id, lower_lane_y, upper_lane_y, start_lane_y,
                          source_rear_y);
@@ -569,10 +569,15 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
             double reserve_x = std::max(
                 final_min_req_x,
                 (near_source_target || cross_corridor_exit) ? 0.36 : 0.12);
-            direct_reverse_end_x = start_to_right
-                ? std::max(0.04, src.pre_dock_x - reserve_x)
-                : std::min(mp_.field_width - 0.04,
-                           src.pre_dock_x + reserve_x);
+            if (row1_upper_to_a1) {
+                (void)reserve_x;
+                direct_reverse_end_x = src.pre_dock_x;
+            } else {
+                direct_reverse_end_x = start_to_right
+                    ? std::max(0.04, src.pre_dock_x - reserve_x)
+                    : std::min(mp_.field_width - 0.04,
+                               src.pre_dock_x + reserve_x);
+            }
             if (row2_upper_left_edge_to_a1) {
                 const double min_exit_run =
                     std::max(0.48, final_min_req_x + 0.14);
@@ -1210,9 +1215,11 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
 
     auto build_exact_a1_lane_path = [&]() {
         RoughPath path;
+        const double first_lane_y = corridor_lane_y(mp_, 1, HDir::LEFT);
+        const double second_lane_y = corridor_lane_y(mp_, 1, HDir::RIGHT);
         const double top_lane_y = row1_upper_source_to_a1
-            ? row1_upper_aux_lane_y()
-            : corridor_lane_y(mp_, 1, HDir::LEFT);
+            ? second_lane_y
+            : first_lane_y;
         const double map_mt_port = 0.30;
         const double rear_stop_y =
             tgt.dock_y() -
@@ -1227,7 +1234,11 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
             std::max(sample_ds, std::min(map_mt_port, map_safe_out));
         const double mt_port = available_out;
         const Pt lane_start = initial_reverse_end;
-        const int din_sign = (lane_start.x <= spine_x_) ? 1 : -1;
+        const double row1_connector_x = row1_upper_source_to_a1
+            ? ((src.pre_dock_x < spine_x_) ? row1_right_down_x
+                                           : row1_left_up_x)
+            : lane_start.x;
+        const int din_sign = (row1_connector_x <= spine_x_) ? 1 : -1;
         const double in_heading = (din_sign > 0) ? 0.0 : kPi;
         const double signed_turn =
             (din_sign > 0) ? (kPi * 0.5) : (-kPi * 0.5);
@@ -1287,6 +1298,144 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
                         theta, type);
             }
         };
+        auto append_road_arc = [&](const Pt& corner, const Pt& u_in,
+                                   const Pt& u_out, double radius,
+                                   WpType type = WpType::FORWARD) {
+            const double bend = cross(u_in, u_out);
+            if (std::abs(bend) < 1e-6 || radius <= sample_ds) return;
+            const Pt t1 = corner - u_in * radius;
+            const Pt t2 = corner + u_out * radius;
+            const Pt normal =
+                (bend > 0.0) ? left_normal(u_in) : right_normal(u_in);
+            const Pt center = t1 + normal * radius;
+            double a0 = std::atan2(t1.y - center.y, t1.x - center.x);
+            double a1 = std::atan2(t2.y - center.y, t2.x - center.x);
+            if (bend > 0.0) {
+                while (a1 <= a0) a1 += 2.0 * kPi;
+            } else {
+                while (a1 >= a0) a1 -= 2.0 * kPi;
+            }
+            const int steps = std::max(
+                2,
+                static_cast<int>(std::ceil(std::abs(a1 - a0) * radius /
+                                           sample_ds)));
+            for (int k = 1; k <= steps; ++k) {
+                const double u = static_cast<double>(k) /
+                                 static_cast<double>(steps);
+                const double ang = a0 + (a1 - a0) * u;
+                const Pt p{center.x + radius * std::cos(ang),
+                           center.y + radius * std::sin(ang)};
+                const double theta =
+                    norm_angle(ang +
+                               ((bend > 0.0) ? kPi * 0.5
+                                             : -kPi * 0.5));
+                push_wp(p,
+                        (type == WpType::REVERSE)
+                            ? norm_angle(theta + kPi)
+                            : theta,
+                        type);
+            }
+        };
+
+        if (row1_upper_source_to_a1) {
+            const double connector_x = row1_connector_x;
+            const double connector_mid_y = 0.5 * (mp_.y6() + mp_.y7());
+            const Pt s0{
+                src.dock_x() -
+                    mp_.rear_axle_to_center * std::cos(src.dock_theta),
+                src.dock_y() -
+                    mp_.rear_axle_to_center * std::sin(src.dock_theta)};
+            const Pt s1{src.pre_dock_x, first_lane_y};
+            const Pt s2{connector_x, first_lane_y};
+            const Pt s3{connector_x, connector_mid_y};
+            const Pt s4{connector_x, second_lane_y};
+            const Pt s5{spine_x_, second_lane_y};
+            const Pt s6{
+                tgt.dock_x() -
+                    mp_.rear_axle_to_center * std::cos(tgt.dock_theta),
+                tgt.dock_y() -
+                    mp_.rear_axle_to_center * std::sin(tgt.dock_theta)};
+            path.clear();
+            if (info != nullptr) {
+                info->debug_layers.clear();
+                record_debug_layer(info, DebugPathLayerType::SKELETON,
+                                   "route_skeleton",
+                                   std::vector<Pt>{s0, s1, s2, s3, s4, s5, s6});
+            }
+
+            auto append_motion_line = [&](const Pt& a, const Pt& b,
+                                          WpType type,
+                                          bool include_start = true) {
+                const double len = dist(a, b);
+                if (len <= 1e-6) return;
+                const double motion = std::atan2(b.y - a.y, b.x - a.x);
+                const double body = (type == WpType::REVERSE)
+                    ? norm_angle(motion + kPi)
+                    : motion;
+                const int steps =
+                    std::max(1, static_cast<int>(std::ceil(len / sample_ds)));
+                const int first_step = include_start ? 0 : 1;
+                for (int k = first_step; k <= steps; ++k) {
+                    const double u = static_cast<double>(k) /
+                                     static_cast<double>(steps);
+                    push_wp({a.x + (b.x - a.x) * u,
+                             a.y + (b.y - a.y) * u},
+                            body, type);
+                }
+            };
+            auto append_motion_arc = [&](const Pt& corner, const Pt& u_in,
+                                         const Pt& u_out, double radius,
+                                         WpType type) {
+                append_road_arc(corner, u_in, u_out, radius, type);
+            };
+
+            const double r_reverse = std::max(
+                sample_ds,
+                std::min({std::min(0.30, 0.95 / std::max(max_curvature, kEps)),
+                          0.45 * dist(s0, s1),
+                          0.45 * dist(s1, s2),
+                          0.45 * dist(s2, s3)}));
+            const Pt r_u0 = normalize(s1 - s0);
+            const Pt r_u1 = normalize(s2 - s1);
+            const Pt r_u2 = normalize(s3 - s2);
+            append_motion_line(s0, s1 - r_u0 * r_reverse, WpType::REVERSE);
+            append_motion_arc(s1, r_u0, r_u1, r_reverse, WpType::REVERSE);
+            append_motion_line(s1 + r_u1 * r_reverse,
+                               s2 - r_u1 * r_reverse, WpType::REVERSE);
+            append_motion_arc(s2, r_u1, r_u2, r_reverse, WpType::REVERSE);
+            append_motion_line(s2 + r_u2 * r_reverse, s3, WpType::REVERSE);
+
+            const double r_forward = std::max(
+                sample_ds,
+                std::min({std::min(0.30, 0.95 / std::max(max_curvature, kEps)),
+                          0.45 * dist(s3, s4),
+                          0.45 * dist(s4, s5),
+                          0.45 * dist(s5, s6)}));
+            const Pt f_u0 = normalize(s4 - s3);
+            const Pt f_u1 = normalize(s5 - s4);
+            const Pt f_u2 = normalize(s6 - s5);
+            append_motion_line(s3, s4 - f_u0 * r_forward,
+                               WpType::FORWARD, false);
+            append_motion_arc(s4, f_u0, f_u1, r_forward, WpType::FORWARD);
+            append_motion_line(s4 + f_u1 * r_forward,
+                               s5 - f_u1 * r_forward, WpType::FORWARD);
+            append_motion_arc(s5, f_u1, f_u2, r_forward, WpType::FORWARD);
+            append_motion_line(s5 + f_u2 * r_forward, s6, WpType::FORWARD);
+            if (debug_row1_target) {
+                ROS_WARN("[planner][row1-debug] row1-upper full road to A1 "
+                         "S0=(%.3f,%.3f) S1=(%.3f,%.3f) "
+                         "S2=(%.3f,%.3f) S3=(%.3f,%.3f) "
+                         "S4=(%.3f,%.3f) S5=(%.3f,%.3f) "
+                         "S6=(%.3f,%.3f) r=(%.3f,%.3f) pts=%zu",
+                         s0.x, s0.y, s1.x, s1.y,
+                         s2.x, s2.y, s3.x, s3.y,
+                         s4.x, s4.y, s5.x, s5.y,
+                         s6.x, s6.y, r_reverse, r_forward,
+                         path.size());
+            }
+            warn_if_reverse_segments(path);
+            return path;
+        }
 
         append_line(lane_start, curve_start, in_heading);
         const double ch = std::cos(in_heading);

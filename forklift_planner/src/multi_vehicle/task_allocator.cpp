@@ -22,7 +22,7 @@ namespace {
 
 constexpr double kPi = M_PI;
 constexpr const char* kA1CatalogFormat =
-    "forklift_a1_cycle_path_catalog_v8";
+    "forklift_a1_cycle_path_catalog_v1";
 
 double normAngle(double a) {
     while (a > kPi) a -= 2.0 * kPi;
@@ -843,13 +843,61 @@ int TaskAllocator::chooseNextTarget(const VehicleAgent& vehicle,
     const int n = static_cast<int>(map_.slots().size());
     std::vector<int> candidates;
     candidates.reserve(static_cast<size_t>(n));
+    std::vector<std::pair<int, std::string>> rejected;
+    rejected.reserve(static_cast<size_t>(n));
 
     for (int target = 0; target < n; ++target) {
-        if (!planAvailable(vehicle, target, require_no_arc)) continue;
-        if (!hasValidOutbound(target)) continue;
-        if (slotReservedByOther(vehicle, all, target)) continue;
+        if (target == vehicle.current_slot) {
+            rejected.push_back({target, "same_slot"});
+            continue;
+        }
+
+        TaskPlanCache plan;
+        if (cfg_.precompute_task_filter) {
+            plan = cacheAt(vehicle.current_slot, target);
+        } else {
+            plan = makeTaskPlan(vehicle.current_slot, target);
+        }
+        if (!plan.valid) {
+            rejected.push_back({target, rejectReasonName(plan.reject_reason)});
+            continue;
+        }
+        if (require_no_arc && plan.info.used_arc_fallback) {
+            rejected.push_back({target, "arc_fallback_filtered"});
+            continue;
+        }
+        if (!hasValidOutbound(target)) {
+            rejected.push_back({target, "no_valid_outbound"});
+            continue;
+        }
+        if (slotReservedByOther(vehicle, all, target)) {
+            rejected.push_back({target, "reserved_by_other"});
+            continue;
+        }
         candidates.push_back(target);
     }
+    std::ostringstream candidate_log;
+    candidate_log << "\n********\n";
+    candidate_log << "[multi_patrol] V" << vehicle.id
+                  << " feasible target slots from "
+                  << slotLabel(map_, vehicle.current_slot) << ": ";
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        if (i > 0) candidate_log << ", ";
+        candidate_log << candidates[i];
+    }
+    candidate_log << "\n[multi_patrol] rejected target slots:";
+    if (rejected.empty()) {
+        candidate_log << " none";
+    } else {
+        for (const auto& r : rejected) {
+            candidate_log << "\n  " << r.first << " ("
+                          << slotLabel(map_, r.first) << "): "
+                          << r.second;
+        }
+    }
+    candidate_log << "\n************";
+    ROS_WARN("%s", candidate_log.str().c_str());
+
     if (candidates.empty()) return -1;
 
     std::random_device rd;
