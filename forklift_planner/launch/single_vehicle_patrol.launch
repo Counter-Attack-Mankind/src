@@ -10,6 +10,7 @@
   <arg name="a1_cycle_catalog_file" default="$(find forklift_planner)/config/a1_cycle_path_catalog.yaml"/>
   <arg name="save_a1_cycle_catalog" default="true"/>
   <arg name="show_paths" default="false"/>
+  <arg name="coord_log_file" default="$(find forklift_planner)/logs/multi_vehicle_coordination.log"/>
 
   <param name="/use_sim_time" value="false"/>
 
@@ -37,6 +38,7 @@
     <param name="target_only" value="-1"/>
     <!-- false means: after reaching one target and dwelling, assign the next reachable target. -->
     <param name="one_shot" value="$(arg one_shot)"/>
+    <param name="coord_log_file" value="$(arg coord_log_file)"/>
   </node>
 
   <node pkg="rviz" type="rviz" name="rviz"

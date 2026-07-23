@@ -1089,6 +1089,24 @@ bool TaskAllocator::hasForwardTarget(int slot) const {
 
 bool TaskAllocator::assignNextTask(VehicleAgent& vehicle,
                                    const std::vector<VehicleAgent>& all) {
+    if (vehicle.mode == VehicleMode::ACTIVE) {
+        ROS_WARN_THROTTLE(1.0,
+                          "[multi_patrol] V%d ignored task assignment while ACTIVE "
+                          "(slot %d -> %d, s=%.3f/%.3f, reason=%s)",
+                          vehicle.id, vehicle.current_slot, vehicle.target_slot,
+                          vehicle.path_s,
+                          vehicle.track.empty() ? 0.0 : vehicle.track.length(),
+                          vehicle.reason.c_str());
+        return false;
+    }
+    if (vehicle.mode == VehicleMode::DWELL && vehicle.dwell_remaining > 1e-6) {
+        ROS_WARN_THROTTLE(1.0,
+                          "[multi_patrol] V%d ignored task assignment before DWELL "
+                          "finished (remaining=%.3f)",
+                          vehicle.id, vehicle.dwell_remaining);
+        return false;
+    }
+
     const bool prefer_no_arc = cfg_.skip_arc_fallback_paths;
     // 简单测试版:优先用预设终点(target_slots[id]),校验是「全程前进」目标且未被预约;否则自动选最近
     // 前进目标。一把进库、不绕远;都选不到就停着等(不退回跨排选靶)。

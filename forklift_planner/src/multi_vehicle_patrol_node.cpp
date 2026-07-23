@@ -58,6 +58,9 @@ public:
             param_nh);
         nh_.param("target_only", target_only_, -1);
         nh_.param("one_shot", one_shot_, one_shot_);
+        nh_.param<std::string>("coord_log_file", coord_log_file_,
+                               "logs/multi_vehicle_coordination.log");
+        initCoordLog();
         rb_horizon_ = cfg_.rolling_horizon;
         rb_horizon_refresh_period_ = cfg_.rolling_refresh_period;
         rb_horizon_refresh_ = std::max(
@@ -137,6 +140,29 @@ private:
     using VehicleAgent = forklift_planner::multi_vehicle::VehicleAgent;
     using VehicleAction = forklift_planner::multi_vehicle::VehicleAction;
     using VehicleMode = forklift_planner::multi_vehicle::VehicleMode;
+
+    void initCoordLog() {
+        coord_log_.open(coord_log_file_, std::ios::out | std::ios::trunc);
+        if (!coord_log_) {
+            ROS_WARN("[multi_patrol] failed to open coordination log: %s",
+                     coord_log_file_.c_str());
+            return;
+        }
+        coord_log_ << "[multi_patrol] coordination log started\n";
+        coord_log_ << "vehicle_count=" << cfg_.vehicle_count
+                   << " one_shot=" << (one_shot_ ? 1 : 0)
+                   << " use_a1_cycle=" << (cfg_.use_a1_cycle ? 1 : 0)
+                   << "\n";
+        coord_log_.flush();
+        ROS_WARN("[multi_patrol] coordination log: %s",
+                 coord_log_file_.c_str());
+    }
+
+    void coordLog(const std::string& line) {
+        if (!coord_log_) return;
+        coord_log_ << line << "\n";
+        coord_log_.flush();
+    }
 
     bool targetEnabled(int id) const {
         return target_only_ < 0 || id == target_only_;
@@ -1105,16 +1131,21 @@ private:
 
             const double length = v.track.empty() ? 0.0 : v.track.length();
             const double rem = v.track.empty() ? 0.0 : v.remainingS();
-            ROS_INFO("[multi_patrol][state] tick=%llu sim_t=%.2f V%d "
-                     "mode=%s action=%s reason=%s "
-                     "blocker=%d task=%d slot=%d->%d s=%.3f/%.3f rem=%.3f "
-                     "speed=%.3f wait=%.2f dwell=%.2f",
-                     static_cast<unsigned long long>(tick_count_), sim_time_,
-                     v.id, modeName(v.mode), actionName(v.action),
-                     v.reason.empty() ? "-" : v.reason.c_str(), v.blocker_id,
-                     v.task_count, v.current_slot, v.target_slot, v.path_s,
-                     length, rem, v.current_speed, v.wait_time,
-                     v.dwell_remaining);
+            char buf[512];
+            std::snprintf(
+                buf, sizeof(buf),
+                "[multi_patrol][state] tick=%llu sim_t=%.2f V%d "
+                "mode=%s action=%s reason=%s "
+                "blocker=%d task=%d slot=%d->%d s=%.3f/%.3f rem=%.3f "
+                "speed=%.3f wait=%.2f dwell=%.2f",
+                static_cast<unsigned long long>(tick_count_), sim_time_,
+                v.id, modeName(v.mode), actionName(v.action),
+                v.reason.empty() ? "-" : v.reason.c_str(), v.blocker_id,
+                v.task_count, v.current_slot, v.target_slot, v.path_s,
+                length, rem, v.current_speed, v.wait_time,
+                v.dwell_remaining);
+            ROS_INFO("%s", buf);
+            coordLog(buf);
 
             last_logged_mode_[i] = v.mode;
             last_logged_action_[i] = v.action;
@@ -1723,6 +1754,8 @@ private:
     std::vector<VehicleAgent> agents_;
     std::vector<bool> visited_slots_;
     int target_only_ = -1;  // realbridge debug: -1 = all vehicles, otherwise control only this id
+    std::string coord_log_file_;
+    std::ofstream coord_log_;
 
     // ── 实车模式(real_mode)I/O ──────────────────────────────────────────────
     ros::Subscriber object_sub_;                       // /object 动捕位姿(mm)
@@ -1936,6 +1969,7 @@ public:
     // 长测排错专用——只在出问题那一刻写,故文件小、不刷屏。
     void onsetLog(const std::string& s) {
         ROS_ERROR("%s", s.c_str());
+        coordLog(s);
         std::ofstream f("/tmp/forklift_onset.log", std::ios::app);
         if (f) f << s << "\n";
     }
@@ -1945,7 +1979,9 @@ public:
         std::ofstream f("/tmp/forklift_onset.log", std::ios::app);
         if (!f) return;
         f << "\n========== " << header << " ==========\n";
+        coordLog("========== " + header + " ==========");
         for (const std::string& snap : hist) f << snap << "\n";
+        for (const std::string& snap : hist) coordLog(snap);
         f.flush();
     }
 
