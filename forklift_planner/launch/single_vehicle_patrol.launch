@@ -1,9 +1,9 @@
 <launch>
-  <!-- RViz single-vehicle A1-cycle patrol simulation. -->
+  <!-- RViz A1-cycle patrol simulation (1-8 vehicles). -->
 
   <arg name="vehicle_count" default="8"/>
-  <arg name="start_slot" default="17"/>
-  <arg name="target_slot" default="24"/>
+  <arg name="start_slots" default="[38, 20, 36, 35, 56, 40, 57, 21]"/>
+  <arg name="target_slots" default="[9, 10, 8, 41, 52, 55, 42, 64]"/>
   <arg name="one_shot" default="false"/>
   <arg name="use_a1_cycle" default="true"/>
   <arg name="precompute_task_filter" default="false"/>
@@ -17,7 +17,8 @@
   <rosparam command="load" file="$(find forklift_map)/config/map_param.yaml" />
   <rosparam command="load" file="$(find forklift_planner)/config/planner_param.yaml" />
 
-  <!-- In A1-cycle mode a B->B task is generated as B->A1->B. -->
+  <!-- Each vehicle starts with an independent B->A1 leg. The B target is
+       assigned only after that vehicle finishes pickup at A1. -->
   <param name="/forklift_planner/multi_vehicle/vehicle_count" value="$(arg vehicle_count)"/>
   <param name="/forklift_planner/multi_vehicle/show_paths" value="$(arg show_paths)"/>
   <param name="/forklift_planner/multi_vehicle/simple_forward_demo" value="false"/>
@@ -25,8 +26,10 @@
   <param name="/forklift_planner/multi_vehicle/precompute_task_filter" value="$(arg precompute_task_filter)"/>
   <param name="/forklift_planner/multi_vehicle/a1_cycle_catalog_file" value="$(arg a1_cycle_catalog_file)"/>
   <param name="/forklift_planner/multi_vehicle/save_a1_cycle_catalog" value="$(arg save_a1_cycle_catalog)"/>
-  <rosparam param="/forklift_planner/multi_vehicle/start_slots">[$(arg start_slot)]</rosparam>
-  <rosparam param="/forklift_planner/multi_vehicle/target_slots">[$(arg target_slot)]</rosparam>
+  <rosparam param="/forklift_planner/multi_vehicle/start_slots"
+            subst_value="true">$(arg start_slots)</rosparam>
+  <rosparam param="/forklift_planner/multi_vehicle/target_slots"
+            subst_value="true">$(arg target_slots)</rosparam>
   <param name="/forklift_planner/multi_vehicle/real_mode" value="false"/>
 
   <node pkg="forklift_map" type="map_node" name="forklift_map" output="screen" />

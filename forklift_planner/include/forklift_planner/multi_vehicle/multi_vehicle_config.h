@@ -22,7 +22,6 @@ struct MultiVehicleConfig {
     double dwell_time = 20.0;       // sleep time
     double pickup_dwell_time = 5.0; // A1 pickup operation
     double unload_dwell_time = 5.0; // B-slot unload operation
-    double a1_release_distance = 0.30; // release A1 after loaded vehicle clears it
     double rolling_horizon = 10.0;          // future planner time 
     double rolling_refresh_period = 2.0;        //  refresh period
 

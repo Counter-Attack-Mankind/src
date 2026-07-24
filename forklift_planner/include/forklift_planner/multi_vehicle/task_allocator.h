@@ -50,22 +50,19 @@ public:
     bool assignPickupLeg(VehicleAgent& vehicle);
     bool assignDropoffLeg(VehicleAgent& vehicle,
                           const std::vector<VehicleAgent>& all);
-    void updateA1Reservation(const std::vector<VehicleAgent>& all);
 
     // 前瞻仿真用:快照/恢复分配器持久计数器,使「克隆-空跑」里的再派活不污染真实分配状态。
     struct AllocSnapshot {
         std::vector<int> target, edge, row;
-        int a1_owner = -1;
     };
     AllocSnapshot snapshot() const {
         return AllocSnapshot{target_visit_counts_, edge_visit_counts_,
-                             row_visit_counts_, a1_owner_vehicle_id_};
+                             row_visit_counts_};
     }
     void restore(const AllocSnapshot& s) {
         target_visit_counts_ = s.target;
         edge_visit_counts_ = s.edge;
         row_visit_counts_ = s.row;
-        a1_owner_vehicle_id_ = s.a1_owner;
     }
     // 死锁恢复(C):给一辆卡死车从其「当前实际位姿」重规划到一个空库位,使其驶离争用区。
     // 不倒车;成功置新 track 并返回 true。失败(无可行目标/路径)返回 false。
@@ -74,6 +71,7 @@ public:
     const char* rejectReasonName(TaskRejectReason reason) const;
 
     bool hasValidOutbound(int slot) const;
+    bool hasValidPickupLeg(int slot) const;
 
     // 简单测试版:该库位是否至少有一个「全程前进(无 REVERSE 段=无尖点)」的可达目标。
     // 用于 initAgents 起点筛选,保证每车都能一把开进某个库位。
@@ -150,7 +148,6 @@ private:
     std::vector<int> row_visit_counts_;
     std::vector<int> outbound_valid_counts_;
     std::vector<int> outbound_cross_row_counts_;
-    int a1_owner_vehicle_id_ = -1;
 };
 
 }  // namespace multi_vehicle

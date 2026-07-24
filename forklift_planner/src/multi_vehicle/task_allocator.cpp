@@ -1111,42 +1111,14 @@ bool TaskAllocator::hasForwardTarget(int slot) const {
     std::vector<int> ft; forwardTargets(slot, ft); return !ft.empty();
 }
 
-void TaskAllocator::updateA1Reservation(
-    const std::vector<VehicleAgent>& all) {
-    if (!cfg_.use_a1_cycle || a1_owner_vehicle_id_ < 0) return;
-
-    const VehicleAgent* owner = nullptr;
-    for (const VehicleAgent& v : all) {
-        if (v.id == a1_owner_vehicle_id_) {
-            owner = &v;
-            break;
-        }
+bool TaskAllocator::hasValidPickupLeg(int slot) const {
+    if (slot < 0 || slot >= static_cast<int>(map_.slots().size())) {
+        return false;
     }
-    if (owner == nullptr) {
-        a1_owner_vehicle_id_ = -1;
-        return;
-    }
-
-    // Keep A1 locked throughout approach, pickup, task wait, and the first
-    // part of departure. Releasing at the instant the A1->B track is installed
-    // would allow the next vehicle to enter while the owner is still at A1.
-    if (owner->mission_phase == MissionPhase::TO_B && owner->loaded &&
-        owner->path_s >= cfg_.a1_release_distance) {
-        ROS_INFO("[multi_patrol][A1] V%d cleared A1 at s=%.3f; reservation released",
-                 owner->id, owner->path_s);
-        a1_owner_vehicle_id_ = -1;
-        return;
-    }
-    if (owner->mission_phase == MissionPhase::UNLOAD_DWELL) {
-        a1_owner_vehicle_id_ = -1;
-        return;
-    }
-
-    // A deadlock recovery may abort an empty B->A1 leg and send the vehicle
-    // directly to a safe B slot. It no longer owns the pickup point.
-    if (owner->mission_phase == MissionPhase::TO_B && !owner->loaded) {
-        a1_owner_vehicle_id_ = -1;
-    }
+    ensureA1LegCache();
+    const DepotLegCache& leg =
+        b_to_a1_leg_cache_.at(static_cast<size_t>(slot));
+    return leg.ready && leg.valid && !leg.path.empty();
 }
 
 bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
@@ -1155,17 +1127,6 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
         vehicle.current_slot >= static_cast<int>(map_.slots().size())) {
         return false;
     }
-    if (a1_owner_vehicle_id_ >= 0 &&
-        a1_owner_vehicle_id_ != vehicle.id) {
-        vehicle.mode = VehicleMode::NEED_TASK;
-        vehicle.action = VehicleAction::STOP;
-        vehicle.requested_action = VehicleAction::STOP;
-        vehicle.current_speed = 0.0;
-        vehicle.reason =
-            "wait_a1_V" + std::to_string(a1_owner_vehicle_id_);
-        return false;
-    }
-
     ensureA1LegCache();
     const DepotLegCache& leg =
         b_to_a1_leg_cache_.at(static_cast<size_t>(vehicle.current_slot));
@@ -1181,7 +1142,6 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
         return false;
     }
 
-    a1_owner_vehicle_id_ = vehicle.id;
     vehicle.track.set(leg.path);
     ++vehicle.path_gen;
     vehicle.path_s = 0.0;
@@ -1238,15 +1198,6 @@ bool TaskAllocator::tryPlanFromA1(VehicleAgent& vehicle, int target,
 bool TaskAllocator::assignDropoffLeg(
     VehicleAgent& vehicle, const std::vector<VehicleAgent>& all) {
     if (!cfg_.use_a1_cycle) return false;
-    if (a1_owner_vehicle_id_ != vehicle.id) {
-        vehicle.mode = VehicleMode::DWELL;
-        vehicle.action = VehicleAction::STOP;
-        vehicle.requested_action = VehicleAction::STOP;
-        vehicle.current_speed = 0.0;
-        vehicle.reason = "a1_reservation_lost";
-        return false;
-    }
-
     const bool prefer_no_arc = cfg_.skip_arc_fallback_paths;
     int target = chooseNextTarget(vehicle, all, prefer_no_arc);
 

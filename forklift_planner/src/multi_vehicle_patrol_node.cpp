@@ -215,9 +215,10 @@ private:
         std::mt19937 rng(static_cast<unsigned int>(cfg_.random_seed));
         const int slot_count = static_cast<int>(map_->slots().size());
 
-        // 简单测试版:一个库位「能当起点」= 既能出库(hasValidOutbound),又至少有一个全程前进
-        // (无尖点)的可达目标(hasForwardTarget)。普通模式只要求能出库。
+        // A1-cycle 的起点必须存在有效 B->A1 航段；普通模式要求能出库，
+        // simple_forward_demo 还要求至少存在一个全程前进目标。
         auto startOK = [&](int s) {
+            if (cfg_.use_a1_cycle) return allocator_->hasValidPickupLeg(s);
             if (!allocator_->hasValidOutbound(s)) return false;
             if (cfg_.simple_forward_demo && !allocator_->hasForwardTarget(s)) return false;
             return true;
@@ -323,9 +324,23 @@ private:
             agents_.push_back(v);
         }
 
+        int enabled_count = 0;
+        int assigned_count = 0;
         for (VehicleAgent& v : agents_) {
             if (targetEnabled(v.id)) {
-                allocator_->assignNextTask(v, agents_);
+                ++enabled_count;
+                if (allocator_->assignNextTask(v, agents_)) {
+                    ++assigned_count;
+                }
+            }
+        }
+        if (cfg_.use_a1_cycle) {
+            ROS_INFO("[multi_patrol][A1] initial pickup legs assigned: %d/%d",
+                     assigned_count, enabled_count);
+            if (assigned_count != enabled_count) {
+                ROS_ERROR("[multi_patrol][A1] %d enabled vehicle(s) have no "
+                          "initial B->A1 task; inspect the preceding path errors",
+                          enabled_count - assigned_count);
             }
         }
         force_horizon_refresh_ = true;
@@ -683,8 +698,6 @@ private:
 
     //==============《任务指派与路径生成函数》===================================
     void updateDwellAndTasks(double dt) {
-        allocator_->updateA1Reservation(agents_);
-
         for (VehicleAgent& v : agents_) {
 
             //*************** 1. 若该车未启用，则车状态一直置为STOP *******
