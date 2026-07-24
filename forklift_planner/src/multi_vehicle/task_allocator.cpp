@@ -300,7 +300,10 @@ void TaskAllocator::buildA1LegCacheFromGenerator() const {
         DepotLegCache to_a1;
         to_a1.path = generator_b_to_a1_.generate(slot, a1, &to_a1.info);
         to_a1.ready = true;
-        if (!to_a1.path.empty()) {
+        to_a1.reject_reason =
+            validatePath(to_a1.path, to_a1.info, slot, a1);
+        to_a1.valid = to_a1.reject_reason == TaskRejectReason::NONE;
+        if (to_a1.valid) {
             ++to_a1_ok;
             if (to_a1.info.used_arc_fallback) ++to_a1_arc;
         }
@@ -309,7 +312,11 @@ void TaskAllocator::buildA1LegCacheFromGenerator() const {
         DepotLegCache from_a1;
         from_a1.path = generator_a1_to_b_.generate(a1, slot, &from_a1.info);
         from_a1.ready = true;
-        if (!from_a1.path.empty()) {
+        from_a1.reject_reason =
+            validatePath(from_a1.path, from_a1.info, a1, slot);
+        from_a1.valid =
+            from_a1.reject_reason == TaskRejectReason::NONE;
+        if (from_a1.valid) {
             ++from_a1_ok;
             if (from_a1.info.used_arc_fallback) ++from_a1_arc;
         }
@@ -447,10 +454,23 @@ bool TaskAllocator::loadA1LegCacheFromFile() const {
                      id);
             return false;
         }
-        ++to_a1_ok;
-        ++from_a1_ok;
-        if (b_to_a1[id].info.used_arc_fallback) ++to_a1_arc;
-        if (a1_to_b[id].info.used_arc_fallback) ++from_a1_arc;
+        const Slot& slot = map_.slots().at(id);
+        b_to_a1[id].reject_reason =
+            validatePath(b_to_a1[id].path, b_to_a1[id].info, slot, a1);
+        b_to_a1[id].valid =
+            b_to_a1[id].reject_reason == TaskRejectReason::NONE;
+        a1_to_b[id].reject_reason =
+            validatePath(a1_to_b[id].path, a1_to_b[id].info, a1, slot);
+        a1_to_b[id].valid =
+            a1_to_b[id].reject_reason == TaskRejectReason::NONE;
+        if (b_to_a1[id].valid) {
+            ++to_a1_ok;
+            if (b_to_a1[id].info.used_arc_fallback) ++to_a1_arc;
+        }
+        if (a1_to_b[id].valid) {
+            ++from_a1_ok;
+            if (a1_to_b[id].info.used_arc_fallback) ++from_a1_arc;
+        }
     }
 
     b_to_a1_leg_cache_.swap(b_to_a1);
@@ -533,18 +553,16 @@ TaskPlanCache TaskAllocator::makeA1CycleTaskPlan(int src_id,
         return out;
     }
 
-    const Slot& src = map_.slots().at(src_id);
-    const Slot& target = map_.slots().at(target_id);
-    ensureA1LegCache();
     if (src_id < 0 || src_id >= static_cast<int>(b_to_a1_leg_cache_.size()) ||
         target_id < 0 || target_id >= static_cast<int>(a1_to_b_leg_cache_.size())) {
         out.reject_reason = TaskRejectReason::EMPTY_PATH;
         return out;
     }
+    ensureA1LegCache();
     const DepotLegCache& to_a1 = b_to_a1_leg_cache_[src_id];
     const DepotLegCache& from_a1 = a1_to_b_leg_cache_[target_id];
     if (!to_a1.ready || !from_a1.ready ||
-        to_a1.path.empty() || from_a1.path.empty()) {
+        !to_a1.valid || !from_a1.valid) {
         out.reject_reason = TaskRejectReason::EMPTY_PATH;
         return out;
     }
@@ -556,8 +574,12 @@ TaskPlanCache TaskAllocator::makeA1CycleTaskPlan(int src_id,
     out.info.debug_layers.insert(out.info.debug_layers.end(),
                                  from_a1.info.debug_layers.begin(),
                                  from_a1.info.debug_layers.end());
-    out.reject_reason = validatePath(out.path, out.info, src, target);
-    out.valid = out.reject_reason == TaskRejectReason::NONE;
+    // This concatenated path exists only for cache scoring/diagnostics. Runtime
+    // never installs it as a track: each leg was validated independently and
+    // A1 is an intentional stop/task boundary, so a join-level kink test would
+    // incorrectly reject a valid two-leg mission.
+    out.reject_reason = TaskRejectReason::NONE;
+    out.valid = true;
     return out;
 }
 
@@ -961,6 +983,8 @@ bool TaskAllocator::tryPlan(VehicleAgent& vehicle, int target,
     vehicle.current_speed = 0.0;
     vehicle.wait_time = 0.0;
     vehicle.dwell_remaining = 0.0;
+    vehicle.leg_target = LegTargetKind::B_SLOT;
+    vehicle.mission_phase = MissionPhase::DIRECT_TO_B;
     vehicle.mode = vehicle.track.empty() ? VehicleMode::NEED_TASK
                                          : VehicleMode::ACTIVE;
     vehicle.action = VehicleAction::NOMINAL;
@@ -1087,8 +1111,191 @@ bool TaskAllocator::hasForwardTarget(int slot) const {
     std::vector<int> ft; forwardTargets(slot, ft); return !ft.empty();
 }
 
+void TaskAllocator::updateA1Reservation(
+    const std::vector<VehicleAgent>& all) {
+    if (!cfg_.use_a1_cycle || a1_owner_vehicle_id_ < 0) return;
+
+    const VehicleAgent* owner = nullptr;
+    for (const VehicleAgent& v : all) {
+        if (v.id == a1_owner_vehicle_id_) {
+            owner = &v;
+            break;
+        }
+    }
+    if (owner == nullptr) {
+        a1_owner_vehicle_id_ = -1;
+        return;
+    }
+
+    // Keep A1 locked throughout approach, pickup, task wait, and the first
+    // part of departure. Releasing at the instant the A1->B track is installed
+    // would allow the next vehicle to enter while the owner is still at A1.
+    if (owner->mission_phase == MissionPhase::TO_B && owner->loaded &&
+        owner->path_s >= cfg_.a1_release_distance) {
+        ROS_INFO("[multi_patrol][A1] V%d cleared A1 at s=%.3f; reservation released",
+                 owner->id, owner->path_s);
+        a1_owner_vehicle_id_ = -1;
+        return;
+    }
+    if (owner->mission_phase == MissionPhase::UNLOAD_DWELL) {
+        a1_owner_vehicle_id_ = -1;
+        return;
+    }
+
+    // A deadlock recovery may abort an empty B->A1 leg and send the vehicle
+    // directly to a safe B slot. It no longer owns the pickup point.
+    if (owner->mission_phase == MissionPhase::TO_B && !owner->loaded) {
+        a1_owner_vehicle_id_ = -1;
+    }
+}
+
+bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
+    if (!cfg_.use_a1_cycle) return false;
+    if (vehicle.current_slot < 0 ||
+        vehicle.current_slot >= static_cast<int>(map_.slots().size())) {
+        return false;
+    }
+    if (a1_owner_vehicle_id_ >= 0 &&
+        a1_owner_vehicle_id_ != vehicle.id) {
+        vehicle.mode = VehicleMode::NEED_TASK;
+        vehicle.action = VehicleAction::STOP;
+        vehicle.requested_action = VehicleAction::STOP;
+        vehicle.current_speed = 0.0;
+        vehicle.reason =
+            "wait_a1_V" + std::to_string(a1_owner_vehicle_id_);
+        return false;
+    }
+
+    ensureA1LegCache();
+    const DepotLegCache& leg =
+        b_to_a1_leg_cache_.at(static_cast<size_t>(vehicle.current_slot));
+    if (!leg.ready || !leg.valid || leg.path.empty()) {
+        vehicle.mode = VehicleMode::NEED_TASK;
+        vehicle.action = VehicleAction::STOP;
+        vehicle.requested_action = VehicleAction::STOP;
+        vehicle.current_speed = 0.0;
+        vehicle.reason = "no_b_to_a1_leg";
+        ROS_ERROR("[multi_patrol][A1] V%d has no valid B%d->A1 leg (%s)",
+                  vehicle.id, vehicle.current_slot,
+                  rejectReasonName(leg.reject_reason));
+        return false;
+    }
+
+    a1_owner_vehicle_id_ = vehicle.id;
+    vehicle.track.set(leg.path);
+    ++vehicle.path_gen;
+    vehicle.path_s = 0.0;
+    vehicle.current_speed = 0.0;
+    vehicle.wait_time = 0.0;
+    vehicle.dwell_remaining = 0.0;
+    vehicle.target_slot = -1;  // A1 is not an element of map_.slots().
+    vehicle.loaded = false;
+    vehicle.leg_target = LegTargetKind::A1;
+    vehicle.mission_phase = MissionPhase::TO_A1;
+    vehicle.mode = VehicleMode::ACTIVE;
+    vehicle.action = VehicleAction::NOMINAL;
+    vehicle.requested_action = VehicleAction::NOMINAL;
+    vehicle.reason = "new_pickup_leg";
+    ROS_INFO("[multi_patrol][A1] V%d pickup leg: B%d -> A1  wpts=%zu len=%.3f",
+             vehicle.id, vehicle.current_slot, vehicle.track.path().size(),
+             vehicle.track.length());
+    return true;
+}
+
+bool TaskAllocator::tryPlanFromA1(VehicleAgent& vehicle, int target,
+                                  bool require_no_arc) {
+    if (target < 0 ||
+        target >= static_cast<int>(map_.slots().size())) {
+        return false;
+    }
+    ensureA1LegCache();
+    const DepotLegCache& leg =
+        a1_to_b_leg_cache_.at(static_cast<size_t>(target));
+    if (!leg.ready || !leg.valid || leg.path.empty()) return false;
+    if (require_no_arc && leg.info.used_arc_fallback) return false;
+
+    rememberTask(vehicle, target);
+    vehicle.target_slot = target;
+    vehicle.track.set(leg.path);
+    ++vehicle.path_gen;
+    vehicle.path_s = 0.0;
+    vehicle.current_speed = 0.0;
+    vehicle.wait_time = 0.0;
+    vehicle.dwell_remaining = 0.0;
+    vehicle.loaded = true;
+    vehicle.leg_target = LegTargetKind::B_SLOT;
+    vehicle.mission_phase = MissionPhase::TO_B;
+    vehicle.mode = VehicleMode::ACTIVE;
+    vehicle.action = VehicleAction::NOMINAL;
+    vehicle.requested_action = VehicleAction::NOMINAL;
+    vehicle.reason = "new_dropoff_leg";
+    ROS_INFO("[multi_patrol][A1] V%d dropoff leg: A1 -> B%d  wpts=%zu len=%.3f",
+             vehicle.id, target, vehicle.track.path().size(),
+             vehicle.track.length());
+    return true;
+}
+
+bool TaskAllocator::assignDropoffLeg(
+    VehicleAgent& vehicle, const std::vector<VehicleAgent>& all) {
+    if (!cfg_.use_a1_cycle) return false;
+    if (a1_owner_vehicle_id_ != vehicle.id) {
+        vehicle.mode = VehicleMode::DWELL;
+        vehicle.action = VehicleAction::STOP;
+        vehicle.requested_action = VehicleAction::STOP;
+        vehicle.current_speed = 0.0;
+        vehicle.reason = "a1_reservation_lost";
+        return false;
+    }
+
+    const bool prefer_no_arc = cfg_.skip_arc_fallback_paths;
+    int target = chooseNextTarget(vehicle, all, prefer_no_arc);
+
+    // Preserve the existing first-cycle preset semantics, but apply it only
+    // now, after pickup at A1, rather than before the vehicle leaves its B slot.
+    if (vehicle.task_count == 0 &&
+        vehicle.id >= 0 &&
+        vehicle.id < static_cast<int>(cfg_.target_slots.size())) {
+        const int preset = cfg_.target_slots[vehicle.id];
+        if (preset >= 0 &&
+            preset < static_cast<int>(map_.slots().size()) &&
+            preset != vehicle.current_slot &&
+            !slotReservedByOther(vehicle, all, preset) &&
+            planAvailable(vehicle, preset, prefer_no_arc)) {
+            target = preset;
+        }
+    }
+
+    if (target >= 0 &&
+        tryPlanFromA1(vehicle, target, prefer_no_arc)) {
+        return true;
+    }
+    if (prefer_no_arc && !cfg_.reject_curvature_discontinuity) {
+        target = chooseNextTarget(vehicle, all, false);
+        if (target >= 0 && tryPlanFromA1(vehicle, target, false)) {
+            return true;
+        }
+    }
+
+    vehicle.mode = VehicleMode::DWELL;
+    vehicle.action = VehicleAction::STOP;
+    vehicle.requested_action = VehicleAction::STOP;
+    vehicle.current_speed = 0.0;
+    vehicle.mission_phase = MissionPhase::WAIT_DROPOFF_TASK;
+    vehicle.dwell_remaining = 0.5;
+    vehicle.reason = "waiting_dropoff_task";
+    return false;
+}
+
 bool TaskAllocator::assignNextTask(VehicleAgent& vehicle,
                                    const std::vector<VehicleAgent>& all) {
+    if (cfg_.use_a1_cycle) {
+        if (vehicle.mission_phase == MissionPhase::PICKUP_DWELL ||
+            vehicle.mission_phase == MissionPhase::WAIT_DROPOFF_TASK) {
+            return assignDropoffLeg(vehicle, all);
+        }
+        return assignPickupLeg(vehicle);
+    }
+
     if (vehicle.mode == VehicleMode::ACTIVE) {
         ROS_WARN_THROTTLE(1.0,
                           "[multi_patrol] V%d ignored task assignment while ACTIVE "
@@ -1246,6 +1453,10 @@ bool TaskAllocator::replanFromPose(VehicleAgent& vehicle,
     vehicle.current_speed = 0.0;
     vehicle.wait_time = 0.0;
     vehicle.dwell_remaining = 0.0;
+    vehicle.leg_target = LegTargetKind::B_SLOT;
+    vehicle.mission_phase =
+        cfg_.use_a1_cycle ? MissionPhase::TO_B
+                          : MissionPhase::DIRECT_TO_B;
     vehicle.mode = VehicleMode::ACTIVE;
     vehicle.action = VehicleAction::NOMINAL;
     vehicle.requested_action = VehicleAction::NOMINAL;

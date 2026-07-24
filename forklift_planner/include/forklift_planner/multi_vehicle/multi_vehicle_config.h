@@ -20,6 +20,9 @@ struct MultiVehicleConfig {
     double conflict_margin = 0.12;
 
     double dwell_time = 20.0;       // sleep time
+    double pickup_dwell_time = 5.0; // A1 pickup operation
+    double unload_dwell_time = 5.0; // B-slot unload operation
+    double a1_release_distance = 0.30; // release A1 after loaded vehicle clears it
     double rolling_horizon = 10.0;          // future planner time 
     double rolling_refresh_period = 2.0;        //  refresh period
 
@@ -103,7 +106,7 @@ struct MultiVehicleConfig {
     // 简单测试版(eight-veh-sim):每车选「路径最短且全程前进(无 REVERSE 段=无尖点)」的目标,
     // 一把开进去、走得近。覆盖默认的跨排/分散选靶逻辑。仅用于实车链路冒烟测试。
     bool simple_forward_demo = false;
-    bool use_a1_cycle = false;  // true: every B->B task is generated as B->A1->B
+    bool use_a1_cycle = false;  // true: execute B->A1 and A1->B as separate legs
     std::string a1_cycle_catalog_file;
     bool save_a1_cycle_catalog = true;
 

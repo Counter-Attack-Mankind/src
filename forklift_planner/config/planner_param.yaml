@@ -51,6 +51,9 @@ forklift_planner:
 
     # 滚动轨迹与休眠配置
     dwell_time: 5.0               # s，到达目标货位后的休眠/等待时间
+    pickup_dwell_time: 5.0        # s，A1取货作业时间
+    unload_dwell_time: 5.0        # s，B库位卸货作业时间
+    a1_release_distance: 0.30     # m，满载车离开A1该距离后释放A1
     rolling_horizon: 10.0         # s，每次生成未来多长时间的轨迹
     rolling_refresh_period: 2.0   # s，每隔多久重新计算并覆盖发布轨迹
 
@@ -106,6 +109,10 @@ forklift_planner:
     precompute_task_filter: true
     log_invalid_task_pairs: false
     quiet_task_filter_precompute: true
+
+    # 运输业务状态机：空载B->A1，取货后才分配目标B，再满载A1->B。
+    use_a1_cycle: true
+    save_a1_cycle_catalog: true
 
     # 确定性任务选择记忆，避免频繁重复选择同一目标/同一排
     recent_target_memory: 5

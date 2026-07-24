@@ -32,6 +32,8 @@ struct TaskPlanCache {
 
 struct DepotLegCache {
     bool ready = false;
+    bool valid = false;
+    TaskRejectReason reject_reason = TaskRejectReason::EMPTY_PATH;
     RoughPath path;
     PathGenerationInfo info;
 };
@@ -45,16 +47,25 @@ public:
     void buildCache();
     bool assignNextTask(VehicleAgent& vehicle,
                         const std::vector<VehicleAgent>& all);
+    bool assignPickupLeg(VehicleAgent& vehicle);
+    bool assignDropoffLeg(VehicleAgent& vehicle,
+                          const std::vector<VehicleAgent>& all);
+    void updateA1Reservation(const std::vector<VehicleAgent>& all);
 
     // 前瞻仿真用:快照/恢复分配器持久计数器,使「克隆-空跑」里的再派活不污染真实分配状态。
-    struct AllocSnapshot { std::vector<int> target, edge, row; };
+    struct AllocSnapshot {
+        std::vector<int> target, edge, row;
+        int a1_owner = -1;
+    };
     AllocSnapshot snapshot() const {
-        return AllocSnapshot{target_visit_counts_, edge_visit_counts_, row_visit_counts_};
+        return AllocSnapshot{target_visit_counts_, edge_visit_counts_,
+                             row_visit_counts_, a1_owner_vehicle_id_};
     }
     void restore(const AllocSnapshot& s) {
         target_visit_counts_ = s.target;
         edge_visit_counts_ = s.edge;
         row_visit_counts_ = s.row;
+        a1_owner_vehicle_id_ = s.a1_owner;
     }
     // 死锁恢复(C):给一辆卡死车从其「当前实际位姿」重规划到一个空库位,使其驶离争用区。
     // 不倒车;成功置新 track 并返回 true。失败(无可行目标/路径)返回 false。
@@ -109,6 +120,8 @@ private:
     int chooseNearestForwardTarget(const VehicleAgent& vehicle,
                                    const std::vector<VehicleAgent>& all) const;
     bool tryPlan(VehicleAgent& vehicle, int target, bool require_no_arc);
+    bool tryPlanFromA1(VehicleAgent& vehicle, int target,
+                       bool require_no_arc);
     void rememberTask(VehicleAgent& vehicle, int target);
     bool containsRecent(const std::vector<int>& values, int value) const;
     double deterministicJitter(const VehicleAgent& vehicle, int target) const;
@@ -137,6 +150,7 @@ private:
     std::vector<int> row_visit_counts_;
     std::vector<int> outbound_valid_counts_;
     std::vector<int> outbound_cross_row_counts_;
+    int a1_owner_vehicle_id_ = -1;
 };
 
 }  // namespace multi_vehicle

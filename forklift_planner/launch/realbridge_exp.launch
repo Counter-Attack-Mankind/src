@@ -27,6 +27,8 @@
   <!-- ① forklift 协调配置(地图 + 规划/协调参数)——realbridge 读这套,与仿真一致 -->
   <rosparam command="load" file="$(find forklift_map)/config/map_param.yaml" />
   <rosparam command="load" file="$(find forklift_planner)/config/planner_param.yaml" />
+  <param name="/forklift_planner/multi_vehicle/a1_cycle_catalog_file"
+         value="$(find forklift_planner)/config/a1_cycle_path_catalog.yaml"/>
   <!-- 车数覆盖(放在 planner_param 之后,覆盖其 vehicle_count;协调侧已 clamp 到 [1,8]) -->
   <param name="/forklift_planner/multi_vehicle/vehicle_count" value="$(arg veh_count)"/>
 

@@ -7,6 +7,8 @@
   <rosparam command="load" file="$(find forklift_map)/config/map_param.yaml" />
   <!-- 加载规划参数-->
   <rosparam command="load" file="$(find forklift_planner)/config/planner_param.yaml" />
+  <param name="/forklift_planner/multi_vehicle/a1_cycle_catalog_file"
+         value="$(find forklift_planner)/config/a1_cycle_path_catalog.yaml"/>
 
 
   <!-- 启动地图节点-->

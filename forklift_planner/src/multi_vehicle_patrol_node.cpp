@@ -66,6 +66,12 @@ public:
         rb_horizon_refresh_ = std::max(
             1, static_cast<int>(std::lround(rb_horizon_refresh_period_ * pp_.update_rate)));
         rb_one_shot_traj_ = cfg_.one_shot_traj;
+        if (cfg_.use_a1_cycle && rb_one_shot_traj_) {
+            ROS_WARN("[multi_patrol][A1] one_shot_traj is incompatible with "
+                     "task assignment at A1; forcing rolling-horizon mode");
+            cfg_.one_shot_traj = false;
+            rb_one_shot_traj_ = false;
+        }
         if (target_only_ >= 0) {
             target_only_ = std::max(0, std::min(7, target_only_));
             cfg_.vehicle_count = std::max(cfg_.vehicle_count, target_only_ + 1);
@@ -140,6 +146,8 @@ private:
     using VehicleAgent = forklift_planner::multi_vehicle::VehicleAgent;
     using VehicleAction = forklift_planner::multi_vehicle::VehicleAction;
     using VehicleMode = forklift_planner::multi_vehicle::VehicleMode;
+    using MissionPhase = forklift_planner::multi_vehicle::MissionPhase;
+    using LegTargetKind = forklift_planner::multi_vehicle::LegTargetKind;
 
     void initCoordLog() {
         coord_log_.open(coord_log_file_, std::ios::out | std::ios::trunc);
@@ -177,6 +185,18 @@ private:
         return "UNKNOWN";
     }
 
+    const char* missionPhaseName(MissionPhase phase) const {
+        switch (phase) {
+            case MissionPhase::DIRECT_TO_B: return "DIRECT_TO_B";
+            case MissionPhase::TO_A1: return "TO_A1";
+            case MissionPhase::PICKUP_DWELL: return "PICKUP_DWELL";
+            case MissionPhase::WAIT_DROPOFF_TASK: return "WAIT_DROPOFF_TASK";
+            case MissionPhase::TO_B: return "TO_B";
+            case MissionPhase::UNLOAD_DWELL: return "UNLOAD_DWELL";
+        }
+        return "UNKNOWN";
+    }
+
     void initAgents() {
         agents_.clear();
         agents_.reserve(static_cast<size_t>(cfg_.vehicle_count));
@@ -193,7 +213,6 @@ private:
         };
 
         std::mt19937 rng(static_cast<unsigned int>(cfg_.random_seed));
-        std::bernoulli_distribution load_dist(0.5);
         const int slot_count = static_cast<int>(map_->slots().size());
 
         // 简单测试版:一个库位「能当起点」= 既能出库(hasValidOutbound),又至少有一个全程前进
@@ -289,7 +308,16 @@ private:
 
             v.current_slot = start_slot;
             v.target_slot = v.current_slot;
-            v.loaded = load_dist(rng);
+            if (cfg_.use_a1_cycle) {
+                v.loaded = false;
+                v.mission_phase = MissionPhase::TO_A1;
+                v.leg_target = LegTargetKind::A1;
+            } else {
+                std::bernoulli_distribution load_dist(0.5);
+                v.loaded = load_dist(rng);
+                v.mission_phase = MissionPhase::DIRECT_TO_B;
+                v.leg_target = LegTargetKind::B_SLOT;
+            }
             v.color = colors[static_cast<size_t>(i) % colors.size()];
             v.mode = VehicleMode::NEED_TASK;
             agents_.push_back(v);
@@ -300,6 +328,7 @@ private:
                 allocator_->assignNextTask(v, agents_);
             }
         }
+        force_horizon_refresh_ = true;
         resetStatusLogState();
     }
 
@@ -327,6 +356,7 @@ private:
         last_logged_reason_.assign(n, "");
         last_logged_blocker_.assign(n, -999);
         last_logged_task_count_.assign(n, -1);
+        last_logged_mission_phase_.assign(n, MissionPhase::DIRECT_TO_B);
         last_status_log_time_.assign(n, ros::Time(0));
         last_diag_time_.assign(n, ros::Time(0));
     }
@@ -366,6 +396,7 @@ private:
         constexpr int H = 400;          // 前瞻 ~40s
         constexpr double kWait = 10.0;  // 全停闭环持续此秒数 = 真死锁
         const std::vector<VehicleAgent> sa = agents_;
+        const std::vector<bool> sv = visited_slots_;
         const auto sr = rule_engine_->snapshot();
         const auto sl = allocator_->snapshot();
         const bool prev = sim_mode_;
@@ -378,6 +409,7 @@ private:
             if (!findDeadlockMembers(kWait).empty()) dead = true;
         }
         agents_ = sa;
+        visited_slots_ = sv;
         rule_engine_->restore(sr);
         allocator_->restore(sl);
         sim_mode_ = prev;
@@ -406,6 +438,7 @@ private:
 
         //===========（状态快照与回滚）============
         const std::vector<VehicleAgent> sa = agents_;    //（将Agents通过拷贝构造函数给sa，sa设为const，后续仅改变备份的agents，对显示不产生影响）  
+        const std::vector<bool> sv = visited_slots_;
         const auto sr = rule_engine_->snapshot();       //保存规则引擎状态
         const auto sl = allocator_->snapshot();         //保存任务分配器状态
         const bool prev = sim_mode_;                    //保存现在模式（仿真或是实际）
@@ -450,6 +483,7 @@ private:
 
         //将沙盒预测造成所有的改动恢复
         agents_ = sa;
+        visited_slots_ = sv;
         rule_engine_->restore(sr);
         allocator_->restore(sl);
         sim_mode_ = prev;
@@ -649,8 +683,8 @@ private:
 
     //==============《任务指派与路径生成函数》===================================
     void updateDwellAndTasks(double dt) {
+        allocator_->updateA1Reservation(agents_);
 
-        
         for (VehicleAgent& v : agents_) {
 
             //*************** 1. 若该车未启用，则车状态一直置为STOP *******
@@ -661,10 +695,77 @@ private:
                 continue;
             }
 
+            // A1-cycle is a two-leg logistics state machine. A1 is not a map
+            // slot, so current_slot remains the last physical B slot until the
+            // loaded A1->B leg reaches its destination.
+            if (cfg_.use_a1_cycle) {
+                if (v.mode == VehicleMode::NEED_TASK) {
+                    if (sim_mode_) continue;
+                    const int old_gen = v.path_gen;
+                    allocator_->assignNextTask(v, agents_);
+                    if (v.path_gen != old_gen) force_horizon_refresh_ = true;
+                    continue;
+                }
+
+                if (v.mode != VehicleMode::DWELL) continue;
+
+                v.dwell_remaining = std::max(0.0, v.dwell_remaining - dt);
+                v.action = VehicleAction::STOP;
+                v.requested_action = VehicleAction::STOP;
+                v.current_speed = 0.0;
+                if (v.dwell_remaining > 1e-9) continue;
+
+                // A rollout may predict arrival at A1, but it must not invent
+                // a B assignment before the real pickup event. Hold at A1 and
+                // force a new rollout after the real task transition.
+                if (sim_mode_) {
+                    v.dwell_remaining = 0.0;
+                    continue;
+                }
+
+                if (v.mission_phase == MissionPhase::PICKUP_DWELL) {
+                    v.loaded = true;
+                    v.mission_phase = MissionPhase::WAIT_DROPOFF_TASK;
+                    const int old_gen = v.path_gen;
+                    allocator_->assignDropoffLeg(v, agents_);
+                    if (v.path_gen != old_gen) force_horizon_refresh_ = true;
+                    continue;
+                }
+
+                if (v.mission_phase == MissionPhase::WAIT_DROPOFF_TASK) {
+                    const int old_gen = v.path_gen;
+                    allocator_->assignDropoffLeg(v, agents_);
+                    if (v.path_gen != old_gen) force_horizon_refresh_ = true;
+                    continue;
+                }
+
+                if (v.mission_phase == MissionPhase::UNLOAD_DWELL) {
+                    const bool completed_transport = v.loaded;
+                    v.loaded = false;
+                    if (completed_transport) ++v.task_count;
+                    if (one_shot_) {
+                        v.action = VehicleAction::STOP;
+                        v.requested_action = VehicleAction::STOP;
+                        v.reason = "one_shot_complete";
+                        continue;
+                    }
+
+                    v.mission_phase = MissionPhase::TO_A1;
+                    v.leg_target = LegTargetKind::A1;
+                    v.mode = VehicleMode::NEED_TASK;
+                    const int old_gen = v.path_gen;
+                    allocator_->assignPickupLeg(v);
+                    if (v.path_gen != old_gen) force_horizon_refresh_ = true;
+                    continue;
+                }
+                continue;
+            }
+
             // ********2. 若该车状态为需要任务，则尝试指派任务 ************
             // NEED_TASK 的车每拍重试派活——分配可能因"当下所有路都与在途车对穿"而暂时失败,
             // 但别车一移动局面就变,必须重试,否则车永久饿死(实测 6 车卡死的根因之一)。
             if (v.mode == VehicleMode::NEED_TASK) {
+                if (sim_mode_) continue;
                 allocator_->assignNextTask(v, agents_);         //***关键任务指派函数和路径生成 ******/
                 continue;
             }
@@ -681,6 +782,10 @@ private:
                     
                 //********* 4.1 若车已过睡眠时间，并且为一次性规划，则跳过不再派发任务 ******/
             if (v.dwell_remaining <= 1e-9) {
+                if (sim_mode_) {
+                    v.dwell_remaining = 0.0;
+                    continue;
+                }
                 if (one_shot_) {        // 一次性 demo:到达目标后永久停,不再派活(8车各跑一程 A→B)
                     v.action = VehicleAction::STOP;
                     v.requested_action = VehicleAction::STOP;
@@ -688,6 +793,7 @@ private:
                 }
 
                 //******** 4.2 若车已过睡眠时间，并且为不间断跑，则切换速度，并派发任务 ******/
+                const VehicleAgent before_task = v;
                 v.loaded = !v.loaded;
                 allocator_->assignNextTask(v, agents_);
                 
@@ -696,13 +802,15 @@ private:
                 // 死锁时才扣(精准,非广撒网);连扣上限防极端饥饿。整块仅真实模式执行(sim 内不递归)。
                 if (!sim_mode_ && v.mode == VehicleMode::ACTIVE) {
                     if (predict_holds_[v.id] < 6 && simPredictsDeadlock()) {
-                        v.loaded = !v.loaded;          // 撤销本次载货翻转(没真出发)
+                        const int hold_id = v.id;
+                        v = before_task;
                         v.mode = VehicleMode::DWELL;
                         v.dwell_remaining = 2.0;
                         v.action = VehicleAction::STOP;
                         v.requested_action = VehicleAction::STOP;
+                        v.current_speed = 0.0;
                         v.reason = "predict_hold";
-                        ++predict_holds_[v.id];
+                        ++predict_holds_[hold_id];
                     } else {
                         predict_holds_[v.id] = 0;      // 真发车了 → 清零连扣计数
                     }
@@ -712,6 +820,40 @@ private:
     }
 
     //==============================================
+
+    void handleLegArrival(VehicleAgent& v) {
+        v.current_speed = 0.0;
+        v.wait_time = 0.0;
+        v.mode = VehicleMode::DWELL;
+        v.action = VehicleAction::STOP;
+        v.requested_action = VehicleAction::STOP;
+
+        if (cfg_.use_a1_cycle && v.leg_target == LegTargetKind::A1) {
+            // A1 is a virtual pickup point, not a B slot. Do not write its
+            // virtual id into current_slot or visited_slots_.
+            v.loaded = false;
+            v.mission_phase = MissionPhase::PICKUP_DWELL;
+            v.dwell_remaining = cfg_.pickup_dwell_time;
+            v.reason = "pickup_dwell";
+            return;
+        }
+
+        v.current_slot = v.target_slot;
+        if (v.current_slot >= 0 &&
+            v.current_slot < static_cast<int>(visited_slots_.size())) {
+            visited_slots_[static_cast<size_t>(v.current_slot)] = true;
+        }
+
+        if (cfg_.use_a1_cycle) {
+            v.mission_phase = MissionPhase::UNLOAD_DWELL;
+            v.dwell_remaining = cfg_.unload_dwell_time;
+            v.reason = "unload_dwell";
+        } else {
+            ++v.task_count;
+            v.dwell_remaining = cfg_.dwell_time;
+            v.reason = "dwell";
+        }
+    }
 
     void advanceVehicles(double dt) {
         std::vector<double> next_s(agents_.size(), 0.0);
@@ -1086,27 +1228,21 @@ private:
             v.path_s = next_s[i];
 
             if (v.path_s >= v.track.length() - 1e-9) {
-                v.current_slot = v.target_slot;
-                if (v.current_slot >= 0 &&
-                    v.current_slot < static_cast<int>(visited_slots_.size())) {
-                    visited_slots_[static_cast<size_t>(v.current_slot)] = true;
-                }
-                ++v.task_count;
-                v.mode = VehicleMode::DWELL;
-                v.action = VehicleAction::STOP;
-                v.requested_action = VehicleAction::STOP;
-                v.current_speed = 0.0;
-                v.wait_time = 0.0;
-                v.dwell_remaining = cfg_.dwell_time;
-                v.reason = "dwell";
+                handleLegArrival(v);
                 // 批处理(长测)里关掉每次到位的 INFO——24h×8车×数千任务=2万+条,会把
                 // 关键的"首撞/首楔"现场 dump 在 rosout 滚动里冲掉。实时/RViz 模式保留。
-                if (cfg_batch_ticks_ == 0)
-                    ROS_INFO("[multi_patrol] tick=%llu sim_t=%.2f V%d arrived slot %d; "
-                             "dwell %.2fs; load=%s",
+                if (cfg_batch_ticks_ == 0 && !sim_mode_) {
+                    const std::string destination =
+                        v.leg_target == LegTargetKind::A1
+                            ? "A1"
+                            : "B" + std::to_string(v.current_slot);
+                    ROS_INFO("[multi_patrol] tick=%llu sim_t=%.2f V%d arrived %s; "
+                             "dwell %.2fs; load=%s phase=%d",
                              static_cast<unsigned long long>(tick_count_), sim_time_,
-                             v.id, v.current_slot, cfg_.dwell_time,
-                             v.loaded ? "loaded" : "empty");
+                             v.id, destination.c_str(), v.dwell_remaining,
+                             v.loaded ? "loaded" : "empty",
+                             static_cast<int>(v.mission_phase));
+                }
             }
         }
     }
@@ -1120,7 +1256,8 @@ private:
                 v.action != last_logged_action_[i] ||
                 v.reason != last_logged_reason_[i] ||
                 v.blocker_id != last_logged_blocker_[i] ||
-                v.task_count != last_logged_task_count_[i];
+                v.task_count != last_logged_task_count_[i] ||
+                v.mission_phase != last_logged_mission_phase_[i];
             const bool stopped_active =
                 v.mode == VehicleMode::ACTIVE && v.action == VehicleAction::STOP;
             const bool periodic =
@@ -1135,11 +1272,12 @@ private:
             std::snprintf(
                 buf, sizeof(buf),
                 "[multi_patrol][state] tick=%llu sim_t=%.2f V%d "
-                "mode=%s action=%s reason=%s "
+                "mode=%s phase=%s action=%s reason=%s "
                 "blocker=%d task=%d slot=%d->%d s=%.3f/%.3f rem=%.3f "
                 "speed=%.3f wait=%.2f dwell=%.2f",
                 static_cast<unsigned long long>(tick_count_), sim_time_,
-                v.id, modeName(v.mode), actionName(v.action),
+                v.id, modeName(v.mode), missionPhaseName(v.mission_phase),
+                actionName(v.action),
                 v.reason.empty() ? "-" : v.reason.c_str(), v.blocker_id,
                 v.task_count, v.current_slot, v.target_slot, v.path_s,
                 length, rem, v.current_speed, v.wait_time,
@@ -1152,6 +1290,7 @@ private:
             last_logged_reason_[i] = v.reason;
             last_logged_blocker_[i] = v.blocker_id;
             last_logged_task_count_[i] = v.task_count;
+            last_logged_mission_phase_[i] = v.mission_phase;
             last_status_log_time_[i] = now;
         }
     }
@@ -1244,7 +1383,11 @@ private:
             rule_engine_->decide(agents_, dt);      //规则调度---决策
             realAdvance(dt);        //  用真实位姿更新车辆状态---执行
             if (tick_count_ % 5 == 0) runDeadlockRecovery();        //5*0.1=0.5s进行一次死锁检测
-            if (tick_count_ % rb_horizon_refresh_ == 0) publishHorizon();   //20*0.1=2s发布新的轨迹
+            if (force_horizon_refresh_ ||
+                tick_count_ % rb_horizon_refresh_ == 0) {
+                publishHorizon();   // 新航段立即发布；否则20*0.1=2s刷新
+                force_horizon_refresh_ = false;
+            }
             publishRealOutputs(dt);
             marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());
             publishRealTrailMarkers();
@@ -1269,8 +1412,10 @@ private:
 
 
         //5. 仿真模式-----滚动时域规划完成 0.1*20=2s
-        else if (tick_count_ % rb_horizon_refresh_ == 0) {
+        else if (force_horizon_refresh_ ||
+                 tick_count_ % rb_horizon_refresh_ == 0) {
             publishHorizon();       //从当前状态复制一份，临时向未来推演一段时间，生成未来轨迹
+            force_horizon_refresh_ = false;
         }
 
         logAgentStatus();
@@ -1571,15 +1716,7 @@ private:
                 // 让"协调眼里的 DWELL 车"=精确槽位,与 sim 逐字节一致(实际 5cm 物理差归控制器管)。
                 v.path_s = v.track.length();
                 rb_prev_path_s_[i] = v.track.length();
-                v.current_slot = v.target_slot;
-                ++v.task_count;
-                v.mode = VehicleMode::DWELL;
-                v.action = VehicleAction::STOP;
-                v.requested_action = VehicleAction::STOP;
-                v.current_speed = 0.0;
-                v.wait_time = 0.0;
-                v.dwell_remaining = cfg_.dwell_time;
-                v.reason = "dwell";
+                handleLegArrival(v);
             }
         }
     }
@@ -1748,7 +1885,7 @@ private:
     std::unique_ptr<PathGenerator> generator_;
     std::unique_ptr<forklift_planner::multi_vehicle::TaskAllocator> allocator_;
     std::unique_ptr<forklift_planner::multi_vehicle::RuleEngine> rule_engine_;
-    bool one_shot_ = true;   // A方案 demo:8车各跑一程 A→B 到达即停,不持续巡逻(可被 ~one_shot 覆盖)
+    bool one_shot_ = false;  // false: continuously execute B->A1->B transports
     std::unique_ptr<forklift_planner::multi_vehicle::MarkerPublisher> marker_pub_;
     std::unique_ptr<forklift_planner::multi_vehicle::TrafficResourceMap> resource_map_;
     std::vector<VehicleAgent> agents_;
@@ -1772,6 +1909,7 @@ private:
     double rb_horizon_refresh_period_ = 2.0;
     int rb_horizon_refresh_ = 20;                        // 每多少拍重新推演刷新一次(5拍=0.5s)
     bool rb_one_shot_traj_ = false;                      // 一次性整条轨迹模式(默认):start后推演全程发一次latch
+    bool force_horizon_refresh_ = false;                 // 新航段安装后立即覆盖发布
     
     double rb_full_horizon_ = 180.0;                    // 一次性模式:全程推演上限时长(s),尾部静止点会裁掉
     bool one_shot_published_ = false;                   // 一次性轨迹是否已全部发完(防重复发)
@@ -1788,6 +1926,7 @@ private:
     // 到不了 length → 永不 DWELL → 不触发下一个任务(卡死);默认 5cm。
     std::vector<int> rb_published_gen_, rb_track_gen_; // 已发布的 path_gen / 上次见到的 path_gen
     std::vector<VehicleMode> last_logged_mode_;
+    std::vector<MissionPhase> last_logged_mission_phase_;
     std::vector<VehicleAction> last_logged_action_;
     std::vector<std::string> last_logged_reason_;
     std::vector<int> last_logged_blocker_;

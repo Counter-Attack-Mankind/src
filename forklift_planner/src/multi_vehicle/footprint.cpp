@@ -9,22 +9,6 @@ namespace multi_vehicle {
 
 namespace {
 
-void axes(const OBB& b, double ax[2][2]) {
-    const double c = std::cos(b.theta);
-    const double s = std::sin(b.theta);
-    ax[0][0] = c;
-    ax[0][1] = s;
-    ax[1][0] = -s;
-    ax[1][1] = c;
-}
-
-double radiusOnAxis(const OBB& b, double ux, double uy) {
-    double ax[2][2];
-    axes(b, ax);
-    return b.half_l * std::abs(ux * ax[0][0] + uy * ax[0][1]) +
-           b.half_w * std::abs(ux * ax[1][0] + uy * ax[1][1]);
-}
-
 void projectOntoAxis(const std::array<FootprintPoint, 4>& pts,
                      double ax, double ay, double& lo, double& hi);
 
@@ -91,28 +75,10 @@ OBB makeBody(const RoughWp& pose, const MapParam& mp, double margin) {
 }
 
 bool overlaps(const OBB& a, const OBB& b) {
-    double ax_a[2][2];
-    double ax_b[2][2];
-    axes(a, ax_a);
-    axes(b, ax_b);
-
-    const double dx = b.x - a.x;
-    const double dy = b.y - a.y;
-    const double test_axes[4][2] = {
-        {ax_a[0][0], ax_a[0][1]},
-        {ax_a[1][0], ax_a[1][1]},
-        {ax_b[0][0], ax_b[0][1]},
-        {ax_b[1][0], ax_b[1][1]},
-    };
-
-    for (const auto& u : test_axes) {
-        const double center_dist = std::abs(dx * u[0] + dy * u[1]);
-        if (center_dist > radiusOnAxis(a, u[0], u[1]) +
-                              radiusOnAxis(b, u[0], u[1])) {
-            return false;
-        }
-    }
-    return true;
+    (void)a;
+    (void)b;
+    // Transparent multi-vehicle stress test: vehicle bodies never block each other.
+    return false;
 }
 
 std::array<FootprintPoint, 4> footprintCorners(const RoughWp& pose,

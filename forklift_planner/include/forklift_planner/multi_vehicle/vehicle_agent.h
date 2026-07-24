@@ -25,6 +25,23 @@ enum class VehicleMode {
     DWELL,
 };
 
+// VehicleMode describes motion; MissionPhase describes the logistics workflow.
+// In A1-cycle mode a transport is deliberately split into two independent
+// tracks: B->A1 (empty) and, only after pickup, A1->B (loaded).
+enum class MissionPhase {
+    DIRECT_TO_B,          // legacy B->B mode
+    TO_A1,
+    PICKUP_DWELL,
+    WAIT_DROPOFF_TASK,
+    TO_B,
+    UNLOAD_DWELL,
+};
+
+enum class LegTargetKind {
+    B_SLOT,
+    A1,
+};
+
 inline const char* actionName(VehicleAction action) {
     switch (action) {
         case VehicleAction::STOP: return "STOP";
@@ -45,6 +62,8 @@ struct VehicleAgent {
     bool loaded = false;
 
     VehicleMode mode = VehicleMode::NEED_TASK;
+    MissionPhase mission_phase = MissionPhase::DIRECT_TO_B;
+    LegTargetKind leg_target = LegTargetKind::B_SLOT;
     VehicleAction action = VehicleAction::STOP;
     VehicleAction requested_action = VehicleAction::STOP;
     double action_hold_remaining = 0.0;  // s left before action may relax

@@ -1,3 +1,5 @@
+2026-07-24：将 A1-cycle 从“预先选定目标 B 并拼接 B->A1->B 单条 track”改为真实两航段运输状态机：车辆从 B 空载执行独立 B->A1 航段，到 A1 后进入取货驻留，取货完成才选择/接收卸货 B 并安装独立 A1->B 航段；到 B 后保持满载完成卸货驻留，再置空载进入下一轮。A1 不写入 B 库位 ID，增加独占预约并在车辆离开 A1 0.30m 后释放；新航段会立即触发滚动轨迹刷新。
+
 2026-07-13：将单车/多车任务路径接入 A1-cycle 模式：新增 `/forklift_planner/multi_vehicle/use_a1_cycle` 开关，打开后普通 B->B 任务在 `TaskAllocator` 内部拆成 `B->A1` 与 `A1->B` 两段，分别使用显式 `B_TO_A1`、`A1_TO_B` 生成器并拼接成完整 track；`single_vehicle_patrol.launch` 默认改为单车 `B17->A1->B24` 实验入口，后续可通过扩展 start/target 数组推广到多车。
 
 2026-07-13：将 A1-cycle 的运行时生成改为两张腿路径字典：启动/首次使用时只生成一次 `B->A1[id]` 和 `A1->B[id]`，普通任务 `B_i->B_j` 直接查 `B_i->A1` 与 `A1->B_j` 后拼接；单车 launch 默认关闭 `precompute_task_filter`，避免枚举全部 B->B pair，后续若需要多车全量筛查可用参数重新打开。
@@ -24,3 +26,4 @@
 2026-07-21: Apply the same road-topology rule to B->A1 row1 upper slots: reverse out to row1 first lane, then drive along first lane to the 1/2 vertical connector, descend to row1 second lane, and enter A1 from the second lane with the existing terminal turn. Catalog format bumped to v14.
 2026-07-21: Refine B->A1 row1 upper-left slots B10/B12/B14 to reuse the A1->B corner set in reverse order: reverse exits to the slot-x first-lane point, drives right to the 1/2 right-inner connector, descends to the second lane, and enters A1 from the second lane with the terminal curve direction chosen from the connector side. Catalog format bumped to v15.
 2026-07-21: Rebuild B->A1 row1 upper-slot paths as a full typed road skeleton: S0 is the slot rear-axle point, S1 is the slot-x row1 first-lane point, S2 is the 1/2 inner vertical connector on the first lane, S3 is the connector midpoint, then the path changes direction and continues through the second lane into A1. Catalog format bumped to v16.
+2026-07-24: Add an 8-vehicle transparent stress-test setup: `single_vehicle_patrol.launch` now defaults to `vehicle_count=8` and continuous dispatch, while `multi_vehicle::overlaps()` always returns false so vehicle-vehicle conflict zones, following/brake checks, hard guards, and start-clear checks that depend on body overlap treat all forklifts as pass-through.
