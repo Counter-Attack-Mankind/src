@@ -15,12 +15,20 @@
 namespace forklift_planner {
 namespace multi_vehicle {
 
+enum class ConflictMarkerKind {
+    SAME_DIRECTION,
+    CROSSING_OR_OPPOSING,
+};
+
 struct ConflictMarker {
     double x = 0.0;
     double y = 0.0;
     double t = 0.0;
+    double scale_x = 0.08;
+    double scale_y = 0.08;
     int vehicle_a = -1;
     int vehicle_b = -1;
+    ConflictMarkerKind kind = ConflictMarkerKind::CROSSING_OR_OPPOSING;
 };
 
 class RuleEngine {
@@ -97,6 +105,10 @@ private:
                                         double zone_exit_s) const;
     bool intervalsOverlap(const OccupancyInterval& a,
                           const OccupancyInterval& b) const;
+    void recordConflictZones(const VehicleAgent& self,
+                             const VehicleAgent& other,
+                             const std::vector<ConflictZone>& zones,
+                             ConflictMarkerKind kind);
     double timeToReachS(const VehicleAgent& v, VehicleAction action,
                         double target_s) const;
     double predictedTravelDistance(const VehicleAgent& v,

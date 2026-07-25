@@ -29,3 +29,5 @@
 2026-07-24: Add an 8-vehicle transparent stress-test setup: `single_vehicle_patrol.launch` now defaults to `vehicle_count=8` and continuous dispatch, while `multi_vehicle::overlaps()` always returns false so vehicle-vehicle conflict zones, following/brake checks, hard guards, and start-clear checks that depend on body overlap treat all forklifts as pass-through.
 
 2026-07-24：移除 A1-cycle 的单车独占准入：不再用 `a1_owner` 将 B→A1 串行化，所有车辆可在初始化时独立领取各自的 B→A1 航段，并在各自完成 A1 取货驻留后独立分配 A1→B 航段。`single_vehicle_patrol.launch` 改为显式传入 8 个起点和 8 个首轮卸货目标；A1-cycle 初始化会校验每个起点确实存在有效 B→A1 路径，避免车辆长期停留在 `NEED_TASK` 而不在 RViz 中显示。
+
+2026-07-25：重新启用车辆 OBB-SAT 重叠检测，使固定路径冲突、跟车、前向净空和硬碰撞保护恢复生效；RViz 将当前参与仲裁的路径冲突弧段显示为浅色区域。同向跟车使用浅蓝色 `conflict_same_direction`，交叉与对向因共用相同的整片互斥区 holder 仲裁而合并为浅橙色 `conflict_crossing_or_opposing`。

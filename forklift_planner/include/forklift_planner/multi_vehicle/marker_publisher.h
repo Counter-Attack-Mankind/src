@@ -48,7 +48,8 @@ private:
     const PlannerParam& pp_;
     const std::vector<Slot>& slots_;
     const MultiVehicleConfig& cfg_;
-    mutable int last_conflict_marker_count_ = 0;
+    mutable int last_same_direction_conflict_marker_count_ = 0;
+    mutable int last_crossing_opposing_conflict_marker_count_ = 0;
     mutable int publish_seq_ = 0;
 };
 

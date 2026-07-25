@@ -232,48 +232,82 @@ void MarkerPublisher::addVisitedSlotMarkers(
 void MarkerPublisher::addConflictMarkers(
     visualization_msgs::MarkerArray& arr,
     const std::vector<ConflictMarker>& conflicts) const {
-    if (!cfg_.show_prediction_conflicts) {
-        for (int id = 0; id < last_conflict_marker_count_; ++id) {
+    const char* same_ns = "conflict_same_direction";
+    const char* mutual_ns = "conflict_crossing_or_opposing";
+    auto deleteMarkers = [&](const char* marker_ns, int count) {
+        for (int id = 0; id < count; ++id) {
             visualization_msgs::Marker m;
             m.header.frame_id = pp_.frame_id;
             m.header.stamp = ros::Time::now();
-            m.ns = "multi_patrol_conflict";
+            m.ns = marker_ns;
             m.id = id;
             m.action = visualization_msgs::Marker::DELETE;
             arr.markers.push_back(m);
         }
-        last_conflict_marker_count_ = 0;
+    };
+
+    if (!cfg_.show_prediction_conflicts) {
+        deleteMarkers(same_ns,
+                      last_same_direction_conflict_marker_count_);
+        deleteMarkers(mutual_ns,
+                      last_crossing_opposing_conflict_marker_count_);
+        last_same_direction_conflict_marker_count_ = 0;
+        last_crossing_opposing_conflict_marker_count_ = 0;
         return;
     }
-    int id = 0;
+
+    int same_id = 0;
+    int mutual_id = 0;
     for (const ConflictMarker& c : conflicts) {
+        const bool same_direction =
+            c.kind == ConflictMarkerKind::SAME_DIRECTION;
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
         m.header.stamp = ros::Time::now();
-        m.ns = "multi_patrol_conflict";
-        m.id = id++;
-        m.type = visualization_msgs::Marker::SPHERE;
+        m.ns = same_direction ? same_ns : mutual_ns;
+        m.id = same_direction ? same_id++ : mutual_id++;
+        m.type = visualization_msgs::Marker::CUBE;
         m.action = visualization_msgs::Marker::ADD;
         m.pose.position.x = c.x;
         m.pose.position.y = c.y;
-        m.pose.position.z = 0.095;
+        m.pose.position.z = 0.018;
         m.pose.orientation.w = 1.0;
-        m.scale.x = 0.060;
-        m.scale.y = 0.060;
-        m.scale.z = 0.020;
-        m.color = rgba(1.0f, 0.0f, 0.0f, 0.70f);
+        m.scale.x = c.scale_x;
+        m.scale.y = c.scale_y;
+        m.scale.z = 0.012;
+        if (same_direction) {
+            // Light cyan: longitudinal following arbitration.
+            m.color = rgba(0.35f, 0.82f, 1.00f, 0.28f);
+        } else {
+            // Light orange: crossing and opposing traffic share the same
+            // mutual-exclusion holder arbitration.
+            m.color = rgba(1.00f, 0.62f, 0.34f, 0.30f);
+        }
         arr.markers.push_back(m);
     }
-    for (int stale = id; stale < last_conflict_marker_count_; ++stale) {
+
+    for (int stale = same_id;
+         stale < last_same_direction_conflict_marker_count_; ++stale) {
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
         m.header.stamp = ros::Time::now();
-        m.ns = "multi_patrol_conflict";
+        m.ns = same_ns;
         m.id = stale;
         m.action = visualization_msgs::Marker::DELETE;
         arr.markers.push_back(m);
     }
-    last_conflict_marker_count_ = id;
+    for (int stale = mutual_id;
+         stale < last_crossing_opposing_conflict_marker_count_; ++stale) {
+        visualization_msgs::Marker m;
+        m.header.frame_id = pp_.frame_id;
+        m.header.stamp = ros::Time::now();
+        m.ns = mutual_ns;
+        m.id = stale;
+        m.action = visualization_msgs::Marker::DELETE;
+        arr.markers.push_back(m);
+    }
+    last_same_direction_conflict_marker_count_ = same_id;
+    last_crossing_opposing_conflict_marker_count_ = mutual_id;
 }
 
 void MarkerPublisher::addOriginAxes(visualization_msgs::MarkerArray& arr) const {

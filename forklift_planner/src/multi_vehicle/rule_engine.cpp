@@ -326,6 +326,59 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::findConflictZones(
     return out;
 }
 
+void RuleEngine::recordConflictZones(
+    const VehicleAgent& self, const VehicleAgent& other,
+    const std::vector<ConflictZone>& zones, ConflictMarkerKind kind) {
+    constexpr double kDisplayStep = 0.025;
+    const double pad =
+        std::max(0.03, 0.5 * mp_.vehicle_width +
+                           0.5 * cfg_.conflict_margin);
+
+    for (const ConflictZone& z : zones) {
+        double x_min = std::numeric_limits<double>::infinity();
+        double y_min = std::numeric_limits<double>::infinity();
+        double x_max = -std::numeric_limits<double>::infinity();
+        double y_max = -std::numeric_limits<double>::infinity();
+
+        auto includePathSpan = [&](const VehicleAgent& v,
+                                   double s_enter, double s_exit) {
+            const double begin = std::max(0.0, s_enter);
+            const double end = std::min(v.track.length(), s_exit);
+            if (end < begin) return;
+            for (double s = begin; s <= end + 1e-9;
+                 s += kDisplayStep) {
+                const RoughWp p = v.track.poseAtS(std::min(s, end));
+                x_min = std::min(x_min, p.x);
+                y_min = std::min(y_min, p.y);
+                x_max = std::max(x_max, p.x);
+                y_max = std::max(y_max, p.y);
+            }
+            const RoughWp p = v.track.poseAtS(end);
+            x_min = std::min(x_min, p.x);
+            y_min = std::min(y_min, p.y);
+            x_max = std::max(x_max, p.x);
+            y_max = std::max(y_max, p.y);
+        };
+
+        includePathSpan(self, z.s_self_enter, z.s_self_exit);
+        includePathSpan(other, z.s_other_enter, z.s_other_exit);
+        if (!std::isfinite(x_min) || !std::isfinite(y_min) ||
+            !std::isfinite(x_max) || !std::isfinite(y_max)) {
+            continue;
+        }
+
+        ConflictMarker marker;
+        marker.x = 0.5 * (x_min + x_max);
+        marker.y = 0.5 * (y_min + y_max);
+        marker.scale_x = std::max(0.06, x_max - x_min + 2.0 * pad);
+        marker.scale_y = std::max(0.06, y_max - y_min + 2.0 * pad);
+        marker.vehicle_a = self.id;
+        marker.vehicle_b = other.id;
+        marker.kind = kind;
+        conflicts_.push_back(marker);
+    }
+}
+
 void RuleEngine::debugDumpConflict(const VehicleAgent& a,
                                    const VehicleAgent& b) const {
     const std::vector<ConflictZone> zones = findConflictZones(a, b);
@@ -637,8 +690,12 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         commit_owner_.erase(it);
                     } else {
                         brakeIfNeeded(other, other_se, owner.id);
-                        conflicts_.push_back(ConflictMarker{
-                            zones.front().x, zones.front().y, 0.0, a.id, b.id});
+                        // Crossing and opposing traffic use the same atomic
+                        // mutual-exclusion arbitration, so RViz shows them as
+                        // one visual class.
+                        recordConflictZones(
+                            a, b, zones,
+                            ConflictMarkerKind::CROSSING_OR_OPPOSING);
                         continue;  // 持有到清出,绝不翻转
                     }
                 }
@@ -658,8 +715,9 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             if (!time_conflict && !a_committed && !b_committed) {
                 continue;  // 时间上错开且都未进区 → 无需协调
             }
-            conflicts_.push_back(ConflictMarker{
-                zones.front().x, zones.front().y, 0.0, a.id, b.id});
+            recordConflictZones(
+                a, b, zones,
+                ConflictMarkerKind::CROSSING_OR_OPPOSING);
 
             // 3) 无预约:裁决整片区域的持有车(holder)并预约。
             //    互斥优先:已在区内者必须清出→它持有;都不在→末端泊入/出库(CLEAR/EXIT,
@@ -768,6 +826,8 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
             } else {
                 continue;
             }
+            recordConflictZones(v, other, fzones,
+                                ConflictMarkerKind::SAME_DIRECTION);
             applyActionRequest(v, follow_action,
                                "following_V" + std::to_string(other.id),
                                other.id);
