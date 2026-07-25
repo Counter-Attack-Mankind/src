@@ -54,6 +54,35 @@ int RuleEngine::priorityWinner(const VehicleAgent& a,
     // 赢了令牌、却被 pairwise 摁住,环还是破不了。
     if (a.deadlock_breaker != b.deadlock_breaker) return a.deadlock_breaker ? a.id : b.id;
 
+    // A1 服务权必须贯穿最后进场、装载驻留和初始离场。该 override 只在 A1 收口附近
+    // 生效，避免影响两车在较远 B→A1 路段上的正常冲突仲裁。
+    if (cfg_.use_a1_cycle && a1_service_owner_ >= 0) {
+        const VehicleAgent* owner = nullptr;
+        const VehicleAgent* waiter = nullptr;
+        if (a.id == a1_service_owner_ && b.id != a1_service_owner_) {
+            owner = &a;
+            waiter = &b;
+        } else if (b.id == a1_service_owner_ && a.id != a1_service_owner_) {
+            owner = &b;
+            waiter = &a;
+        }
+
+        if (owner != nullptr &&
+            waiter->mission_phase == MissionPhase::TO_A1) {
+            const bool owner_approaching =
+                owner->mission_phase == MissionPhase::TO_A1 &&
+                owner->remainingS() <= cfg_.a1_queue_hold_distance + 0.50;
+            const bool owner_loading =
+                owner->mission_phase == MissionPhase::PICKUP_DWELL;
+            const bool owner_departing =
+                owner->mission_phase == MissionPhase::TO_B &&
+                owner->loaded;
+            if (owner_approaching || owner_loading || owner_departing) {
+                return owner->id;
+            }
+        }
+    }
+
     // 资源前置约束(非任意优先级,§4/§6/§7):若一车要去的目标库位正被另一车占着
     // (a.target==b.current),占用者必须先清出该位、入库者让行——否则入库者抢先开到
     // 库位口却进不去(位被占),占用者又被它让停在口内,直接死锁。这是 slot 资源依赖,
@@ -835,6 +864,112 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
     }
 }
 
+void RuleEngine::resolveA1ApproachQueue(
+    std::vector<VehicleAgent>& vehicles, double dt) {
+    if (!cfg_.use_a1_cycle) {
+        a1_service_owner_ = -1;
+        return;
+    }
+
+    auto findById = [&](int id) -> VehicleAgent* {
+        for (VehicleAgent& v : vehicles) {
+            if (v.id == id) return &v;
+        }
+        return nullptr;
+    };
+    auto isApproaching = [](const VehicleAgent& v) {
+        return v.active() && v.mission_phase == MissionPhase::TO_A1;
+    };
+    auto isLoading = [](const VehicleAgent& v) {
+        return v.mode == VehicleMode::DWELL &&
+               v.mission_phase == MissionPhase::PICKUP_DWELL;
+    };
+    const double hold_distance =
+        std::max(cfg_.a1_queue_hold_distance,
+                 cfg_.a1_exit_release_distance + mp_.vehicle_length +
+                     2.0 * cfg_.conflict_margin);
+    auto isDeparting = [&](const VehicleAgent& v) {
+        if (!v.active() || v.mission_phase != MissionPhase::TO_B ||
+            !v.loaded) {
+            return false;
+        }
+        if (v.path_s < cfg_.a1_exit_release_distance) return true;
+
+        // 固定距离只是下限。若车尾尚未清出某辆候车在 A1 末段上的精确 OBB 冲突块，
+        // 服务权继续保持，避免刚到阈值便把路权翻给候车而形成新的对顶。
+        for (const VehicleAgent& other : vehicles) {
+            if (other.id == v.id || !isApproaching(other)) continue;
+            const std::vector<ConflictZone> zones =
+                findConflictZones(v, other);
+            for (const ConflictZone& z : zones) {
+                const double other_rem_at_exit =
+                    other.track.length() - z.s_other_exit;
+                if (other_rem_at_exit <= hold_distance + 1e-9) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    // 跨 A1 换轨保持服务权；载货车沿新 A1→B 轨迹驶出释放距离后才交给下一辆车。
+    VehicleAgent* owner = findById(a1_service_owner_);
+    if (owner == nullptr ||
+        !(isApproaching(*owner) || isLoading(*owner) ||
+          isDeparting(*owner))) {
+        a1_service_owner_ = -1;
+        owner = nullptr;
+    }
+
+    if (owner == nullptr) {
+        // 节点若在装载/离场中重建，先恢复现场占用者；正常情况下选剩余路程最短者，
+        // 完全相同时以 id 确定，保证裁决稳定。
+        for (VehicleAgent& v : vehicles) {
+            if (!isLoading(v)) continue;
+            if (owner == nullptr || v.id < owner->id) owner = &v;
+        }
+        if (owner == nullptr) {
+            for (VehicleAgent& v : vehicles) {
+                if (!isDeparting(v)) continue;
+                if (owner == nullptr || v.id < owner->id) owner = &v;
+            }
+        }
+        if (owner == nullptr) {
+            for (VehicleAgent& v : vehicles) {
+                if (!isApproaching(v)) continue;
+                if (owner == nullptr ||
+                    v.remainingS() < owner->remainingS() - 1e-9 ||
+                    (std::abs(v.remainingS() - owner->remainingS()) <= 1e-9 &&
+                     v.id < owner->id)) {
+                    owner = &v;
+                }
+            }
+        }
+        if (owner != nullptr) a1_service_owner_ = owner->id;
+    }
+
+    if (owner == nullptr) return;
+
+    // 非 owner 在其余路段照常运行，仅在 A1 前停止线制动，为装载车倒退离场保留扫掠空间。
+    for (VehicleAgent& v : vehicles) {
+        if (v.id == a1_service_owner_ || !isApproaching(v)) continue;
+
+        const double distance_to_stop_line =
+            v.remainingS() - hold_distance;
+        const double speed = std::max(0.0, v.current_speed);
+        const double braking_distance =
+            speed * speed / (2.0 * std::max(1e-6, cfg_.max_decel));
+        const double reaction_distance = speed * std::max(0.0, dt);
+        if (distance_to_stop_line <=
+            braking_distance + reaction_distance + 0.02) {
+            applyActionRequest(
+                v, VehicleAction::STOP,
+                "wait_a1_exit_V" + std::to_string(a1_service_owner_),
+                a1_service_owner_);
+        }
+    }
+}
+
 void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles) {
     // 普适前向净空护栏(§11.13.1 出口检查精神 + 补 following/crossing 分类接缝漏洞)。
     // 接缝 bug:近乎同向、向不同库位汇聚的两车,被 pairwise 当跟车跳过、又不满足
@@ -1322,6 +1457,7 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt) {
         v.reason = "clear";
     }
 
+    resolveA1ApproachQueue(vehicles, dt);
     resolveFollowing(vehicles);
     // 深层根治(用户洞察:路径固定→只信精确几何):停用粗粒度资源盒仲裁(路口/车道
     // 令牌),它把"共用一个路口盒"当冲突造成幻象冲突→打架→死锁。改由精确的 pairwise

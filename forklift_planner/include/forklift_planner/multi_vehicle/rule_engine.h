@@ -47,15 +47,18 @@ public:
         std::set<std::pair<int, int>> following_pairs;
         ResourceTokenTable tokens;
         double now = 0.0;
+        int a1_service_owner = -1;
     };
     SimSnapshot snapshot() const {
-        return SimSnapshot{commit_owner_, following_pairs_, tokens_, now_};
+        return SimSnapshot{commit_owner_, following_pairs_, tokens_, now_,
+                           a1_service_owner_};
     }
     void restore(const SimSnapshot& s) {
         commit_owner_ = s.commit_owner;
         following_pairs_ = s.following_pairs;
         tokens_ = s.tokens;
         now_ = s.now;
+        a1_service_owner_ = s.a1_service_owner;
     }
     const std::vector<ConflictMarker>& conflicts() const { return conflicts_; }
 
@@ -118,6 +121,8 @@ private:
                             const std::string& reason, int blocker_id = -1);
     void resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles, double dt);
     void resolveFollowing(std::vector<VehicleAgent>& vehicles);
+    void resolveA1ApproachQueue(std::vector<VehicleAgent>& vehicles,
+                                double dt);
     // 普适前向净空护栏:任何车若沿自身固定路径在自己刹车距离内会撞上另一辆车的当前
     // 车身,提前 STOP(留余量、干净对停)。堵死 following/crossing 分类接缝处「两套都
     // 没刹→NOMINAL 直撞停着的车→十字楔死」的漏洞。破环车豁免。比硬护栏早刹留余量。
@@ -165,6 +170,8 @@ private:
     const TrafficResourceMap* resmap_ = nullptr;
     ResourceTokenTable tokens_;
     double now_ = 0.0;  // 内部仿真时钟(每 decide 累加 dt),供令牌防抖/超时用
+    // 仅门控 A1 最后一段进场、装载和初始离场，不串行化整条 B→A1 路径。
+    int a1_service_owner_ = -1;
 };
 
 }  // namespace multi_vehicle

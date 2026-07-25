@@ -22,6 +22,11 @@ struct MultiVehicleConfig {
     double dwell_time = 20.0;       // sleep time
     double pickup_dwell_time = 5.0; // A1 pickup operation
     double unload_dwell_time = 5.0; // B-slot unload operation
+    // Only the final A1 approach is serialized. Vehicles may travel from B
+    // concurrently, but non-owners stop this far upstream while the owner
+    // loads and clears the A1 departure sweep.
+    double a1_queue_hold_distance = 1.10;
+    double a1_exit_release_distance = 0.75;
     double rolling_horizon = 10.0;          // future planner time 
     double rolling_refresh_period = 2.0;        //  refresh period
 
