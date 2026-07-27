@@ -160,6 +160,11 @@ private:
         coord_log_ << "vehicle_count=" << cfg_.vehicle_count
                    << " one_shot=" << (one_shot_ ? 1 : 0)
                    << " use_a1_cycle=" << (cfg_.use_a1_cycle ? 1 : 0)
+                   << " a1_request=" << cfg_.a1_request_distance
+                   << " a1_hold=" << cfg_.a1_queue_hold_distance
+                   << " a1_exit_release=" << cfg_.a1_exit_release_distance
+                   << " prediction_horizon=" << cfg_.prediction_horizon
+                   << " prediction_step=" << cfg_.prediction_step
                    << "\n";
         coord_log_.flush();
         ROS_WARN("[multi_patrol] coordination log: %s",
@@ -1357,6 +1362,58 @@ private:
         }
     }
 
+    // 状态行只说明“谁在等谁”；等待环诊断进一步记录 A1 owner、普通预约、
+    // 整片外包区 committed、逐个真实 OBB 冲突块及 NOMINAL 时间窗。
+    // 环首次持续 1s 即写，之后每 5s 重写一次，兼顾现场完整性与日志体积。
+    void logCoordinationCycleDiagnostics() {
+        if (sim_mode_) return;
+        const std::vector<int> cycle = findDeadlockCycle(1.0);
+        if (cycle.empty()) {
+            last_coord_cycle_.clear();
+            return;
+        }
+
+        const std::set<int> signature(cycle.begin(), cycle.end());
+        const bool changed = signature != last_coord_cycle_;
+        if (!changed && sim_time_ - last_coord_cycle_log_time_ < 5.0) return;
+        last_coord_cycle_ = signature;
+        last_coord_cycle_log_time_ = sim_time_;
+
+        std::string ring;
+        for (int id : cycle) {
+            if (!ring.empty()) ring += "->";
+            ring += "V" + std::to_string(id);
+        }
+        ring += "->V" + std::to_string(cycle.front());
+
+        char header[256];
+        std::snprintf(
+            header, sizeof(header),
+            "[coord_diag][cycle] tick=%llu sim_t=%.2f ring=%s a1_owner=V%d",
+            static_cast<unsigned long long>(tick_count_), sim_time_,
+            ring.c_str(), rule_engine_->a1ServiceOwner());
+        coordLog(header);
+        ROS_WARN("%s", header);
+
+        for (int id : signature) {
+            const VehicleAgent* v = agentById_c(id);
+            if (v != nullptr) coordLog("[coord_diag][vehicle]" + vehLine(*v));
+        }
+
+        const std::vector<int> ids(signature.begin(), signature.end());
+        for (size_t i = 0; i < ids.size(); ++i) {
+            for (size_t j = i + 1; j < ids.size(); ++j) {
+                const VehicleAgent* a = agentById_c(ids[i]);
+                const VehicleAgent* b = agentById_c(ids[j]);
+                if (a == nullptr || b == nullptr) continue;
+                for (const std::string& line :
+                     rule_engine_->debugConflictLines(*a, *b)) {
+                    coordLog(line);
+                }
+            }
+        }
+    }
+
     //==================== 最重要的节拍函数======================================
     void tick(const ros::TimerEvent&) {
         const double dt = 1.0 / pp_.update_rate;        //控制周期与仿真系统推移周期一致
@@ -1385,6 +1442,7 @@ private:
                     rule_engine_->decide(agents_, dt);
                 }
                 realAdvance(dt);        //根据真实车身位置重新定位
+                logCoordinationCycleDiagnostics();
                 logAgentStatus();
                 marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());
                 publishRealTrailMarkers();
@@ -1395,6 +1453,7 @@ private:
             updateDwellAndTasks(dt);    //更新任务---任务   dt 
             rule_engine_->decide(agents_, dt);      //规则调度---决策
             realAdvance(dt);        //  用真实位姿更新车辆状态---执行
+            logCoordinationCycleDiagnostics();
             if (tick_count_ % 5 == 0) runDeadlockRecovery();        //5*0.1=0.5s进行一次死锁检测
             if (force_horizon_refresh_ ||
                 tick_count_ % rb_horizon_refresh_ == 0) {
@@ -1414,6 +1473,7 @@ private:
         updateDwellAndTasks(dt);        //更新任务，到点停留并且分配新任务，生成路径
         rule_engine_->decide(agents_, dt);      //多车协调决策，分配速度
         advanceVehicles(dt);            //仿真推进
+        logCoordinationCycleDiagnostics();
 
 
         //4. 仿真模式---一次性触发完成
@@ -1946,6 +2006,8 @@ private:
     std::vector<int> last_logged_task_count_;
     std::vector<ros::Time> last_status_log_time_;
     std::vector<ros::Time> last_diag_time_;  // TEMPORARY: [DIAG stuck] throttle
+    std::set<int> last_coord_cycle_;
+    double last_coord_cycle_log_time_ = -1e9;
     unsigned long long tick_count_ = 0;
     double sim_time_ = 0.0;
 
@@ -1965,11 +2027,13 @@ private:
 public:
     // 一辆车的紧凑状态行(诊断用,信息尽量全)。
     std::string vehLine(const VehicleAgent& v) const {
-        char buf[256];
+        char buf[320];
         snprintf(buf, sizeof(buf),
-                 "  V%d mode=%d act=%d reason=%s blk=%d brkr=%d task=%d slot=%d->%d "
+                 "  V%d mode=%d phase=%s loaded=%d act=%d reason=%s blk=%d "
+                 "brkr=%d task=%d slot=%d->%d "
                  "s=%.3f/%.3f rem=%.3f spd=%.3f wait=%.1f gen=%d",
-                 v.id, (int)v.mode, (int)v.action, v.reason.c_str(), v.blocker_id,
+                 v.id, (int)v.mode, missionPhaseName(v.mission_phase), (int)v.loaded,
+                 (int)v.action, v.reason.c_str(), v.blocker_id,
                  (int)v.deadlock_breaker, v.task_count, v.current_slot,
                  v.target_slot, v.path_s, v.track.length(), v.remainingS(),
                  v.current_speed, v.wait_time, v.path_gen);
@@ -2192,6 +2256,7 @@ public:
             rule_engine_->decide(agents_, dt);
             const unsigned long long guards_before = hard_guard_events_;
             advanceVehicles(dt);
+            logCoordinationCycleDiagnostics();
             const bool new_collision = hard_guard_events_ > guards_before;
 
             hist.push_back(fleetSnapshot());

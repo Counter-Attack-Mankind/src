@@ -71,6 +71,9 @@ public:
     // 诊断:打印一对车的冲突区全貌(各块 se/sx、same_dir、committed、停止线、owner 预约、
     // 是否在 following_pairs_)。供无头批处理在碰撞现场调用,定位"该不该门控/谁越线"。
     void debugDumpConflict(const VehicleAgent& a, const VehicleAgent& b) const;
+    std::vector<std::string> debugConflictLines(
+        const VehicleAgent& a, const VehicleAgent& b) const;
+    int a1ServiceOwner() const { return a1_service_owner_; }
 
 private:
     struct ConflictZone {

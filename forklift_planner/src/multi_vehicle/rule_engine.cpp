@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <sstream>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -409,31 +410,160 @@ void RuleEngine::recordConflictZones(
 
 void RuleEngine::debugDumpConflict(const VehicleAgent& a,
                                    const VehicleAgent& b) const {
+    for (const std::string& line : debugConflictLines(a, b)) {
+        ROS_WARN("%s", line.c_str());
+    }
+}
+
+std::vector<std::string> RuleEngine::debugConflictLines(
+    const VehicleAgent& a, const VehicleAgent& b) const {
+    auto phaseName = [](MissionPhase phase) {
+        switch (phase) {
+            case MissionPhase::DIRECT_TO_B: return "DIRECT_TO_B";
+            case MissionPhase::TO_A1: return "TO_A1";
+            case MissionPhase::PICKUP_DWELL: return "PICKUP_DWELL";
+            case MissionPhase::WAIT_DROPOFF_TASK: return "WAIT_DROPOFF_TASK";
+            case MissionPhase::TO_B: return "TO_B";
+            case MissionPhase::UNLOAD_DWELL: return "UNLOAD_DWELL";
+        }
+        return "UNKNOWN";
+    };
     const std::vector<ConflictZone> zones = findConflictZones(a, b);
     const std::pair<int, int> pkey{std::min(a.id, b.id), std::max(a.id, b.id)};
     int owner = -1;
     auto it = commit_owner_.find(pkey);
     if (it != commit_owner_.end()) owner = it->second;
     const bool following = following_pairs_.count(pkey) > 0;
-    const double f = mp_.body_front_ext();
+    const double front = mp_.body_front_ext();
+    const double rear = mp_.body_rear_ext();
+
+    double se_a = std::numeric_limits<double>::infinity();
+    double sx_a = -std::numeric_limits<double>::infinity();
+    double se_b = std::numeric_limits<double>::infinity();
+    double sx_b = -std::numeric_limits<double>::infinity();
     bool all_same = true;
-    for (const ConflictZone& z : zones)
+    bool a_inside_any = false;
+    bool b_inside_any = false;
+    bool both_inside_same_zone = false;
+    bool nominal_time_overlap = false;
+    for (const ConflictZone& z : zones) {
+        se_a = std::min(se_a, z.s_self_enter);
+        sx_a = std::max(sx_a, z.s_self_exit);
+        se_b = std::min(se_b, z.s_other_enter);
+        sx_b = std::max(sx_b, z.s_other_exit);
         if (!z.same_dir) { all_same = false; break; }
-    ROS_WARN("[CONFLICT] V%d(s=%.3f rem=%.3f act=%d blk=%d) vs "
-             "V%d(s=%.3f rem=%.3f act=%d blk=%d) | owner=V%d following=%d "
-             "nzones=%zu all_same_dir=%d",
-             a.id, a.path_s, a.remainingS(), (int)a.action, a.blocker_id,
-             b.id, b.path_s, b.remainingS(), (int)b.action, b.blocker_id,
-             owner, (int)following, zones.size(), (int)all_same);
+    }
+    // The previous loop may stop early when it finds a non-same-direction
+    // block, so compute occupancy/time facts in a separate complete pass.
+    for (const ConflictZone& z : zones) {
+        const bool a_inside =
+            a.path_s + front >= z.s_self_enter &&
+            a.path_s - rear <= z.s_self_exit;
+        const bool b_inside =
+            b.path_s + front >= z.s_other_enter &&
+            b.path_s - rear <= z.s_other_exit;
+        a_inside_any = a_inside_any || a_inside;
+        b_inside_any = b_inside_any || b_inside;
+        both_inside_same_zone =
+            both_inside_same_zone || (a_inside && b_inside);
+        const OccupancyInterval oa = occupancyInterval(
+            a, VehicleAction::NOMINAL, z.s_self_enter, z.s_self_exit);
+        const OccupancyInterval ob = occupancyInterval(
+            b, VehicleAction::NOMINAL, z.s_other_enter, z.s_other_exit);
+        nominal_time_overlap =
+            nominal_time_overlap || intervalsOverlap(oa, ob);
+    }
+
+    // Recompute the envelope without early termination.
+    se_a = se_b = std::numeric_limits<double>::infinity();
+    sx_a = sx_b = -std::numeric_limits<double>::infinity();
+    for (const ConflictZone& z : zones) {
+        se_a = std::min(se_a, z.s_self_enter);
+        sx_a = std::max(sx_a, z.s_self_exit);
+        se_b = std::min(se_b, z.s_other_enter);
+        sx_b = std::max(sx_b, z.s_other_exit);
+    }
+    const bool a_envelope_committed =
+        !zones.empty() && a.path_s > se_a;
+    const bool b_envelope_committed =
+        !zones.empty() && b.path_s > se_b;
+
+    std::vector<std::string> lines;
+    std::ostringstream head;
+    head.setf(std::ios::fixed);
+    head.precision(3);
+    head << "[coord_diag][pair] V" << a.id << "<->V" << b.id
+         << " a1_owner=V" << a1_service_owner_
+         << " reservation=V" << owner
+         << " following=" << static_cast<int>(following)
+         << " zones=" << zones.size()
+         << " all_same_dir=" << static_cast<int>(all_same)
+         << " nominal_time_overlap=" << static_cast<int>(nominal_time_overlap)
+         << " | A phase=" << phaseName(a.mission_phase)
+         << " s=" << a.path_s << "/" << a.track.length()
+         << " act=" << static_cast<int>(a.action)
+         << " blk=V" << a.blocker_id
+         << " gen=" << a.path_gen
+         << " | B phase=" << phaseName(b.mission_phase)
+         << " s=" << b.path_s << "/" << b.track.length()
+         << " act=" << static_cast<int>(b.action)
+         << " blk=V" << b.blocker_id
+         << " gen=" << b.path_gen;
+    lines.push_back(head.str());
+
+    if (!zones.empty()) {
+        std::ostringstream envelope;
+        envelope.setf(std::ios::fixed);
+        envelope.precision(3);
+        envelope << "[coord_diag][envelope] A[" << se_a << "," << sx_a
+                 << "] committed=" << static_cast<int>(a_envelope_committed)
+                 << " inside_real=" << static_cast<int>(a_inside_any)
+                 << " | B[" << se_b << "," << sx_b
+                 << "] committed=" << static_cast<int>(b_envelope_committed)
+                 << " inside_real=" << static_cast<int>(b_inside_any)
+                 << " both_inside_same_zone="
+                 << static_cast<int>(both_inside_same_zone);
+        if (a_envelope_committed && b_envelope_committed &&
+            !both_inside_same_zone) {
+            envelope << " diagnosis=both_envelope_committed_without_shared_real_occupancy";
+        }
+        lines.push_back(envelope.str());
+    }
+
     for (size_t i = 0; i < zones.size(); ++i) {
         const ConflictZone& z = zones[i];
-        ROS_WARN("[CONFLICT]   zone%zu same_dir=%d | A[%.3f,%.3f] stopA=%.3f "
-                 "committedA=%d | B[%.3f,%.3f] stopB=%.3f committedB=%d | @(%.2f,%.2f)",
-                 i, (int)z.same_dir, z.s_self_enter, z.s_self_exit,
-                 z.s_self_enter - f, (int)(a.path_s > z.s_self_enter),
-                 z.s_other_enter, z.s_other_exit, z.s_other_enter - f,
-                 (int)(b.path_s > z.s_other_enter), z.x, z.y);
+        const bool a_inside =
+            a.path_s + front >= z.s_self_enter &&
+            a.path_s - rear <= z.s_self_exit;
+        const bool b_inside =
+            b.path_s + front >= z.s_other_enter &&
+            b.path_s - rear <= z.s_other_exit;
+        const OccupancyInterval oa = occupancyInterval(
+            a, VehicleAction::NOMINAL, z.s_self_enter, z.s_self_exit);
+        const OccupancyInterval ob = occupancyInterval(
+            b, VehicleAction::NOMINAL, z.s_other_enter, z.s_other_exit);
+        std::ostringstream zone;
+        zone.setf(std::ios::fixed);
+        zone.precision(3);
+        zone << "[coord_diag][zone " << i << "] same_dir="
+             << static_cast<int>(z.same_dir)
+             << " xy=(" << z.x << "," << z.y << ")"
+             << " | A[" << z.s_self_enter << "," << z.s_self_exit
+             << "] stop=" << z.s_self_enter - front
+             << " gap=" << z.s_self_enter - front - a.path_s
+             << " inside=" << static_cast<int>(a_inside)
+             << " t=[" << (oa.occupies ? oa.enter : -1.0)
+             << "," << (oa.occupies ? oa.exit : -1.0) << "]"
+             << " | B[" << z.s_other_enter << "," << z.s_other_exit
+             << "] stop=" << z.s_other_enter - front
+             << " gap=" << z.s_other_enter - front - b.path_s
+             << " inside=" << static_cast<int>(b_inside)
+             << " t=[" << (ob.occupies ? ob.enter : -1.0)
+             << "," << (ob.occupies ? ob.exit : -1.0) << "]"
+             << " overlap=" << static_cast<int>(intervalsOverlap(oa, ob));
+        lines.push_back(zone.str());
     }
+    return lines;
 }
 
 RuleEngine::OccupancyInterval RuleEngine::occupancyInterval(
