@@ -46,17 +46,19 @@ public:
         std::map<std::pair<int, int>, int> commit_owner;
         std::set<std::pair<int, int>> following_pairs;
         ResourceTokenTable tokens;
+        std::map<int, int> reservation_path_gen;
         double now = 0.0;
         int a1_service_owner = -1;
     };
     SimSnapshot snapshot() const {
-        return SimSnapshot{commit_owner_, following_pairs_, tokens_, now_,
-                           a1_service_owner_};
+        return SimSnapshot{commit_owner_, following_pairs_, tokens_,
+                           reservation_path_gen_, now_, a1_service_owner_};
     }
     void restore(const SimSnapshot& s) {
         commit_owner_ = s.commit_owner;
         following_pairs_ = s.following_pairs;
         tokens_ = s.tokens;
+        reservation_path_gen_ = s.reservation_path_gen;
         now_ = s.now;
         a1_service_owner_ = s.a1_service_owner;
     }
@@ -149,6 +151,10 @@ private:
     // 车身(含后伸)完全驶出该共享区才释放——杜绝优先级随 wait_time 在过程中翻转
     // 而把让行车提前放行导致的撞车。
     std::map<std::pair<int, int>, int> commit_owner_;
+    // Reservations are meaningful only for the exact pair of fixed tracks
+    // that created them. A path_gen change invalidates every reservation
+    // involving that vehicle.
+    std::map<int, int> reservation_path_gen_;
 
     // 真·同向同车道跟车对(由 resolveFollowing 每周期重算认定;key={min,max} id)。
     // 唯一事实源:resolvePairwiseConflicts 仅当某对在此集合内才跳过(交 resolveFollowing

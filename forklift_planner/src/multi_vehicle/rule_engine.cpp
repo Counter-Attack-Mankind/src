@@ -534,6 +534,27 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
     // 期间不因 wait_time/饥饿等状态变化而翻转，让行方持续让行。硬护栏(patrol node)仍
     // 是不可关闭的安全底线。
 
+    // 预约只属于创建它的那一对固定路径。A1 装货后 B→A1 会换成全新的 A1→B
+    // track；若仍只按车辆 id 保留旧预约，新航段会继承与自身几何无关的 holder。
+    // 任一车 path_gen 变化时，清除所有涉及它的成对预约，再由新路径重新裁决。
+    for (const VehicleAgent& v : vehicles) {
+        auto seen = reservation_path_gen_.find(v.id);
+        if (seen == reservation_path_gen_.end()) {
+            reservation_path_gen_[v.id] = v.path_gen;
+            continue;
+        }
+        if (seen->second == v.path_gen) continue;
+
+        for (auto it = commit_owner_.begin(); it != commit_owner_.end();) {
+            if (it->first.first == v.id || it->first.second == v.id) {
+                it = commit_owner_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        seen->second = v.path_gen;
+    }
+
     // 后轴参考下，车身相对参考点(后轴)向前伸 body_front_ext、向后伸 body_rear_ext。
     // 「占用某区段」= 参考点 s ∈ [enter - 前伸, exit + 后伸]（车身任一点压在区段上）。
     const double front_ext = mp_.body_front_ext();
@@ -665,6 +686,81 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             auto cleared = [&](const VehicleAgent& v, double sx) {
                 return v.path_s - rear_ext > sx;
             };
+
+            // A1 是不可被普通路径仲裁打断的服务事务。持有车一旦进入 A1 收口，
+            // 必须连续完成进场、装载和初始离场；候车在 TO_A1 阶段只能让行。
+            //
+            // 这里必须位于 commit_owner_ 和 a/b_committed 之前：后两者把整条固定路径
+            // 上多个冲突块外包成一个大区，候车可能只越过远处的早期入口便被标成
+            // committed。若让该状态压过 A1 服务权，就会得到
+            //   owner --brake_waiter--> 等 waiter
+            //   waiter --wait_a1_exit--> 等 owner
+            // 的两节点等待环。
+            {
+                VehicleAgent* service_owner = nullptr;
+                VehicleAgent* a1_waiter = nullptr;
+                bool owner_is_a = false;
+                if (a.id == a1_service_owner_ &&
+                    b.mission_phase == MissionPhase::TO_A1) {
+                    service_owner = &a;
+                    a1_waiter = &b;
+                    owner_is_a = true;
+                } else if (b.id == a1_service_owner_ &&
+                           a.mission_phase == MissionPhase::TO_A1) {
+                    service_owner = &b;
+                    a1_waiter = &a;
+                    owner_is_a = false;
+                }
+
+                const bool owner_final_approach =
+                    service_owner != nullptr &&
+                    service_owner->mission_phase == MissionPhase::TO_A1 &&
+                    service_owner->remainingS() <=
+                        cfg_.a1_queue_hold_distance + 0.50;
+                const bool owner_departing =
+                    service_owner != nullptr &&
+                    service_owner->mission_phase == MissionPhase::TO_B &&
+                    service_owner->loaded;
+
+                if (owner_final_approach || owner_departing) {
+                    // 安全例外：若候车车身已经真实压入某个独立 OBB 冲突块，不能命令
+                    // 服务车硬撞过去。让普通仲裁暂时令侵入车清出；正常运行时 A1
+                    // 上游门控会在发生这种侵入之前截停它。
+                    bool waiter_inside_real_zone = false;
+                    double waiter_next_enter =
+                        std::numeric_limits<double>::infinity();
+                    for (const ConflictZone& z : zones) {
+                        const double waiter_enter =
+                            owner_is_a ? z.s_other_enter : z.s_self_enter;
+                        const double waiter_exit =
+                            owner_is_a ? z.s_other_exit : z.s_self_exit;
+                        if (insideZone(*a1_waiter, waiter_enter,
+                                       waiter_exit)) {
+                            waiter_inside_real_zone = true;
+                            break;
+                        }
+                        if (waiter_exit + rear_ext >= a1_waiter->path_s) {
+                            waiter_next_enter =
+                                std::min(waiter_next_enter, waiter_enter);
+                        }
+                    }
+
+                    if (!waiter_inside_real_zone) {
+                        // 不把此事务写入普通 commit_owner_：a1_service_owner_ 本身就是
+                        // 跨周期闭锁。这样服务车清出 A1、事务释放后，不会遗留一张要求
+                        // 候车继续等到服务车跑完整条 A1→B 路径的旧预约。
+                        commit_owner_.erase(pkey);
+                        if (std::isfinite(waiter_next_enter)) {
+                            brakeIfNeeded(*a1_waiter, waiter_next_enter,
+                                          service_owner->id);
+                        }
+                        recordConflictZones(
+                            a, b, zones,
+                            ConflictMarkerKind::CROSSING_OR_OPPOSING);
+                        continue;
+                    }
+                }
+            }
 
             // [DIAG wedge] 某对车卡很久(wait>8s)→ 打印整片区域几何 + 各冲突区明细,
             // 定位根因。每对只打一次,只读。
