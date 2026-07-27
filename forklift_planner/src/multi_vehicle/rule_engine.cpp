@@ -70,8 +70,7 @@ int RuleEngine::priorityWinner(const VehicleAgent& a,
         if (owner != nullptr &&
             waiter->mission_phase == MissionPhase::TO_A1) {
             const bool owner_approaching =
-                owner->mission_phase == MissionPhase::TO_A1 &&
-                owner->remainingS() <= cfg_.a1_queue_hold_distance + 0.50;
+                owner->mission_phase == MissionPhase::TO_A1;
             const bool owner_loading =
                 owner->mission_phase == MissionPhase::PICKUP_DWELL;
             const bool owner_departing =
@@ -714,9 +713,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
 
                 const bool owner_final_approach =
                     service_owner != nullptr &&
-                    service_owner->mission_phase == MissionPhase::TO_A1 &&
-                    service_owner->remainingS() <=
-                        cfg_.a1_queue_hold_distance + 0.50;
+                    service_owner->mission_phase == MissionPhase::TO_A1;
                 const bool owner_departing =
                     service_owner != nullptr &&
                     service_owner->mission_phase == MissionPhase::TO_B &&
@@ -984,6 +981,13 @@ void RuleEngine::resolveA1ApproachQueue(
         std::max(cfg_.a1_queue_hold_distance,
                  cfg_.a1_exit_release_distance + mp_.vehicle_length +
                      2.0 * cfg_.conflict_margin);
+    const double max_speed_braking =
+        cfg_.max_speed * cfg_.max_speed /
+        (2.0 * std::max(1e-6, cfg_.max_decel));
+    const double request_distance =
+        std::max(cfg_.a1_request_distance,
+                 hold_distance + max_speed_braking +
+                     cfg_.max_speed * std::max(0.0, dt) + 0.05);
     auto isDeparting = [&](const VehicleAgent& v) {
         if (!v.active() || v.mission_phase != MissionPhase::TO_B ||
             !v.loaded) {
@@ -1018,8 +1022,9 @@ void RuleEngine::resolveA1ApproachQueue(
     }
 
     if (owner == nullptr) {
-        // 节点若在装载/离场中重建，先恢复现场占用者；正常情况下选剩余路程最短者，
-        // 完全相同时以 id 确定，保证裁决稳定。
+        // 节点若在装载/离场中重建，先恢复现场占用者。普通 TO_A1 车辆只有进入
+        // A1 请求线后才成为候选；请求线外不提前占有服务权。若同周期有多辆候选，
+        // 选择进入更深(remainingS 更小)者，完全相同时以 id 确定。
         for (VehicleAgent& v : vehicles) {
             if (!isLoading(v)) continue;
             if (owner == nullptr || v.id < owner->id) owner = &v;
@@ -1033,6 +1038,7 @@ void RuleEngine::resolveA1ApproachQueue(
         if (owner == nullptr) {
             for (VehicleAgent& v : vehicles) {
                 if (!isApproaching(v)) continue;
+                if (v.remainingS() > request_distance) continue;
                 if (owner == nullptr ||
                     v.remainingS() < owner->remainingS() - 1e-9 ||
                     (std::abs(v.remainingS() - owner->remainingS()) <= 1e-9 &&

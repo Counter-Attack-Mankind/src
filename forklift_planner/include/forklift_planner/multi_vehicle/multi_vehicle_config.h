@@ -25,6 +25,7 @@ struct MultiVehicleConfig {
     // Only the final A1 approach is serialized. Vehicles may travel from B
     // concurrently, but non-owners stop this far upstream while the owner
     // loads and clears the A1 departure sweep.
+    double a1_request_distance = 1.50;
     double a1_queue_hold_distance = 1.10;
     double a1_exit_release_distance = 0.75;
     double rolling_horizon = 10.0;          // future planner time 

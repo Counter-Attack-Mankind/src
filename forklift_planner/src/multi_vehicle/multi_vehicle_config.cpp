@@ -45,6 +45,8 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
              c.pickup_dwell_time);
     nh.param(ns + "unload_dwell_time", c.unload_dwell_time,
              c.unload_dwell_time);
+    nh.param(ns + "a1_request_distance", c.a1_request_distance,
+             c.a1_request_distance);
     nh.param(ns + "a1_queue_hold_distance", c.a1_queue_hold_distance,
              c.a1_queue_hold_distance);
     nh.param(ns + "a1_exit_release_distance",
@@ -146,6 +148,13 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
         std::max(0.05, c.a1_queue_hold_distance);
     c.a1_exit_release_distance =
         std::max(0.05, c.a1_exit_release_distance);
+    const double a1_max_speed_braking =
+        c.max_speed * c.max_speed /
+        (2.0 * std::max(1e-6, c.max_decel));
+    c.a1_request_distance =
+        std::max(c.a1_request_distance,
+                 c.a1_queue_hold_distance +
+                     a1_max_speed_braking + 0.10);
     c.rolling_horizon = std::max(0.1, c.rolling_horizon);
     c.rolling_refresh_period = std::max(0.1, c.rolling_refresh_period);
     c.path_validation_step = std::max(0.005, c.path_validation_step);
