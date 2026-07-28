@@ -46,6 +46,7 @@ public:
         std::map<std::pair<int, int>, int> commit_owner;
         std::set<std::pair<int, int>> following_pairs;
         std::map<std::pair<int, int>, int> following_leader;
+        std::map<std::pair<int, int>, int> following_phase;
         ResourceTokenTable tokens;
         std::map<int, int> reservation_path_gen;
         double now = 0.0;
@@ -53,13 +54,14 @@ public:
     };
     SimSnapshot snapshot() const {
         return SimSnapshot{commit_owner_, following_pairs_, following_leader_,
-                           tokens_,
+                           following_phase_, tokens_,
                            reservation_path_gen_, now_, a1_service_owner_};
     }
     void restore(const SimSnapshot& s) {
         commit_owner_ = s.commit_owner;
         following_pairs_ = s.following_pairs;
         following_leader_ = s.following_leader;
+        following_phase_ = s.following_phase;
         tokens_ = s.tokens;
         reservation_path_gen_ = s.reservation_path_gen;
         now_ = s.now;
@@ -86,8 +88,12 @@ private:
         double s_other_exit = 0.0;   // arc exit on other's path
         double x = 0.0;
         double y = 0.0;
-        // 块内两路径是否「同向」(正对角带=同车道跟车;否则交叉/对向)。由静态几何在
-        // 块中点测两路径行进朝向算定 → 稳定不随当前位姿闪烁(对称,与 self/other 朝向无关)。
+        // Gear changes are hard conflict-block boundaries. These flags keep a
+        // REVERSE/FORWARD cusp out of one large following resource.
+        bool self_reverse = false;
+        bool other_reverse = false;
+        // 块内两路径是否同向。逐个重叠样本按真实运动朝向分类，只有分类和
+        // self/other 档位均相同的相邻样本才允许合并。
         bool same_dir = false;
     };
 
@@ -176,6 +182,9 @@ private:
     // vehicle id; the other member is the sole follower. Recomputed every
     // cycle together with following_pairs_.
     std::map<std::pair<int, int>, int> following_leader_;
+    // Encoded gear pair for the block that established the directed order.
+    // A leader lock is invalid as soon as either vehicle crosses a cusp.
+    std::map<std::pair<int, int>, int> following_phase_;
 
     // 静态冲突集 C_ij 缓存(协调图第一步)。key={lo.id,hi.id};块以 self=lo 朝向存储。
     // gen_lo/gen_hi 记录算定时两车的 path_gen;任一方 path_gen 变(换了固定路径)即失效

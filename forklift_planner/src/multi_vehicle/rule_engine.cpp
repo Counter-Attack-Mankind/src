@@ -24,6 +24,9 @@ struct OverlapSample {
     double s_other = 0.0;
     double x = 0.0;
     double y = 0.0;
+    bool self_reverse = false;
+    bool other_reverse = false;
+    bool same_dir = false;
 };
 
 }  // namespace
@@ -235,9 +238,22 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
 
             const RoughWp ps = self.track.poseAtS(ss_clamped);
             const RoughWp po = other.track.poseAtS(so_clamped);
+            const bool self_reverse =
+                self.track.typeAtS(ss_clamped) == WpType::REVERSE;
+            const bool other_reverse =
+                other.track.typeAtS(so_clamped) == WpType::REVERSE;
+            constexpr double kPi = 3.14159265358979323846;
+            const double hs = ps.theta + (self_reverse ? kPi : 0.0);
+            const double ho = po.theta + (other_reverse ? kPi : 0.0);
+            const bool same_dir =
+                self_reverse == other_reverse &&
+                (std::cos(hs) * std::cos(ho) +
+                 std::sin(hs) * std::sin(ho)) > 0.7;
             row.push_back(OverlapSample{ss_clamped, so_clamped,
                                         0.5 * (ps.x + po.x),
-                                        0.5 * (ps.y + po.y)});
+                                        0.5 * (ps.y + po.y),
+                                        self_reverse, other_reverse,
+                                        same_dir});
         }
 
         if (row.empty()) continue;
@@ -245,7 +261,10 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
         std::vector<ConflictZone> row_zones;
         for (const OverlapSample& sample : row) {
             if (row_zones.empty() ||
-                sample.s_other > row_zones.back().s_other_exit + kMergeGap) {
+                sample.s_other > row_zones.back().s_other_exit + kMergeGap ||
+                sample.self_reverse != row_zones.back().self_reverse ||
+                sample.other_reverse != row_zones.back().other_reverse ||
+                sample.same_dir != row_zones.back().same_dir) {
                 ConflictZone z;
                 z.s_self_enter = sample.s_self;
                 z.s_self_exit = sample.s_self;
@@ -253,6 +272,9 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
                 z.s_other_exit = sample.s_other;
                 z.x = sample.x;
                 z.y = sample.y;
+                z.self_reverse = sample.self_reverse;
+                z.other_reverse = sample.other_reverse;
+                z.same_dir = sample.same_dir;
                 row_zones.push_back(z);
             } else {
                 ConflictZone& z = row_zones.back();
@@ -265,12 +287,16 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
         for (const ConflictZone& row_zone : row_zones) {
             bool merged = false;
             for (ConflictZone& z : zones) {
+                const bool same_motion_class =
+                    row_zone.self_reverse == z.self_reverse &&
+                    row_zone.other_reverse == z.other_reverse &&
+                    row_zone.same_dir == z.same_dir;
                 const bool self_touch =
                     row_zone.s_self_enter <= z.s_self_exit + kMergeGap;
                 const bool other_touch =
                     row_zone.s_other_enter <= z.s_other_exit + kMergeGap &&
                     row_zone.s_other_exit + kMergeGap >= z.s_other_enter;
-                if (!self_touch || !other_touch) continue;
+                if (!same_motion_class || !self_touch || !other_touch) continue;
 
                 z.s_self_enter = std::min(z.s_self_enter, row_zone.s_self_enter);
                 z.s_self_exit = std::max(z.s_self_exit, row_zone.s_self_exit);
@@ -287,24 +313,8 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
         }
     }
 
-    // 为每个块算「同向」标志(静态):在块中点测两路径行进朝向(REVERSE 段切线+π),
-    // 同向(dot>0.7)=正对角带=同车道跟车;否则交叉/对向。供 resolveFollowing 与 pairwise
-    // 共用作稳定判据——不再用随当前位姿闪烁的瞬时朝向(交叉/汇入处会瞬时对齐而误判)。
-    constexpr double kPi = 3.14159265358979323846;
-    auto pathHeadingAtS = [&](const VehicleAgent& v, double s) {
-        double h = v.track.poseAtS(s).theta;
-        if (v.track.typeAtS(s) == WpType::REVERSE) h += kPi;
-        return h;
-    };
-    for (ConflictZone& z : zones) {
-        const double hs =
-            pathHeadingAtS(self, 0.5 * (z.s_self_enter + z.s_self_exit));
-        const double ho =
-            pathHeadingAtS(other, 0.5 * (z.s_other_enter + z.s_other_exit));
-        z.same_dir =
-            (std::cos(hs) * std::cos(ho) + std::sin(hs) * std::sin(ho)) > 0.7;
-    }
-
+    // same_dir and both gear phases were classified per overlap sample.
+    // Merging above preserves those labels, so no block can bridge a cusp.
     return zones;
 }
 
@@ -366,6 +376,7 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::findConflictZones(
         if (!self_is_lo) {  // 朝向反转:canonical 以 lo 为 self,这里 self 是 hi
             std::swap(z.s_self_enter, z.s_other_enter);
             std::swap(z.s_self_exit, z.s_other_exit);
+            std::swap(z.self_reverse, z.other_reverse);
         }
         // 任一方已完全清出该块 → 不再冲突,丢弃。(入口不夹紧,保持静态)
         if (z.s_self_exit < self_begin || z.s_other_exit < other_begin) continue;
@@ -526,6 +537,8 @@ std::vector<std::string> RuleEngine::debugConflictLines(
          << " nominal_time_overlap=" << static_cast<int>(nominal_time_overlap)
          << " | A phase=" << phaseName(a.mission_phase)
          << " s=" << a.path_s << "/" << a.track.length()
+         << " gear="
+         << (a.track.typeAtS(a.path_s) == WpType::REVERSE ? "R" : "F")
          << " act=" << static_cast<int>(a.action)
          << " blk=V" << a.blocker_id
          << " gen=" << a.path_gen
@@ -533,6 +546,8 @@ std::vector<std::string> RuleEngine::debugConflictLines(
          << " pending_gen=" << a.pending_path_gen
          << " | B phase=" << phaseName(b.mission_phase)
          << " s=" << b.path_s << "/" << b.track.length()
+         << " gear="
+         << (b.track.typeAtS(b.path_s) == WpType::REVERSE ? "R" : "F")
          << " act=" << static_cast<int>(b.action)
          << " blk=V" << b.blocker_id
          << " gen=" << b.path_gen
@@ -576,6 +591,9 @@ std::vector<std::string> RuleEngine::debugConflictLines(
         zone.precision(3);
         zone << "[coord_diag][zone " << i << "] same_dir="
              << static_cast<int>(z.same_dir)
+             << " phase="
+             << (z.self_reverse ? "R" : "F") << "/"
+             << (z.other_reverse ? "R" : "F")
              << " xy=(" << z.x << "," << z.y << ")"
              << " | A[" << z.s_self_enter << "," << z.s_self_exit
              << "] stop=" << z.s_self_enter - front
@@ -717,6 +735,26 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
     // 「占用某区段」= 参考点 s ∈ [enter - 前伸, exit + 后伸]（车身任一点压在区段上）。
     const double front_ext = mp_.body_front_ext();
     const double rear_ext = mp_.body_rear_ext();
+    constexpr double kFollowingCuspGuard = 0.15;
+    auto reverseAt = [](const VehicleAgent& v, double s) {
+        return v.track.typeAtS(
+                   std::max(0.0, std::min(s, v.track.length()))) ==
+               WpType::REVERSE;
+    };
+    auto stableMotionPhase = [&](const VehicleAgent& v,
+                                 bool expected_reverse) {
+        return reverseAt(v, v.path_s - kFollowingCuspGuard) ==
+                   expected_reverse &&
+               reverseAt(v, v.path_s) == expected_reverse &&
+               reverseAt(v, v.path_s + kFollowingCuspGuard) ==
+                   expected_reverse;
+    };
+    auto currentMotionHeading = [&](const VehicleAgent& v) {
+        constexpr double kPi = 3.14159265358979323846;
+        double h = v.track.poseAtS(v.path_s).theta;
+        if (reverseAt(v, v.path_s)) h += kPi;
+        return h;
+    };
     auto insideZone = [&](const VehicleAgent& v, double enter_s, double exit_s) {
         const double s =
             (v.mode == VehicleMode::DWELL) ? v.track.length() : v.path_s;
@@ -815,7 +853,24 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     std::remove_if(
                         zones.begin(), zones.end(),
                         [&](const ConflictZone& z) {
-                            return z.same_dir &&
+                            if (!z.same_dir ||
+                                z.self_reverse != z.other_reverse ||
+                                !stableMotionPhase(a, z.self_reverse) ||
+                                !stableMotionPhase(b, z.other_reverse)) {
+                                return false;
+                            }
+                            const double ha = currentMotionHeading(a);
+                            const double hb = currentMotionHeading(b);
+                            const double heading_dot =
+                                std::cos(ha) * std::cos(hb) +
+                                std::sin(ha) * std::sin(hb);
+                            const bool a_inside =
+                                a.path_s + front_ext >= z.s_self_enter &&
+                                a.path_s - rear_ext <= z.s_self_exit;
+                            const bool b_inside =
+                                b.path_s + front_ext >= z.s_other_enter &&
+                                b.path_s - rear_ext <= z.s_other_exit;
+                            return heading_dot > 0.7 && a_inside && b_inside &&
                                    std::min(z.s_self_exit -
                                                 z.s_self_enter,
                                             z.s_other_exit -
@@ -1062,8 +1117,11 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
     // 直接形成双向等待。这里用同向共享块上的归一化弧长进度确定唯一前后顺序。
     const std::map<std::pair<int, int>, int> previous_leaders =
         following_leader_;
+    const std::map<std::pair<int, int>, int> previous_phases =
+        following_phase_;
     following_pairs_.clear();
     following_leader_.clear();
+    following_phase_.clear();
 
     auto terminalDocking = [&](const VehicleAgent& v) {
         if (!v.active()) return false;
@@ -1093,8 +1151,24 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
 
     const double front = mp_.body_front_ext();
     const double rear = mp_.body_rear_ext();
-    const double lookahead =
-        std::max(cfg_.following_normal_distance, mp_.vehicle_length);
+    constexpr double kCuspGuard = 0.15;
+    auto reverseAt = [](const VehicleAgent& v, double s) {
+        return v.track.typeAtS(
+                   std::max(0.0, std::min(s, v.track.length()))) ==
+               WpType::REVERSE;
+    };
+    auto stableMotionPhase = [&](const VehicleAgent& v,
+                                 bool expected_reverse) {
+        return reverseAt(v, v.path_s - kCuspGuard) == expected_reverse &&
+               reverseAt(v, v.path_s) == expected_reverse &&
+               reverseAt(v, v.path_s + kCuspGuard) == expected_reverse;
+    };
+    auto currentMotionHeading = [&](const VehicleAgent& v) {
+        constexpr double kPi = 3.14159265358979323846;
+        double h = v.track.poseAtS(v.path_s).theta;
+        if (reverseAt(v, v.path_s)) h += kPi;
+        return h;
+    };
     auto distanceToSpan = [](double s, double enter, double exit) {
         if (s < enter) return enter - s;
         if (s > exit) return s - exit;
@@ -1120,6 +1194,20 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
             double best_score = std::numeric_limits<double>::infinity();
             for (const ConflictZone& z : zones) {
                 if (!z.same_dir) continue;
+                // Mixed REVERSE/FORWARD encounters and cusp transitions are
+                // mutual-exclusion problems, not longitudinal following.
+                if (z.self_reverse != z.other_reverse) continue;
+                if (!stableMotionPhase(a, z.self_reverse) ||
+                    !stableMotionPhase(b, z.other_reverse)) {
+                    continue;
+                }
+                const double ha = currentMotionHeading(a);
+                const double hb = currentMotionHeading(b);
+                if (std::cos(ha) * std::cos(hb) +
+                        std::sin(ha) * std::sin(hb) <=
+                    0.7) {
+                    continue;
+                }
                 const double a_zone_len =
                     z.s_self_exit - z.s_self_enter;
                 const double b_zone_len =
@@ -1132,10 +1220,10 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
                     continue;
                 }
                 const bool a_relevant =
-                    a.path_s + front + lookahead >= z.s_self_enter &&
+                    a.path_s + front >= z.s_self_enter &&
                     a.path_s - rear <= z.s_self_exit;
                 const bool b_relevant =
-                    b.path_s + front + lookahead >= z.s_other_enter &&
+                    b.path_s + front >= z.s_other_enter &&
                     b.path_s - rear <= z.s_other_exit;
                 if (!a_relevant || !b_relevant) continue;
                 active_same.push_back(z);
@@ -1163,16 +1251,25 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
             const std::pair<int, int> key{
                 std::min(a.id, b.id), std::max(a.id, b.id)};
             auto previous = previous_leaders.find(key);
+            const int phase_key =
+                (order_zone.self_reverse ? 2 : 0) |
+                (order_zone.other_reverse ? 1 : 0);
+            const auto previous_phase = previous_phases.find(key);
+            const bool same_previous_phase =
+                previous_phase != previous_phases.end() &&
+                previous_phase->second == phase_key;
             // Nearly side-by-side/indistinguishable progress is a merge
             // arbitration problem unless a continuous relation already locked
             // the order in an earlier cycle.
             if (std::abs(a_progress - b_progress) <= 0.01 &&
-                previous == previous_leaders.end()) {
+                (previous == previous_leaders.end() ||
+                 !same_previous_phase)) {
                 continue;
             }
             int leader_id =
                 a_progress > b_progress ? a.id : b.id;
             if (previous != previous_leaders.end() &&
+                same_previous_phase &&
                 (previous->second == a.id ||
                  previous->second == b.id)) {
                 // No overtaking inside one shared lane: keep the established
@@ -1185,6 +1282,7 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
                 leader_id == a.id ? b : a;
             following_pairs_.insert(key);
             following_leader_[key] = leader.id;
+            following_phase_[key] = phase_key;
 
             // Display the same-direction shared region whenever the relation
             // exists, even when the gap is large and no speed reduction is
