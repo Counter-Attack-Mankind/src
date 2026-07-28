@@ -81,14 +81,6 @@ struct VehicleAgent {
     double path_s = 0.0;
     double current_speed = 0.0;
 
-    // A1 egress recovery reuses the already validated B->A1 track in reverse
-    // arc-length order. The logistics task and pending A1->B leg stay intact;
-    // after reaching retreat_target_s the vehicle waits there and later
-    // resumes the same TO_A1 task.
-    bool a1_egress_retreat = false;
-    int a1_egress_retreat_owner = -1;
-    double a1_egress_retreat_target_s = 0.0;
-
     // 实车显示用真实位姿:real_mode 下由 /object 填(后轴中心)。RViz 据此显示车的【实际位置】
     // 而非投影到路径上的位置——这样跟踪误差(车偏离路径多少)一眼可见。sim 下不置位,行为不变。
     bool real_pose_valid = false;

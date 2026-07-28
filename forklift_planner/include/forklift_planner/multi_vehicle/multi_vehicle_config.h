@@ -35,6 +35,11 @@ struct MultiVehicleConfig {
     // Minimum owner-side anchor; release waits for rear clearance of the full
     // connected departure chain, not just this scalar distance.
     double a1_exit_release_distance = 0.75;
+    // Total decision/control latency used by every A1 admission and gate
+    // braking check. The current control dt is used when it is larger.
+    double a1_control_delay = 0.20;
+    // Static allowance for localization error and discrete path sampling.
+    double a1_stop_margin = 0.05;
     double rolling_horizon = 10.0;          // future planner time 
     double rolling_refresh_period = 2.0;        //  refresh period
 

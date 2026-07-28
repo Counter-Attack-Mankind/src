@@ -294,9 +294,9 @@ private:
     // Early scheduling hint only. It never issues motion commands or overrides
     // ordinary (orange) arbitration.
     int a1_reserved_owner_ = -1;
-    // Owner of the cached future A1->B critical egress chain. This reservation
-    // may become active before local A1 service control so approaching traffic
-    // can still stop at an upstream gate.
+    // Formal owner of the cached future A1->B critical egress chain. It is set
+    // only together with a1_service_owner_ after atomic admission of both the
+    // current B->A1 approach and cached A1->B departure chains.
     int a1_egress_owner_ = -1;
     // 仅门控 A1 最后一段进场、装载和初始离场，不串行化整条 B→A1 路径。
     int a1_service_owner_ = -1;

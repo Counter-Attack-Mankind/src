@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <deque>
 #include <map>
@@ -914,18 +915,6 @@ private:
             next_speed[i] = v.current_speed;
             if (!v.active()) continue;
 
-            if (v.a1_egress_retreat) {
-                const double desired_speed =
-                    rule_engine_->speedForAction(VehicleAction::CREEP);
-                next_speed[i] =
-                    limitedSpeed(v.current_speed, desired_speed, dt);
-                next_s[i] = std::max(
-                    v.a1_egress_retreat_target_s,
-                    v.path_s - next_speed[i] * dt);
-                planned_s[i] = next_s[i];
-                continue;
-            }
-
             // 规划速度=动作档,再被曲率限速卡住(与实车 coord_speed 同一套,sim 才能真实验证)。
             const double desired_speed = std::min(rule_engine_->speedForAction(v.action),
                                                   curvatureSpeed(v));
@@ -976,7 +965,6 @@ private:
         auto tryClearBlocker = [&](size_t idx, int blocker_id) {
             VehicleAgent& v = agents_[idx];
             if (!v.active()) return false;
-            if (v.a1_egress_retreat) return false;
             if (next_s[idx] > v.path_s + 1e-9) return false;
 
             const double creep_speed =
@@ -1055,11 +1043,9 @@ private:
                         changed = blockVehicle(j) || changed;
                     } else if (i_active && j_active) {
                         const bool i_moves =
-                            std::abs(next_s[i] -
-                                     agents_[i].path_s) > 1e-9;
+                            next_s[i] > agents_[i].path_s + 1e-9;
                         const bool j_moves =
-                            std::abs(next_s[j] -
-                                     agents_[j].path_s) > 1e-9;
+                            next_s[j] > agents_[j].path_s + 1e-9;
                         const bool i_only_safe =
                             i_moves &&
                             !overlapsAt(i, next_s[i], j, agents_[j].path_s);
@@ -1244,8 +1230,7 @@ private:
             if (!agents_[i].active()) continue;
             any_blocked_active = any_blocked_active || blocked[i];
             if (!blocked[i] &&
-                std::abs(planned_s[i] -
-                         agents_[i].path_s) > 1e-9) {
+                planned_s[i] > agents_[i].path_s + 1e-9) {
                 any_active_motion = true;
             }
         }
@@ -1278,9 +1263,6 @@ private:
             for (size_t i = 0; i < agents_.size(); ++i) {
                 VehicleAgent& v = agents_[i];
                 if (!v.active()) continue;
-                // A1 egress recovery already has an explicit reverse motion.
-                // The generic forward stall release must never cancel it.
-                if (v.a1_egress_retreat) continue;
                 if (!blocked[i] && planned_s[i] > v.path_s + 1e-9) continue;
                 const double creep_speed =
                     limitedSpeed(v.current_speed,
@@ -1333,7 +1315,6 @@ private:
             for (size_t i = 0; i < agents_.size(); ++i) {
                 VehicleAgent& v = agents_[i];
                 if (!v.active() || v.wait_time < kReverseWait) continue;
-                if (v.a1_egress_retreat) continue;
                 const int bk = forwardBlocker(i);
                 if (bk < 0) continue;
                 const VehicleAgent& b = agents_[bk];
@@ -1442,8 +1423,7 @@ private:
                 "mode=%s phase=%s action=%s reason=%s "
                 "blocker=%d task=%d slot=%d->%d pending_B=%d "
                 "s=%.3f/%.3f rem=%.3f "
-                "speed=%.3f wait=%.2f dwell=%.2f "
-                "a1_retreat=%d retreat_owner=%d retreat_target=%.3f",
+                "speed=%.3f wait=%.2f dwell=%.2f",
                 static_cast<unsigned long long>(tick_count_), sim_time_,
                 v.id, modeName(v.mode), missionPhaseName(v.mission_phase),
                 actionName(v.action),
@@ -1451,9 +1431,7 @@ private:
                 v.task_count, v.current_slot, v.target_slot,
                 v.pending_target_slot, v.path_s,
                 length, rem, v.current_speed, v.wait_time,
-                v.dwell_remaining, v.a1_egress_retreat ? 1 : 0,
-                v.a1_egress_retreat_owner,
-                v.a1_egress_retreat_target_s);
+                v.dwell_remaining);
             ROS_INFO("%s", buf);
             coordLog(buf);
 
@@ -1969,14 +1947,10 @@ private:
             const double lo = std::max(0.0, rb_prev_path_s_[i] - 0.10);
             const double hi = std::min(v.track.length(), rb_prev_path_s_[i] + 0.50);
             double new_s = projectOntoTrackRange(v.track, real_x_[i], real_y_[i], lo, hi);
-            if (v.a1_egress_retreat) {
-                new_s = std::min(new_s, rb_prev_path_s_[i]);
-            } else {
-                new_s = std::max(new_s, rb_prev_path_s_[i]);
-            }
+            new_s = std::max(new_s, rb_prev_path_s_[i]);
             v.current_speed = std::max(
                 0.0,
-                std::min(std::abs(new_s - rb_prev_path_s_[i]) / dt,
+                std::min((new_s - rb_prev_path_s_[i]) / dt,
                          cfg_.max_speed));
             v.path_s = new_s;
             rb_prev_path_s_[i] = new_s;
@@ -2071,7 +2045,6 @@ private:
                                      == WpType::REVERSE;
                 if (rev) dir = -1.0;
             }
-            if (v.a1_egress_retreat) dir = -dir;
             double target = dir * mag;
             // 动捕看门狗:该车位姿失联(>0.5s)→ 强制目标速度 0。否则控制器拿陈旧位姿
             // 盲走、底盘又无超时 → 跑飞。只压这一辆的输出速度,协调逻辑/其它车不受影响
@@ -2227,25 +2200,22 @@ private:
     bool deadlock_logged_ = false;                    // 首次死锁是否已详打
     std::set<std::set<int>> dumped_clusters_;         // 已详打过的死锁簇(按成员集去重,编目用)
     std::map<int, double> last_replan_t_;             // 车id→上次重规划 sim_t(冷却用)
+    std::map<int, double> last_a1_task_reroute_t_;     // A1兜底换库位冷却
 
 public:
     // 一辆车的紧凑状态行(诊断用,信息尽量全)。
     std::string vehLine(const VehicleAgent& v) const {
-        char buf[384];
+        char buf[320];
         snprintf(buf, sizeof(buf),
                  "  V%d mode=%d phase=%s loaded=%d act=%d reason=%s blk=%d "
                  "brkr=%d task=%d slot=%d->%d pending_B=%d "
-                 "s=%.3f/%.3f rem=%.3f spd=%.3f wait=%.1f gen=%d "
-                 "a1_retreat=%d(owner=V%d target=%.3f)",
+                 "s=%.3f/%.3f rem=%.3f spd=%.3f wait=%.1f gen=%d",
                  v.id, (int)v.mode, missionPhaseName(v.mission_phase), (int)v.loaded,
                  (int)v.action, v.reason.c_str(), v.blocker_id,
                  (int)v.deadlock_breaker, v.task_count, v.current_slot,
                  v.target_slot, v.pending_target_slot,
                  v.path_s, v.track.length(), v.remainingS(),
-                 v.current_speed, v.wait_time, v.path_gen,
-                 v.a1_egress_retreat ? 1 : 0,
-                 v.a1_egress_retreat_owner,
-                 v.a1_egress_retreat_target_s);
+                 v.current_speed, v.wait_time, v.path_gen);
         return buf;
     }
     std::string fleetSnapshot() const {
@@ -2307,6 +2277,143 @@ public:
         const std::set<int> members = findDeadlockMembers(kDeadlockWait);
         if (members.empty()) return;
         ++deadlock_ticks_;
+
+        // A1-specific last resort. Keep every B->A1 path untouched and never
+        // reverse a waiting vehicle. If a persistent wait cycle contains the
+        // future A1-egress owner, replace only that vehicle's cached A1->B
+        // destination with a currently clear free-slot route. Changing
+        // pending_path_gen invalidates RuleEngine's future-egress cache on the
+        // next cycle, so the stale A1 wait edge disappears automatically.
+        if (cfg_.use_a1_cycle) {
+            const int owner_id =
+                rule_engine_->a1ServiceOwner() >= 0
+                    ? rule_engine_->a1ServiceOwner()
+                    : (rule_engine_->a1EgressOwner() >= 0
+                           ? rule_engine_->a1EgressOwner()
+                           : rule_engine_->a1ReservedOwner());
+            VehicleAgent* owner = agentById(owner_id);
+            const bool owner_has_pending_leg =
+                owner != nullptr && owner->hasPendingDropoff() &&
+                (owner->mission_phase == MissionPhase::TO_A1 ||
+                 owner->mission_phase == MissionPhase::PICKUP_DWELL ||
+                 owner->mission_phase ==
+                     MissionPhase::WAIT_DROPOFF_TASK);
+            const bool owner_on_initial_departure =
+                owner != nullptr && owner->active() && owner->loaded &&
+                owner->mission_phase == MissionPhase::TO_B &&
+                owner->path_s <=
+                    cfg_.a1_exit_release_distance +
+                        cfg_.a1_stop_margin;
+            const bool owner_can_reselect =
+                owner != nullptr &&
+                members.count(owner_id) != 0 &&
+                (owner_has_pending_leg ||
+                 owner_on_initial_departure);
+            const auto last = last_a1_task_reroute_t_.find(owner_id);
+            const bool cooldown_ready =
+                last == last_a1_task_reroute_t_.end() ||
+                sim_time_ - last->second >= kCooldown;
+            if (owner_can_reselect && cooldown_ready) {
+                last_a1_task_reroute_t_[owner_id] = sim_time_;
+                const int old_target =
+                    owner_has_pending_leg
+                        ? owner->pending_target_slot
+                        : owner->target_slot;
+                const double old_wait_time = owner->wait_time;
+                const RoughWp old_departure_pose =
+                    owner->track.poseAtS(owner->path_s);
+                VehicleAgent proposal = *owner;
+                if (owner_on_initial_departure) {
+                    // The normal A1->B leg has already been activated. Build a
+                    // detached pending proposal so a failed fallback cannot
+                    // mutate the live transaction or teleport its vehicle.
+                    proposal.pending_target_slot = proposal.target_slot;
+                    proposal.pending_dropoff_track = proposal.track;
+                    ++proposal.pending_path_gen;
+                }
+                const int old_pending_gen = proposal.pending_path_gen;
+                const bool path_available =
+                    allocator_->prepareClearDropoffLegAtA1(
+                        proposal, agents_, true);
+                if (path_available &&
+                    proposal.pending_path_gen != old_pending_gen) {
+                    if (owner_on_initial_departure) {
+                        double projected_s = 0.0;
+                        double projected_error =
+                            std::numeric_limits<double>::infinity();
+                        const double project_end = std::min(
+                            proposal.pending_dropoff_track.length(),
+                            cfg_.a1_exit_release_distance +
+                                mp_.vehicle_length);
+                        constexpr double kProjectStep = 0.01;
+                        for (double s = 0.0;
+                             s <= project_end + 1e-9;
+                             s += kProjectStep) {
+                            const RoughWp p =
+                                proposal.pending_dropoff_track.poseAtS(
+                                    std::min(s, project_end));
+                            const double error = std::hypot(
+                                p.x - old_departure_pose.x,
+                                p.y - old_departure_pose.y);
+                            if (error < projected_error) {
+                                projected_error = error;
+                                projected_s = std::min(s, project_end);
+                            }
+                        }
+                        const double max_projection_error =
+                            std::max(0.08,
+                                     2.0 * cfg_.a1_stop_margin);
+                        if (projected_error >
+                            max_projection_error) {
+                            ROS_ERROR(
+                                "[multi_patrol][A1 deadlock task fallback] "
+                                "V%d rejected replacement B%d: current "
+                                "departure pose is %.3fm from the new A1->B "
+                                "path (limit %.3fm); live path unchanged",
+                                owner_id,
+                                proposal.pending_target_slot,
+                                projected_error,
+                                max_projection_error);
+                            return;
+                        }
+                        if (!allocator_->assignDropoffLeg(
+                                proposal, agents_)) {
+                            ROS_ERROR(
+                                "[multi_patrol][A1 deadlock task fallback] "
+                                "V%d selected B%d but failed to activate "
+                                "the replacement departure leg",
+                                owner_id,
+                                proposal.pending_target_slot);
+                            return;
+                        }
+                        // Preserve the physical departure pose when changing
+                        // the active route; never reset a partially departed
+                        // vehicle back to A1 path_s=0.
+                        proposal.path_s = projected_s;
+                        proposal.current_speed = 0.0;
+                    }
+                    *owner = std::move(proposal);
+                    ++deadlock_recoveries_;
+                    force_horizon_refresh_ = true;
+                    ROS_ERROR(
+                        "[multi_patrol][A1 deadlock task fallback] "
+                        "ring owner=V%d changed A1->B%d to "
+                        "A1->B%d after %.1fs wait; B->A1 tracks unchanged",
+                        owner_id, old_target,
+                        owner_on_initial_departure
+                            ? owner->target_slot
+                            : owner->pending_target_slot,
+                        old_wait_time);
+                    return;
+                }
+                ROS_WARN_THROTTLE(
+                    2.0,
+                    "[multi_patrol][A1 deadlock task fallback] "
+                    "V%d found no alternative A1->B path that "
+                    "is physically clear; keep all vehicles stopped",
+                    owner_id);
+            }
+        }
         // 选等待最久、且不在冷却期的成员当受害车。
         int victim = -1;
         double worst_wait = -1.0;

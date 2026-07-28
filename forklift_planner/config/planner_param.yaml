@@ -62,6 +62,8 @@ forklift_planner:
     a1_request_distance: 1.50     # m，A1正式接管边界；边界外的提前预约只作调度提示，不发停车命令
     a1_queue_hold_distance: 1.10  # m，无竖直候车段/受保护冲突链时的后备排队距离
     a1_exit_release_distance: 0.75 # m，A1离场保护链的最小锚定长度；实际服务权保持到车尾清出整条连通冲突链
+    a1_control_delay: 0.20        # s，A1准入/停车统一采用的决策与控制总延迟
+    a1_stop_margin: 0.05          # m，A1准入/停车统一采用的定位与离散误差余量
     rolling_horizon: 10.0         # s，每次生成未来多长时间的轨迹
     rolling_refresh_period: 2.0   # s，每隔多久重新计算并覆盖发布轨迹
 
