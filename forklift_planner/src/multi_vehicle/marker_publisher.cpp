@@ -229,6 +229,82 @@ void MarkerPublisher::addVisitedSlotMarkers(
     }
 }
 
+void MarkerPublisher::addA1ServiceZoneMarkers(
+    visualization_msgs::MarkerArray& arr) const {
+    if (!cfg_.use_a1_cycle) return;
+
+    // The expanded A1 service region is U-shaped: corridor 1 and the upper
+    // halves of both vertical connectors between corridor 2 and corridor 1.
+    // Purple is deliberately distinct from cyan following and orange mutual
+    // exclusion regions.
+    const double queue_y = 0.5 * (mp_.y6() + mp_.y7());
+    const double right_x0 = mp_.row1_left_aisle + mp_.row1_shelf_width;
+    const double right_x1 = mp_.field_width - mp_.row1_mini_shelf;
+    const std_msgs::ColorRGBA fill =
+        rgba(0.72f, 0.34f, 1.00f, 0.16f);
+    const std_msgs::ColorRGBA edge =
+        rgba(0.86f, 0.48f, 1.00f, 0.92f);
+
+    auto addBox = [&](int id, double x0, double x1,
+                      double y0, double y1) {
+        if (x1 <= x0 || y1 <= y0) return;
+        visualization_msgs::Marker m;
+        m.header.frame_id = pp_.frame_id;
+        m.header.stamp = ros::Time::now();
+        m.ns = "a1_service_zone";
+        m.id = id;
+        m.type = visualization_msgs::Marker::CUBE;
+        m.action = visualization_msgs::Marker::ADD;
+        m.pose.position.x = 0.5 * (x0 + x1);
+        m.pose.position.y = 0.5 * (y0 + y1);
+        m.pose.position.z = 0.007;
+        m.pose.orientation.w = 1.0;
+        m.scale.x = x1 - x0;
+        m.scale.y = y1 - y0;
+        m.scale.z = 0.006;
+        m.color = fill;
+        arr.markers.push_back(m);
+    };
+    addBox(0, 0.0, mp_.field_width, mp_.y7(), mp_.field_height);
+    addBox(1, 0.0, mp_.row1_left_aisle, queue_y, mp_.y7());
+    addBox(2, right_x0, right_x1, queue_y, mp_.y7());
+
+    auto addQueueLine = [&](int id, double x0, double x1) {
+        visualization_msgs::Marker m;
+        m.header.frame_id = pp_.frame_id;
+        m.header.stamp = ros::Time::now();
+        m.ns = "a1_service_queue_line";
+        m.id = id;
+        m.type = visualization_msgs::Marker::LINE_STRIP;
+        m.action = visualization_msgs::Marker::ADD;
+        m.pose.orientation.w = 1.0;
+        m.scale.x = 0.026;
+        m.color = edge;
+        m.points.push_back(pt3(x0, queue_y, 0.026));
+        m.points.push_back(pt3(x1, queue_y, 0.026));
+        arr.markers.push_back(m);
+    };
+    addQueueLine(0, 0.0, mp_.row1_left_aisle);
+    addQueueLine(1, right_x0, right_x1);
+
+    visualization_msgs::Marker label;
+    label.header.frame_id = pp_.frame_id;
+    label.header.stamp = ros::Time::now();
+    label.ns = "a1_service_zone";
+    label.id = 10;
+    label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+    label.action = visualization_msgs::Marker::ADD;
+    label.pose.position.x = 0.5 * mp_.field_width;
+    label.pose.position.y =
+        mp_.field_height - 0.5 * mp_.bottom_shelf_depth;
+    label.pose.position.z = 0.115;
+    label.pose.orientation.w = 1.0;
+    label.scale.z = 0.085;
+    label.color = edge;
+    label.text = "A1 SERVICE";
+    arr.markers.push_back(label);
+}
+
 void MarkerPublisher::addConflictMarkers(
     visualization_msgs::MarkerArray& arr,
     const std::vector<ConflictMarker>& conflicts) const {
@@ -361,6 +437,7 @@ void MarkerPublisher::publish(
     const std::vector<ConflictMarker>& conflicts) const {
     ++publish_seq_;
     visualization_msgs::MarkerArray arr;
+    addA1ServiceZoneMarkers(arr);
     addVisitedSlotMarkers(arr, visited_slots);
     addOriginAxes(arr);  // 地图原点+XY正方向(标定核对用)
     for (const VehicleAgent& v : vehicles) {

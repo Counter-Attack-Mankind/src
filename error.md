@@ -12,17 +12,17 @@ vehicle_count=2 one_shot=0 use_a1_cycle=1 a1_request=1.5 a1_hold=1.1 a1_exit_rel
 [multi_patrol][state] tick=158 sim_t=15.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=0 slot=20->-1 pending_B=10 s=2.250/3.391 rem=1.141 speed=0.000 wait=1.40 dwell=0.00
 [multi_patrol][state] tick=162 sim_t=16.20 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.020 wait=1.80 dwell=0.00
 [multi_patrol][state] tick=163 sim_t=16.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=1.90 dwell=0.00
-[multi_patrol][state] tick=183 sim_t=18.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=3.90 dwell=0.00
-[multi_patrol][state] tick=204 sim_t=20.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=6.00 dwell=0.00
+[multi_patrol][state] tick=184 sim_t=18.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=4.00 dwell=0.00
+[multi_patrol][state] tick=205 sim_t=20.50 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=6.10 dwell=0.00
 [multi_patrol][state] tick=211 sim_t=21.10 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=0 slot=38->-1 pending_B=9 s=3.368/3.368 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
 [multi_patrol][state] tick=212 sim_t=21.20 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=0 slot=38->-1 pending_B=9 s=3.368/3.368 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
-[multi_patrol][state] tick=224 sim_t=22.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=8.00 dwell=0.00
-[multi_patrol][state] tick=245 sim_t=24.50 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=10.10 dwell=0.00
+[multi_patrol][state] tick=226 sim_t=22.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=8.20 dwell=0.00
+[multi_patrol][state] tick=246 sim_t=24.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=10.20 dwell=0.00
 [multi_patrol][state] tick=261 sim_t=26.10 V0 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=0 slot=38->9 pending_B=-1 s=0.002/2.555 rem=2.553 speed=0.020 wait=0.00 dwell=0.00
 [multi_patrol][state] tick=261 sim_t=26.10 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=11.70 dwell=0.00
 [multi_patrol][state] tick=282 sim_t=28.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=13.80 dwell=0.00
-[multi_patrol][state] tick=303 sim_t=30.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=15.90 dwell=0.00
-[multi_patrol][state] tick=323 sim_t=32.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=17.90 dwell=0.00
+[multi_patrol][state] tick=302 sim_t=30.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=15.80 dwell=0.00
+[multi_patrol][state] tick=322 sim_t=32.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=0 slot=20->-1 pending_B=10 s=2.252/3.391 rem=1.139 speed=0.000 wait=17.80 dwell=0.00
 [multi_patrol][state] tick=340 sim_t=34.00 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=0 slot=20->-1 pending_B=10 s=2.254/3.391 rem=1.137 speed=0.020 wait=19.60 dwell=0.00
 [multi_patrol][state] tick=341 sim_t=34.10 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=0 slot=20->-1 pending_B=10 s=2.258/3.391 rem=1.133 speed=0.040 wait=19.70 dwell=0.00
 [multi_patrol][state] tick=345 sim_t=34.50 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=0 slot=20->-1 pending_B=10 s=2.280/3.391 rem=1.111 speed=0.070 wait=0.00 dwell=0.00
@@ -31,214 +31,402 @@ vehicle_count=2 one_shot=0 use_a1_cycle=1 a1_request=1.5 a1_hold=1.1 a1_exit_rel
 [multi_patrol][state] tick=413 sim_t=41.30 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=0 slot=9->9 pending_B=-1 s=2.555/2.555 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
 [multi_patrol][state] tick=414 sim_t=41.40 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=0 slot=9->9 pending_B=-1 s=2.555/2.555 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
 [multi_patrol][state] tick=461 sim_t=46.10 V1 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=0 slot=20->10 pending_B=-1 s=0.002/3.406 rem=3.404 speed=0.020 wait=0.00 dwell=0.00
-[multi_patrol][state] tick=463 sim_t=46.30 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=1 slot=9->-1 pending_B=21 s=0.002/3.034 rem=3.032 speed=0.020 wait=0.00 dwell=0.00
-[multi_patrol][state] tick=497 sim_t=49.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=21 s=0.489/3.034 rem=2.545 speed=0.112 wait=0.10 dwell=0.00
-[multi_patrol][state] tick=498 sim_t=49.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=1 slot=9->-1 pending_B=21 s=0.498/3.034 rem=2.537 speed=0.082 wait=0.20 dwell=0.00
-[multi_patrol][state] tick=502 sim_t=50.20 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=9->-1 pending_B=21 s=0.507/3.034 rem=2.527 speed=0.020 wait=0.60 dwell=0.00
-[multi_patrol][state] tick=503 sim_t=50.30 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=1 slot=9->-1 pending_B=21 s=0.511/3.034 rem=2.523 speed=0.040 wait=0.70 dwell=0.00
-[multi_patrol][state] tick=506 sim_t=50.60 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=21 s=0.523/3.034 rem=2.511 speed=0.020 wait=1.00 dwell=0.00
-[multi_patrol][state] tick=507 sim_t=50.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=1 slot=9->-1 pending_B=21 s=0.523/3.034 rem=2.511 speed=0.000 wait=1.10 dwell=0.00
-[multi_patrol][state] tick=511 sim_t=51.10 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=9->-1 pending_B=21 s=0.525/3.034 rem=2.509 speed=0.020 wait=1.50 dwell=0.00
-[multi_patrol][state] tick=512 sim_t=51.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=21 s=0.525/3.034 rem=2.509 speed=0.000 wait=1.60 dwell=0.00
-[multi_patrol][state] tick=513 sim_t=51.30 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=1 slot=9->-1 pending_B=21 s=0.525/3.034 rem=2.509 speed=0.000 wait=1.70 dwell=0.00
-[multi_patrol][state] tick=517 sim_t=51.70 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=9->-1 pending_B=21 s=0.527/3.034 rem=2.507 speed=0.020 wait=2.10 dwell=0.00
-[multi_patrol][state] tick=518 sim_t=51.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=21 s=0.527/3.034 rem=2.507 speed=0.000 wait=2.20 dwell=0.00
-[multi_patrol][state] tick=538 sim_t=53.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=21 s=0.527/3.034 rem=2.507 speed=0.000 wait=4.20 dwell=0.00
-[multi_patrol][state] tick=558 sim_t=55.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=21 s=0.527/3.034 rem=2.507 speed=0.000 wait=6.20 dwell=0.00
-[multi_patrol][state] tick=579 sim_t=57.90 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=21 s=0.527/3.034 rem=2.507 speed=0.000 wait=8.30 dwell=0.00
-[multi_patrol][state] tick=600 sim_t=60.00 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=21 s=0.527/3.034 rem=2.507 speed=0.000 wait=10.40 dwell=0.00
-[multi_patrol][state] tick=605 sim_t=60.50 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=9->-1 pending_B=21 s=0.529/3.034 rem=2.505 speed=0.020 wait=10.90 dwell=0.00
-[multi_patrol][state] tick=606 sim_t=60.60 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=1 slot=9->-1 pending_B=21 s=0.533/3.034 rem=2.501 speed=0.040 wait=11.00 dwell=0.00
-[multi_patrol][state] tick=610 sim_t=61.00 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=1 slot=9->-1 pending_B=21 s=0.555/3.034 rem=2.479 speed=0.070 wait=0.00 dwell=0.00
-[multi_patrol][state] tick=661 sim_t=66.10 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=clear_block_V1 blocker=1 task=1 slot=9->-1 pending_B=21 s=1.500/3.034 rem=1.534 speed=0.170 wait=0.10 dwell=0.00
-[multi_patrol][state] tick=672 sim_t=67.20 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=9->-1 pending_B=21 s=1.542/3.034 rem=1.492 speed=0.020 wait=1.20 dwell=0.00
-[multi_patrol][state] tick=673 sim_t=67.30 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=1 slot=9->-1 pending_B=21 s=1.546/3.034 rem=1.488 speed=0.040 wait=1.30 dwell=0.00
+[multi_patrol][state] tick=463 sim_t=46.30 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=1 slot=9->-1 pending_B=43 s=0.002/3.034 rem=3.032 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=497 sim_t=49.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=43 s=0.489/3.034 rem=2.545 speed=0.112 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=498 sim_t=49.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=1 slot=9->-1 pending_B=43 s=0.498/3.034 rem=2.537 speed=0.082 wait=0.20 dwell=0.00
+[multi_patrol][state] tick=502 sim_t=50.20 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=9->-1 pending_B=43 s=0.507/3.034 rem=2.527 speed=0.020 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=503 sim_t=50.30 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=1 slot=9->-1 pending_B=43 s=0.511/3.034 rem=2.523 speed=0.040 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=506 sim_t=50.60 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=43 s=0.523/3.034 rem=2.511 speed=0.020 wait=1.00 dwell=0.00
+[multi_patrol][state] tick=507 sim_t=50.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=1 slot=9->-1 pending_B=43 s=0.523/3.034 rem=2.511 speed=0.000 wait=1.10 dwell=0.00
+[multi_patrol][state] tick=511 sim_t=51.10 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=9->-1 pending_B=43 s=0.525/3.034 rem=2.509 speed=0.020 wait=1.50 dwell=0.00
+[multi_patrol][state] tick=512 sim_t=51.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=43 s=0.525/3.034 rem=2.509 speed=0.000 wait=1.60 dwell=0.00
+[multi_patrol][state] tick=513 sim_t=51.30 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=1 slot=9->-1 pending_B=43 s=0.525/3.034 rem=2.509 speed=0.000 wait=1.70 dwell=0.00
+[multi_patrol][state] tick=517 sim_t=51.70 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=9->-1 pending_B=43 s=0.527/3.034 rem=2.507 speed=0.020 wait=2.10 dwell=0.00
+[multi_patrol][state] tick=518 sim_t=51.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=43 s=0.527/3.034 rem=2.507 speed=0.000 wait=2.20 dwell=0.00
+[multi_patrol][state] tick=538 sim_t=53.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=43 s=0.527/3.034 rem=2.507 speed=0.000 wait=4.20 dwell=0.00
+[multi_patrol][state] tick=558 sim_t=55.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=43 s=0.527/3.034 rem=2.507 speed=0.000 wait=6.20 dwell=0.00
+[multi_patrol][state] tick=579 sim_t=57.90 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=43 s=0.527/3.034 rem=2.507 speed=0.000 wait=8.30 dwell=0.00
+[multi_patrol][state] tick=599 sim_t=59.90 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=1 slot=9->-1 pending_B=43 s=0.527/3.034 rem=2.507 speed=0.000 wait=10.30 dwell=0.00
+[multi_patrol][state] tick=605 sim_t=60.50 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=9->-1 pending_B=43 s=0.529/3.034 rem=2.505 speed=0.020 wait=10.90 dwell=0.00
+[multi_patrol][state] tick=606 sim_t=60.60 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=1 slot=9->-1 pending_B=43 s=0.533/3.034 rem=2.501 speed=0.040 wait=11.00 dwell=0.00
+[multi_patrol][state] tick=610 sim_t=61.00 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=1 slot=9->-1 pending_B=43 s=0.555/3.034 rem=2.479 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=661 sim_t=66.10 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=clear_block_V1 blocker=1 task=1 slot=9->-1 pending_B=43 s=1.500/3.034 rem=1.534 speed=0.170 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=672 sim_t=67.20 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=9->-1 pending_B=43 s=1.542/3.034 rem=1.492 speed=0.020 wait=1.20 dwell=0.00
+[multi_patrol][state] tick=673 sim_t=67.30 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=1 slot=9->-1 pending_B=43 s=1.546/3.034 rem=1.488 speed=0.040 wait=1.30 dwell=0.00
 [multi_patrol][state] tick=676 sim_t=67.60 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=0 slot=10->10 pending_B=-1 s=3.406/3.406 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
-[multi_patrol][state] tick=677 sim_t=67.70 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=1 slot=9->-1 pending_B=21 s=1.568/3.034 rem=1.466 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=677 sim_t=67.70 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=1 slot=9->-1 pending_B=43 s=1.568/3.034 rem=1.466 speed=0.070 wait=0.00 dwell=0.00
 [multi_patrol][state] tick=677 sim_t=67.70 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=0 slot=10->10 pending_B=-1 s=3.406/3.406 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
-[multi_patrol][state] tick=726 sim_t=72.60 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=1 slot=10->-1 pending_B=29 s=0.002/3.544 rem=3.542 speed=0.020 wait=0.00 dwell=0.00
-[multi_patrol][state] tick=760 sim_t=76.00 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=1 slot=9->-1 pending_B=21 s=3.034/3.034 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
-[multi_patrol][state] tick=761 sim_t=76.10 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=1 slot=9->-1 pending_B=21 s=3.034/3.034 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
-[multi_patrol][state] tick=810 sim_t=81.00 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=1 slot=9->21 pending_B=-1 s=0.000/6.358 rem=6.358 speed=0.000 wait=0.10 dwell=0.00
-[multi_patrol][state] tick=811 sim_t=81.10 V0 mode=ACTIVE phase=TO_B action=STOP reason=action_hold blocker=-1 task=1 slot=9->21 pending_B=-1 s=0.000/6.358 rem=6.358 speed=0.000 wait=0.20 dwell=0.00
-[multi_patrol][state] tick=815 sim_t=81.50 V0 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=1 slot=9->21 pending_B=-1 s=0.002/6.358 rem=6.356 speed=0.020 wait=0.60 dwell=0.00
-[multi_patrol][state] tick=816 sim_t=81.60 V0 mode=ACTIVE phase=TO_B action=CREEP reason=action_hold blocker=-1 task=1 slot=9->21 pending_B=-1 s=0.006/6.358 rem=6.352 speed=0.040 wait=0.70 dwell=0.00
-[multi_patrol][state] tick=820 sim_t=82.00 V0 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=1 slot=9->21 pending_B=-1 s=0.028/6.358 rem=6.330 speed=0.070 wait=0.00 dwell=0.00
-[multi_patrol][state] tick=864 sim_t=86.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=clear_block_V0 blocker=0 task=1 slot=10->-1 pending_B=29 s=2.204/3.544 rem=1.340 speed=0.170 wait=0.10 dwell=0.00
-[multi_patrol][state] tick=876 sim_t=87.60 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=10->-1 pending_B=29 s=2.246/3.544 rem=1.298 speed=0.020 wait=1.30 dwell=0.00
-[multi_patrol][state] tick=877 sim_t=87.70 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=1 slot=10->-1 pending_B=29 s=2.250/3.544 rem=1.294 speed=0.040 wait=1.40 dwell=0.00
-[multi_patrol][state] tick=881 sim_t=88.10 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=1 slot=10->-1 pending_B=29 s=2.272/3.544 rem=1.272 speed=0.070 wait=0.00 dwell=0.00
-[multi_patrol][state] tick=882 sim_t=88.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=1 slot=10->-1 pending_B=29 s=2.276/3.544 rem=1.268 speed=0.040 wait=0.10 dwell=0.00
-[multi_patrol][state] tick=901 sim_t=90.10 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=10->-1 pending_B=29 s=2.279/3.544 rem=1.265 speed=0.020 wait=2.00 dwell=0.00
-[multi_patrol][state] tick=902 sim_t=90.20 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=1 slot=10->-1 pending_B=29 s=2.283/3.544 rem=1.261 speed=0.040 wait=2.10 dwell=0.00
-[multi_patrol][state] tick=906 sim_t=90.60 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=1 slot=10->-1 pending_B=29 s=2.305/3.544 rem=1.239 speed=0.070 wait=0.00 dwell=0.00
-[multi_patrol][state] tick=995 sim_t=99.50 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=1 slot=10->-1 pending_B=29 s=3.544/3.544 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
-[multi_patrol][state] tick=996 sim_t=99.60 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=1 slot=10->-1 pending_B=29 s=3.544/3.544 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
-[multi_patrol][state] tick=1045 sim_t=104.50 V1 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=1 slot=10->29 pending_B=-1 s=0.002/7.297 rem=7.295 speed=0.020 wait=0.00 dwell=0.00
-[multi_patrol][state] tick=1193 sim_t=119.30 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=1 slot=21->21 pending_B=-1 s=6.358/6.358 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
-[multi_patrol][state] tick=1194 sim_t=119.40 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=1 slot=21->21 pending_B=-1 s=6.358/6.358 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
-[multi_patrol][state] tick=1243 sim_t=124.30 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=2 slot=21->-1 pending_B=61 s=0.002/6.102 rem=6.100 speed=0.020 wait=0.00 dwell=0.00
-[multi_patrol][state] tick=1276 sim_t=127.60 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=2 slot=21->-1 pending_B=61 s=0.469/6.102 rem=5.633 speed=0.112 wait=0.10 dwell=0.00
-[multi_patrol][state] tick=1278 sim_t=127.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=0.483/6.102 rem=5.619 speed=0.052 wait=0.30 dwell=0.00
-[multi_patrol][state] tick=1281 sim_t=128.10 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=2 slot=21->-1 pending_B=61 s=0.487/6.102 rem=5.615 speed=0.020 wait=0.60 dwell=0.00
-[multi_patrol][state] tick=1282 sim_t=128.20 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=0.491/6.102 rem=5.611 speed=0.040 wait=0.70 dwell=0.00
-[multi_patrol][state] tick=1284 sim_t=128.40 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=2 slot=21->-1 pending_B=61 s=0.498/6.102 rem=5.604 speed=0.020 wait=0.90 dwell=0.00
-[multi_patrol][state] tick=1285 sim_t=128.50 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=0.498/6.102 rem=5.604 speed=0.000 wait=1.00 dwell=0.00
-[multi_patrol][state] tick=1289 sim_t=128.90 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=2 slot=21->-1 pending_B=61 s=0.500/6.102 rem=5.602 speed=0.020 wait=1.40 dwell=0.00
-[multi_patrol][state] tick=1290 sim_t=129.00 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=2 slot=21->-1 pending_B=61 s=0.500/6.102 rem=5.602 speed=0.000 wait=1.50 dwell=0.00
-[multi_patrol][state] tick=1291 sim_t=129.10 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=0.500/6.102 rem=5.602 speed=0.000 wait=1.60 dwell=0.00
-[multi_patrol][state] tick=1295 sim_t=129.50 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=2 slot=21->-1 pending_B=61 s=0.502/6.102 rem=5.600 speed=0.020 wait=2.00 dwell=0.00
-[multi_patrol][state] tick=1296 sim_t=129.60 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=2 slot=21->-1 pending_B=61 s=0.502/6.102 rem=5.600 speed=0.000 wait=2.10 dwell=0.00
-[multi_patrol][state] tick=1317 sim_t=131.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=2 slot=21->-1 pending_B=61 s=0.502/6.102 rem=5.600 speed=0.000 wait=4.20 dwell=0.00
-[multi_patrol][state] tick=1338 sim_t=133.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=2 slot=21->-1 pending_B=61 s=0.502/6.102 rem=5.600 speed=0.000 wait=6.30 dwell=0.00
-[multi_patrol][state] tick=1358 sim_t=135.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=2 slot=21->-1 pending_B=61 s=0.502/6.102 rem=5.600 speed=0.000 wait=8.30 dwell=0.00
-[multi_patrol][state] tick=1379 sim_t=137.90 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=2 slot=21->-1 pending_B=61 s=0.502/6.102 rem=5.600 speed=0.000 wait=10.40 dwell=0.00
-[multi_patrol][state] tick=1400 sim_t=140.00 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=2 slot=21->-1 pending_B=61 s=0.502/6.102 rem=5.600 speed=0.000 wait=12.50 dwell=0.00
-[multi_patrol][state] tick=1421 sim_t=142.10 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=2 slot=21->-1 pending_B=61 s=0.502/6.102 rem=5.600 speed=0.000 wait=14.60 dwell=0.00
-[multi_patrol][state] tick=1441 sim_t=144.10 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=2 slot=21->-1 pending_B=61 s=0.502/6.102 rem=5.600 speed=0.000 wait=16.60 dwell=0.00
-[multi_patrol][state] tick=1461 sim_t=146.10 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=2 slot=21->-1 pending_B=61 s=0.502/6.102 rem=5.600 speed=0.000 wait=18.60 dwell=0.00
-[multi_patrol][state] tick=1470 sim_t=147.00 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=1 slot=29->29 pending_B=-1 s=7.297/7.297 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
-[multi_patrol][state] tick=1471 sim_t=147.10 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=2 slot=21->-1 pending_B=61 s=0.504/6.102 rem=5.598 speed=0.020 wait=19.60 dwell=0.00
-[multi_patrol][state] tick=1471 sim_t=147.10 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=1 slot=29->29 pending_B=-1 s=7.297/7.297 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
-[multi_patrol][state] tick=1472 sim_t=147.20 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=0.508/6.102 rem=5.594 speed=0.040 wait=19.70 dwell=0.00
-[multi_patrol][state] tick=1476 sim_t=147.60 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=2 slot=21->-1 pending_B=61 s=0.530/6.102 rem=5.572 speed=0.070 wait=0.00 dwell=0.00
-[multi_patrol][state] tick=1520 sim_t=152.00 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=clear_block_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.000/5.225 rem=5.225 speed=0.000 wait=0.10 dwell=0.00
-[multi_patrol][state] tick=1530 sim_t=153.00 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=2 slot=29->-1 pending_B=6 s=0.002/5.225 rem=5.223 speed=0.020 wait=1.10 dwell=0.00
-[multi_patrol][state] tick=1531 sim_t=153.10 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=2 slot=29->-1 pending_B=6 s=0.006/5.225 rem=5.219 speed=0.040 wait=1.20 dwell=0.00
-[multi_patrol][state] tick=1535 sim_t=153.50 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=2 slot=29->-1 pending_B=6 s=0.028/5.225 rem=5.197 speed=0.070 wait=0.00 dwell=0.00
-[multi_patrol][state] tick=1559 sim_t=155.90 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=clear_block_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.386/5.225 rem=4.839 speed=0.112 wait=0.10 dwell=0.00
-[multi_patrol][state] tick=1572 sim_t=157.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=1.40 dwell=0.00
-[multi_patrol][state] tick=1576 sim_t=157.60 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.364/6.102 rem=3.738 speed=0.000 wait=0.00 dwell=0.00
-[multi_patrol][state] tick=1576 sim_t=157.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=-1 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=1.80 dwell=0.00
-[multi_patrol][state] tick=1577 sim_t=157.70 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.366/6.102 rem=3.736 speed=0.020 wait=0.10 dwell=0.00
-[multi_patrol][state] tick=1577 sim_t=157.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=1.90 dwell=0.00
-[multi_patrol][state] tick=1578 sim_t=157.80 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.370/6.102 rem=3.732 speed=0.040 wait=0.20 dwell=0.00
-[multi_patrol][state] tick=1579 sim_t=157.90 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.370/6.102 rem=3.732 speed=0.000 wait=0.30 dwell=0.00
-[multi_patrol][state] tick=1579 sim_t=157.90 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=-1 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=2.10 dwell=0.00
-[multi_patrol][state] tick=1580 sim_t=158.00 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.370/6.102 rem=3.732 speed=0.000 wait=0.40 dwell=0.00
-[multi_patrol][state] tick=1580 sim_t=158.00 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=2.20 dwell=0.00
-[multi_patrol][state] tick=1582 sim_t=158.20 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.020 wait=0.60 dwell=0.00
-[multi_patrol][state] tick=1583 sim_t=158.30 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=0.70 dwell=0.00
-[multi_patrol][state] tick=1583 sim_t=158.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=2.50 dwell=0.00
-[multi_patrol][state] tick=1584 sim_t=158.40 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=0.80 dwell=0.00
-[multi_patrol][state] tick=1584 sim_t=158.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=2.60 dwell=0.00
-[coord_diag][cycle] tick=1587 sim_t=158.70 ring=V0->V1->V0 a1_owner=V-1
-[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=1 brkr=0 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 spd=0.000 wait=1.1 gen=5
-[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=0 brkr=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 spd=0.000 wait=2.9 gen=5
-[coord_diag][pair] V0<->V1 a1_owner=V-1 reservation=V-1 following=1 following_leader=V0 zones=1 all_same_dir=1 nominal_time_overlap=1 | A phase=TO_A1 s=2.372/6.102 act=0 blk=V1 gen=5 pending_B=61 pending_gen=3 | B phase=TO_A1 s=0.401/5.225 act=0 blk=V0 gen=5 pending_B=6 pending_gen=3
-[coord_diag][envelope] A[1.075,6.100] committed=1 inside_real=1 | B[0.000,5.200] committed=1 inside_real=1 both_inside_same_zone=1
-[coord_diag][zone 0] same_dir=1 xy=(1.250,4.263) | A[1.075,6.100] stop=0.896 gap=-1.476 inside=1 t=[0.000,19.302] | B[0.000,5.200] stop=-0.179 gap=-0.580 inside=1 t=[0.000,24.653] overlap=1
-[multi_patrol][state] tick=1587 sim_t=158.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=1.10 dwell=0.00
-[multi_patrol][state] tick=1587 sim_t=158.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=2.90 dwell=0.00
-[multi_patrol][state] tick=1588 sim_t=158.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=1.20 dwell=0.00
-[multi_patrol][state] tick=1588 sim_t=158.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=3.00 dwell=0.00
-[coord_diag][cycle] tick=1592 sim_t=159.20 ring=V0->V1->V0 a1_owner=V-1
-[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=1 brkr=0 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 spd=0.000 wait=1.6 gen=5
-[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=0 brkr=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 spd=0.000 wait=3.4 gen=5
-[coord_diag][pair] V0<->V1 a1_owner=V-1 reservation=V-1 following=1 following_leader=V0 zones=1 all_same_dir=1 nominal_time_overlap=1 | A phase=TO_A1 s=2.372/6.102 act=0 blk=V1 gen=5 pending_B=61 pending_gen=3 | B phase=TO_A1 s=0.401/5.225 act=0 blk=V0 gen=5 pending_B=6 pending_gen=3
-[coord_diag][envelope] A[1.075,6.100] committed=1 inside_real=1 | B[0.000,5.200] committed=1 inside_real=1 both_inside_same_zone=1
-[coord_diag][zone 0] same_dir=1 xy=(1.250,4.263) | A[1.075,6.100] stop=0.896 gap=-1.476 inside=1 t=[0.000,19.302] | B[0.000,5.200] stop=-0.179 gap=-0.580 inside=1 t=[0.000,24.653] overlap=1
-[multi_patrol][state] tick=1592 sim_t=159.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=1.60 dwell=0.00
-[multi_patrol][state] tick=1592 sim_t=159.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=3.40 dwell=0.00
-[multi_patrol][state] tick=1593 sim_t=159.30 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=1.70 dwell=0.00
-[multi_patrol][state] tick=1593 sim_t=159.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=3.50 dwell=0.00
-[coord_diag][cycle] tick=1597 sim_t=159.70 ring=V0->V1->V0 a1_owner=V-1
-[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=1 brkr=0 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 spd=0.000 wait=2.1 gen=5
-[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=0 brkr=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 spd=0.000 wait=3.9 gen=5
-[coord_diag][pair] V0<->V1 a1_owner=V-1 reservation=V-1 following=1 following_leader=V0 zones=1 all_same_dir=1 nominal_time_overlap=1 | A phase=TO_A1 s=2.372/6.102 act=0 blk=V1 gen=5 pending_B=61 pending_gen=3 | B phase=TO_A1 s=0.401/5.225 act=0 blk=V0 gen=5 pending_B=6 pending_gen=3
-[coord_diag][envelope] A[1.075,6.100] committed=1 inside_real=1 | B[0.000,5.200] committed=1 inside_real=1 both_inside_same_zone=1
-[coord_diag][zone 0] same_dir=1 xy=(1.250,4.263) | A[1.075,6.100] stop=0.896 gap=-1.476 inside=1 t=[0.000,19.302] | B[0.000,5.200] stop=-0.179 gap=-0.580 inside=1 t=[0.000,24.653] overlap=1
-[multi_patrol][state] tick=1597 sim_t=159.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=2.10 dwell=0.00
-[multi_patrol][state] tick=1597 sim_t=159.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=3.90 dwell=0.00
-[multi_patrol][state] tick=1598 sim_t=159.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=2.20 dwell=0.00
-[multi_patrol][state] tick=1598 sim_t=159.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=4.00 dwell=0.00
-[coord_diag][cycle] tick=1602 sim_t=160.20 ring=V0->V1->V0 a1_owner=V-1
-[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=1 brkr=0 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 spd=0.000 wait=2.6 gen=5
-[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=0 brkr=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 spd=0.000 wait=4.4 gen=5
-[coord_diag][pair] V0<->V1 a1_owner=V-1 reservation=V-1 following=1 following_leader=V0 zones=1 all_same_dir=1 nominal_time_overlap=1 | A phase=TO_A1 s=2.372/6.102 act=0 blk=V1 gen=5 pending_B=61 pending_gen=3 | B phase=TO_A1 s=0.401/5.225 act=0 blk=V0 gen=5 pending_B=6 pending_gen=3
-[coord_diag][envelope] A[1.075,6.100] committed=1 inside_real=1 | B[0.000,5.200] committed=1 inside_real=1 both_inside_same_zone=1
-[coord_diag][zone 0] same_dir=1 xy=(1.250,4.263) | A[1.075,6.100] stop=0.896 gap=-1.476 inside=1 t=[0.000,19.302] | B[0.000,5.200] stop=-0.179 gap=-0.580 inside=1 t=[0.000,24.653] overlap=1
-[multi_patrol][state] tick=1602 sim_t=160.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=2.60 dwell=0.00
-[multi_patrol][state] tick=1602 sim_t=160.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=4.40 dwell=0.00
-[multi_patrol][state] tick=1603 sim_t=160.30 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=2.70 dwell=0.00
-[multi_patrol][state] tick=1603 sim_t=160.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=4.50 dwell=0.00
-[coord_diag][cycle] tick=1607 sim_t=160.70 ring=V0->V1->V0 a1_owner=V-1
-[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=1 brkr=0 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 spd=0.000 wait=3.1 gen=5
-[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=0 brkr=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 spd=0.000 wait=4.9 gen=5
-[coord_diag][pair] V0<->V1 a1_owner=V-1 reservation=V-1 following=1 following_leader=V0 zones=1 all_same_dir=1 nominal_time_overlap=1 | A phase=TO_A1 s=2.372/6.102 act=0 blk=V1 gen=5 pending_B=61 pending_gen=3 | B phase=TO_A1 s=0.401/5.225 act=0 blk=V0 gen=5 pending_B=6 pending_gen=3
-[coord_diag][envelope] A[1.075,6.100] committed=1 inside_real=1 | B[0.000,5.200] committed=1 inside_real=1 both_inside_same_zone=1
-[coord_diag][zone 0] same_dir=1 xy=(1.250,4.263) | A[1.075,6.100] stop=0.896 gap=-1.476 inside=1 t=[0.000,19.302] | B[0.000,5.200] stop=-0.179 gap=-0.580 inside=1 t=[0.000,24.653] overlap=1
-[multi_patrol][state] tick=1607 sim_t=160.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=3.10 dwell=0.00
-[multi_patrol][state] tick=1607 sim_t=160.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=4.90 dwell=0.00
-[multi_patrol][state] tick=1608 sim_t=160.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=3.20 dwell=0.00
-[multi_patrol][state] tick=1608 sim_t=160.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=5.00 dwell=0.00
-[coord_diag][cycle] tick=1612 sim_t=161.20 ring=V0->V1->V0 a1_owner=V-1
-[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=1 brkr=0 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 spd=0.000 wait=3.6 gen=5
-[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=0 brkr=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 spd=0.000 wait=5.4 gen=5
-[coord_diag][pair] V0<->V1 a1_owner=V-1 reservation=V-1 following=1 following_leader=V0 zones=1 all_same_dir=1 nominal_time_overlap=1 | A phase=TO_A1 s=2.372/6.102 act=0 blk=V1 gen=5 pending_B=61 pending_gen=3 | B phase=TO_A1 s=0.401/5.225 act=0 blk=V0 gen=5 pending_B=6 pending_gen=3
-[coord_diag][envelope] A[1.075,6.100] committed=1 inside_real=1 | B[0.000,5.200] committed=1 inside_real=1 both_inside_same_zone=1
-[coord_diag][zone 0] same_dir=1 xy=(1.250,4.263) | A[1.075,6.100] stop=0.896 gap=-1.476 inside=1 t=[0.000,19.302] | B[0.000,5.200] stop=-0.179 gap=-0.580 inside=1 t=[0.000,24.653] overlap=1
-[multi_patrol][state] tick=1612 sim_t=161.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=3.60 dwell=0.00
-[multi_patrol][state] tick=1612 sim_t=161.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=5.40 dwell=0.00
-[multi_patrol][state] tick=1613 sim_t=161.30 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=3.70 dwell=0.00
-[multi_patrol][state] tick=1613 sim_t=161.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=5.50 dwell=0.00
-[coord_diag][cycle] tick=1617 sim_t=161.70 ring=V0->V1->V0 a1_owner=V-1
-[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=1 brkr=0 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 spd=0.000 wait=4.1 gen=5
-[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=0 brkr=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 spd=0.000 wait=5.9 gen=5
-[coord_diag][pair] V0<->V1 a1_owner=V-1 reservation=V-1 following=1 following_leader=V0 zones=1 all_same_dir=1 nominal_time_overlap=1 | A phase=TO_A1 s=2.372/6.102 act=0 blk=V1 gen=5 pending_B=61 pending_gen=3 | B phase=TO_A1 s=0.401/5.225 act=0 blk=V0 gen=5 pending_B=6 pending_gen=3
-[coord_diag][envelope] A[1.075,6.100] committed=1 inside_real=1 | B[0.000,5.200] committed=1 inside_real=1 both_inside_same_zone=1
-[coord_diag][zone 0] same_dir=1 xy=(1.250,4.263) | A[1.075,6.100] stop=0.896 gap=-1.476 inside=1 t=[0.000,19.302] | B[0.000,5.200] stop=-0.179 gap=-0.580 inside=1 t=[0.000,24.653] overlap=1
-[multi_patrol][state] tick=1617 sim_t=161.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=4.10 dwell=0.00
-[multi_patrol][state] tick=1617 sim_t=161.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=5.90 dwell=0.00
-[multi_patrol][state] tick=1618 sim_t=161.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=4.20 dwell=0.00
-[multi_patrol][state] tick=1618 sim_t=161.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=6.00 dwell=0.00
-[coord_diag][cycle] tick=1622 sim_t=162.20 ring=V0->V1->V0 a1_owner=V-1
-[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=1 brkr=0 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 spd=0.000 wait=4.6 gen=5
-[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=0 brkr=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 spd=0.000 wait=6.4 gen=5
-[coord_diag][pair] V0<->V1 a1_owner=V-1 reservation=V-1 following=1 following_leader=V0 zones=1 all_same_dir=1 nominal_time_overlap=1 | A phase=TO_A1 s=2.372/6.102 act=0 blk=V1 gen=5 pending_B=61 pending_gen=3 | B phase=TO_A1 s=0.401/5.225 act=0 blk=V0 gen=5 pending_B=6 pending_gen=3
-[coord_diag][envelope] A[1.075,6.100] committed=1 inside_real=1 | B[0.000,5.200] committed=1 inside_real=1 both_inside_same_zone=1
-[coord_diag][zone 0] same_dir=1 xy=(1.250,4.263) | A[1.075,6.100] stop=0.896 gap=-1.476 inside=1 t=[0.000,19.302] | B[0.000,5.200] stop=-0.179 gap=-0.580 inside=1 t=[0.000,24.653] overlap=1
-[multi_patrol][state] tick=1622 sim_t=162.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=4.60 dwell=0.00
-[multi_patrol][state] tick=1622 sim_t=162.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=6.40 dwell=0.00
-[multi_patrol][state] tick=1623 sim_t=162.30 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=4.70 dwell=0.00
-[multi_patrol][state] tick=1623 sim_t=162.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=6.50 dwell=0.00
-[coord_diag][cycle] tick=1627 sim_t=162.70 ring=V0->V1->V0 a1_owner=V-1
-[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=1 brkr=0 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 spd=0.000 wait=5.1 gen=5
-[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=0 brkr=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 spd=0.000 wait=6.9 gen=5
-[coord_diag][pair] V0<->V1 a1_owner=V-1 reservation=V-1 following=1 following_leader=V0 zones=1 all_same_dir=1 nominal_time_overlap=1 | A phase=TO_A1 s=2.372/6.102 act=0 blk=V1 gen=5 pending_B=61 pending_gen=3 | B phase=TO_A1 s=0.401/5.225 act=0 blk=V0 gen=5 pending_B=6 pending_gen=3
-[coord_diag][envelope] A[1.075,6.100] committed=1 inside_real=1 | B[0.000,5.200] committed=1 inside_real=1 both_inside_same_zone=1
-[coord_diag][zone 0] same_dir=1 xy=(1.250,4.263) | A[1.075,6.100] stop=0.896 gap=-1.476 inside=1 t=[0.000,19.302] | B[0.000,5.200] stop=-0.179 gap=-0.580 inside=1 t=[0.000,24.653] overlap=1
-[multi_patrol][state] tick=1627 sim_t=162.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=5.10 dwell=0.00
-[multi_patrol][state] tick=1627 sim_t=162.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=6.90 dwell=0.00
-[multi_patrol][state] tick=1628 sim_t=162.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=5.20 dwell=0.00
-[multi_patrol][state] tick=1628 sim_t=162.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=7.00 dwell=0.00
-[coord_diag][cycle] tick=1632 sim_t=163.20 ring=V0->V1->V0 a1_owner=V-1
-[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=1 brkr=0 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 spd=0.000 wait=5.6 gen=5
-[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=0 brkr=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 spd=0.000 wait=7.4 gen=5
-[coord_diag][pair] V0<->V1 a1_owner=V-1 reservation=V-1 following=1 following_leader=V0 zones=1 all_same_dir=1 nominal_time_overlap=1 | A phase=TO_A1 s=2.372/6.102 act=0 blk=V1 gen=5 pending_B=61 pending_gen=3 | B phase=TO_A1 s=0.401/5.225 act=0 blk=V0 gen=5 pending_B=6 pending_gen=3
-[coord_diag][envelope] A[1.075,6.100] committed=1 inside_real=1 | B[0.000,5.200] committed=1 inside_real=1 both_inside_same_zone=1
-[coord_diag][zone 0] same_dir=1 xy=(1.250,4.263) | A[1.075,6.100] stop=0.896 gap=-1.476 inside=1 t=[0.000,19.302] | B[0.000,5.200] stop=-0.179 gap=-0.580 inside=1 t=[0.000,24.653] overlap=1
-[multi_patrol][state] tick=1632 sim_t=163.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=5.60 dwell=0.00
-[multi_patrol][state] tick=1632 sim_t=163.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=7.40 dwell=0.00
-[multi_patrol][state] tick=1633 sim_t=163.30 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=5.70 dwell=0.00
-[multi_patrol][state] tick=1633 sim_t=163.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=7.50 dwell=0.00
-[coord_diag][cycle] tick=1637 sim_t=163.70 ring=V0->V1->V0 a1_owner=V-1
-[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=1 brkr=0 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 spd=0.000 wait=6.1 gen=5
-[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=0 brkr=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 spd=0.000 wait=7.9 gen=5
-[coord_diag][pair] V0<->V1 a1_owner=V-1 reservation=V-1 following=1 following_leader=V0 zones=1 all_same_dir=1 nominal_time_overlap=1 | A phase=TO_A1 s=2.372/6.102 act=0 blk=V1 gen=5 pending_B=61 pending_gen=3 | B phase=TO_A1 s=0.401/5.225 act=0 blk=V0 gen=5 pending_B=6 pending_gen=3
-[coord_diag][envelope] A[1.075,6.100] committed=1 inside_real=1 | B[0.000,5.200] committed=1 inside_real=1 both_inside_same_zone=1
-[coord_diag][zone 0] same_dir=1 xy=(1.250,4.263) | A[1.075,6.100] stop=0.896 gap=-1.476 inside=1 t=[0.000,19.302] | B[0.000,5.200] stop=-0.179 gap=-0.580 inside=1 t=[0.000,24.653] overlap=1
-[multi_patrol][state] tick=1637 sim_t=163.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=6.10 dwell=0.00
-[multi_patrol][state] tick=1637 sim_t=163.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=7.90 dwell=0.00
-[multi_patrol][state] tick=1638 sim_t=163.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=6.20 dwell=0.00
-[multi_patrol][state] tick=1638 sim_t=163.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=8.00 dwell=0.00
-[coord_diag][cycle] tick=1642 sim_t=164.20 ring=V0->V1->V0 a1_owner=V-1
-[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=1 brkr=0 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 spd=0.000 wait=6.6 gen=5
-[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=hard_collision_guard blk=0 brkr=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 spd=0.000 wait=8.4 gen=5
-[coord_diag][pair] V0<->V1 a1_owner=V-1 reservation=V-1 following=1 following_leader=V0 zones=1 all_same_dir=1 nominal_time_overlap=1 | A phase=TO_A1 s=2.372/6.102 act=0 blk=V1 gen=5 pending_B=61 pending_gen=3 | B phase=TO_A1 s=0.401/5.225 act=0 blk=V0 gen=5 pending_B=6 pending_gen=3
-[coord_diag][envelope] A[1.075,6.100] committed=1 inside_real=1 | B[0.000,5.200] committed=1 inside_real=1 both_inside_same_zone=1
-[coord_diag][zone 0] same_dir=1 xy=(1.250,4.263) | A[1.075,6.100] stop=0.896 gap=-1.476 inside=1 t=[0.000,19.302] | B[0.000,5.200] stop=-0.179 gap=-0.580 inside=1 t=[0.000,24.653] overlap=1
-[multi_patrol][state] tick=1642 sim_t=164.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=6.60 dwell=0.00
-[multi_patrol][state] tick=1642 sim_t=164.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=hard_collision_guard blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=8.40 dwell=0.00
-[multi_patrol][state] tick=1643 sim_t=164.30 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=21->-1 pending_B=61 s=2.372/6.102 rem=3.730 speed=0.000 wait=6.70 dwell=0.00
-[multi_patrol][state] tick=1643 sim_t=164.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=following_V0 blocker=0 task=2 slot=29->-1 pending_B=6 s=0.401/5.225 rem=4.823 speed=0.000 wait=8.50 dwell=0.00
+[multi_patrol][state] tick=726 sim_t=72.60 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=1 slot=10->-1 pending_B=23 s=0.002/3.544 rem=3.542 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=760 sim_t=76.00 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=1 slot=9->-1 pending_B=43 s=3.034/3.034 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=761 sim_t=76.10 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=1 slot=9->-1 pending_B=43 s=3.034/3.034 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=810 sim_t=81.00 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=1 slot=9->43 pending_B=-1 s=0.000/7.369 rem=7.369 speed=0.000 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=811 sim_t=81.10 V0 mode=ACTIVE phase=TO_B action=STOP reason=action_hold blocker=-1 task=1 slot=9->43 pending_B=-1 s=0.000/7.369 rem=7.369 speed=0.000 wait=0.20 dwell=0.00
+[multi_patrol][state] tick=815 sim_t=81.50 V0 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=1 slot=9->43 pending_B=-1 s=0.002/7.369 rem=7.367 speed=0.020 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=816 sim_t=81.60 V0 mode=ACTIVE phase=TO_B action=CREEP reason=action_hold blocker=-1 task=1 slot=9->43 pending_B=-1 s=0.006/7.369 rem=7.363 speed=0.040 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=820 sim_t=82.00 V0 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=1 slot=9->43 pending_B=-1 s=0.028/7.369 rem=7.341 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=864 sim_t=86.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=clear_block_V0 blocker=0 task=1 slot=10->-1 pending_B=23 s=2.204/3.544 rem=1.340 speed=0.170 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=876 sim_t=87.60 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=10->-1 pending_B=23 s=2.246/3.544 rem=1.298 speed=0.020 wait=1.30 dwell=0.00
+[multi_patrol][state] tick=877 sim_t=87.70 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=1 slot=10->-1 pending_B=23 s=2.250/3.544 rem=1.294 speed=0.040 wait=1.40 dwell=0.00
+[multi_patrol][state] tick=881 sim_t=88.10 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=1 slot=10->-1 pending_B=23 s=2.272/3.544 rem=1.272 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=886 sim_t=88.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=1 slot=10->-1 pending_B=23 s=2.332/3.544 rem=1.212 speed=0.120 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=891 sim_t=89.10 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=10->-1 pending_B=23 s=2.352/3.544 rem=1.192 speed=0.020 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=892 sim_t=89.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=1 slot=10->-1 pending_B=23 s=2.352/3.544 rem=1.192 speed=0.000 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=901 sim_t=90.10 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=1 slot=10->-1 pending_B=23 s=2.354/3.544 rem=1.190 speed=0.020 wait=1.60 dwell=0.00
+[multi_patrol][state] tick=902 sim_t=90.20 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=1 slot=10->-1 pending_B=23 s=2.358/3.544 rem=1.186 speed=0.040 wait=1.70 dwell=0.00
+[multi_patrol][state] tick=906 sim_t=90.60 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=1 slot=10->-1 pending_B=23 s=2.380/3.544 rem=1.164 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=990 sim_t=99.00 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=1 slot=10->-1 pending_B=23 s=3.544/3.544 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=991 sim_t=99.10 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=1 slot=10->-1 pending_B=23 s=3.544/3.544 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=1040 sim_t=104.00 V1 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.002/6.156 rem=6.154 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=1076 sim_t=107.60 V1 mode=ACTIVE phase=TO_B action=STOP reason=brake_V0 blocker=0 task=1 slot=10->23 pending_B=-1 s=0.518/6.156 rem=5.639 speed=0.112 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=1077 sim_t=107.70 V1 mode=ACTIVE phase=TO_B action=STOP reason=action_hold blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.526/6.156 rem=5.630 speed=0.082 wait=0.20 dwell=0.00
+[multi_patrol][state] tick=1081 sim_t=108.10 V1 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.536/6.156 rem=5.621 speed=0.020 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=1082 sim_t=108.20 V1 mode=ACTIVE phase=TO_B action=CREEP reason=action_hold blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.540/6.156 rem=5.617 speed=0.040 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=1084 sim_t=108.40 V1 mode=ACTIVE phase=TO_B action=STOP reason=brake_V0 blocker=0 task=1 slot=10->23 pending_B=-1 s=0.547/6.156 rem=5.610 speed=0.020 wait=0.90 dwell=0.00
+[multi_patrol][state] tick=1085 sim_t=108.50 V1 mode=ACTIVE phase=TO_B action=STOP reason=action_hold blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.547/6.156 rem=5.610 speed=0.000 wait=1.00 dwell=0.00
+[multi_patrol][state] tick=1089 sim_t=108.90 V1 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.549/6.156 rem=5.608 speed=0.020 wait=1.40 dwell=0.00
+[multi_patrol][state] tick=1090 sim_t=109.00 V1 mode=ACTIVE phase=TO_B action=STOP reason=brake_V0 blocker=0 task=1 slot=10->23 pending_B=-1 s=0.549/6.156 rem=5.608 speed=0.000 wait=1.50 dwell=0.00
+[multi_patrol][state] tick=1091 sim_t=109.10 V1 mode=ACTIVE phase=TO_B action=STOP reason=action_hold blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.549/6.156 rem=5.608 speed=0.000 wait=1.60 dwell=0.00
+[multi_patrol][state] tick=1095 sim_t=109.50 V1 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.551/6.156 rem=5.606 speed=0.020 wait=2.00 dwell=0.00
+[multi_patrol][state] tick=1096 sim_t=109.60 V1 mode=ACTIVE phase=TO_B action=STOP reason=brake_V0 blocker=0 task=1 slot=10->23 pending_B=-1 s=0.551/6.156 rem=5.606 speed=0.000 wait=2.10 dwell=0.00
+[multi_patrol][state] tick=1097 sim_t=109.70 V1 mode=ACTIVE phase=TO_B action=STOP reason=action_hold blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.551/6.156 rem=5.606 speed=0.000 wait=2.20 dwell=0.00
+[multi_patrol][state] tick=1101 sim_t=110.10 V1 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.553/6.156 rem=5.604 speed=0.020 wait=2.60 dwell=0.00
+[multi_patrol][state] tick=1102 sim_t=110.20 V1 mode=ACTIVE phase=TO_B action=STOP reason=brake_V0 blocker=0 task=1 slot=10->23 pending_B=-1 s=0.553/6.156 rem=5.604 speed=0.000 wait=2.70 dwell=0.00
+[multi_patrol][state] tick=1118 sim_t=111.80 V1 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.555/6.156 rem=5.602 speed=0.020 wait=4.30 dwell=0.00
+[multi_patrol][state] tick=1119 sim_t=111.90 V1 mode=ACTIVE phase=TO_B action=CREEP reason=action_hold blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.559/6.156 rem=5.598 speed=0.040 wait=4.40 dwell=0.00
+[multi_patrol][state] tick=1123 sim_t=112.30 V1 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=1 slot=10->23 pending_B=-1 s=0.581/6.156 rem=5.576 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=1247 sim_t=124.70 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=1 slot=43->43 pending_B=-1 s=7.369/7.369 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=1248 sim_t=124.80 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=1 slot=43->43 pending_B=-1 s=7.369/7.369 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=1297 sim_t=129.70 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=2 slot=43->-1 pending_B=56 s=0.002/6.698 rem=6.696 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=1450 sim_t=145.00 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=1 slot=23->23 pending_B=-1 s=6.156/6.156 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=1451 sim_t=145.10 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=1 slot=23->23 pending_B=-1 s=6.156/6.156 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=1500 sim_t=150.00 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=2 slot=23->-1 pending_B=38 s=0.002/5.883 rem=5.881 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=1611 sim_t=161.10 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=1.946/5.883 rem=3.937 speed=0.169 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=1615 sim_t=161.50 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=23->-1 pending_B=38 s=1.983/5.883 rem=3.899 speed=0.049 wait=0.50 dwell=0.00
+[multi_patrol][state] tick=1616 sim_t=161.60 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=2 slot=23->-1 pending_B=38 s=1.988/5.883 rem=3.894 speed=0.050 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=1617 sim_t=161.70 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=2 slot=23->-1 pending_B=38 s=1.993/5.883 rem=3.889 speed=0.050 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=1618 sim_t=161.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=1.995/5.883 rem=3.887 speed=0.020 wait=0.80 dwell=0.00
+[multi_patrol][state] tick=1619 sim_t=161.90 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=2 slot=23->-1 pending_B=38 s=1.995/5.883 rem=3.887 speed=0.000 wait=0.90 dwell=0.00
+[multi_patrol][state] tick=1623 sim_t=162.30 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=2 slot=23->-1 pending_B=38 s=1.997/5.883 rem=3.885 speed=0.020 wait=1.30 dwell=0.00
+[multi_patrol][state] tick=1624 sim_t=162.40 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=2 slot=23->-1 pending_B=38 s=2.001/5.883 rem=3.881 speed=0.040 wait=1.40 dwell=0.00
+[multi_patrol][state] tick=1625 sim_t=162.50 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=2.002/5.883 rem=3.880 speed=0.010 wait=1.50 dwell=0.00
+[multi_patrol][state] tick=1645 sim_t=164.50 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=2.002/5.883 rem=3.880 speed=0.000 wait=3.50 dwell=0.00
+[multi_patrol][state] tick=1666 sim_t=166.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=2.002/5.883 rem=3.880 speed=0.000 wait=5.60 dwell=0.00
+[multi_patrol][state] tick=1686 sim_t=168.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=2.002/5.883 rem=3.880 speed=0.000 wait=7.60 dwell=0.00
+[multi_patrol][state] tick=1694 sim_t=169.40 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=2 slot=43->-1 pending_B=56 s=6.698/6.698 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=1695 sim_t=169.50 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=2 slot=43->-1 pending_B=56 s=6.698/6.698 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=1695 sim_t=169.50 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=2 slot=23->-1 pending_B=38 s=2.004/5.883 rem=3.878 speed=0.020 wait=8.50 dwell=0.00
+[multi_patrol][state] tick=1696 sim_t=169.60 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=2 slot=23->-1 pending_B=38 s=2.008/5.883 rem=3.874 speed=0.040 wait=8.60 dwell=0.00
+[multi_patrol][state] tick=1700 sim_t=170.00 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=2 slot=23->-1 pending_B=38 s=2.030/5.883 rem=3.852 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=1744 sim_t=174.40 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=2 slot=43->56 pending_B=-1 s=0.000/7.361 rem=7.361 speed=0.000 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=1765 sim_t=176.50 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=2 slot=43->56 pending_B=-1 s=0.000/7.361 rem=7.361 speed=0.000 wait=2.20 dwell=0.00
+[multi_patrol][state] tick=1786 sim_t=178.60 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=2 slot=43->56 pending_B=-1 s=0.000/7.361 rem=7.361 speed=0.000 wait=4.30 dwell=0.00
+[multi_patrol][state] tick=1806 sim_t=180.60 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=2 slot=43->56 pending_B=-1 s=0.000/7.361 rem=7.361 speed=0.000 wait=6.30 dwell=0.00
+[multi_patrol][state] tick=1827 sim_t=182.70 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=2 slot=43->56 pending_B=-1 s=0.000/7.361 rem=7.361 speed=0.000 wait=8.40 dwell=0.00
+[multi_patrol][state] tick=1840 sim_t=184.00 V0 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=2 slot=43->56 pending_B=-1 s=0.002/7.361 rem=7.359 speed=0.020 wait=9.70 dwell=0.00
+[multi_patrol][state] tick=1840 sim_t=184.00 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=4.303/5.883 rem=1.579 speed=0.112 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=1841 sim_t=184.10 V0 mode=ACTIVE phase=TO_B action=CREEP reason=action_hold blocker=-1 task=2 slot=43->56 pending_B=-1 s=0.006/7.361 rem=7.355 speed=0.040 wait=9.80 dwell=0.00
+[multi_patrol][state] tick=1845 sim_t=184.50 V0 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=2 slot=43->56 pending_B=-1 s=0.028/7.361 rem=7.333 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=1861 sim_t=186.10 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=4.319/5.883 rem=1.564 speed=0.000 wait=2.20 dwell=0.00
+[multi_patrol][state] tick=1882 sim_t=188.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=4.319/5.883 rem=1.564 speed=0.000 wait=4.30 dwell=0.00
+[multi_patrol][state] tick=1902 sim_t=190.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=4.319/5.883 rem=1.564 speed=0.000 wait=6.30 dwell=0.00
+[multi_patrol][state] tick=1923 sim_t=192.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=4.319/5.883 rem=1.564 speed=0.000 wait=8.40 dwell=0.00
+[multi_patrol][state] tick=1944 sim_t=194.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=4.319/5.883 rem=1.564 speed=0.000 wait=10.50 dwell=0.00
+[multi_patrol][state] tick=1964 sim_t=196.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=2 slot=23->-1 pending_B=38 s=4.319/5.883 rem=1.564 speed=0.000 wait=12.50 dwell=0.00
+[multi_patrol][state] tick=1977 sim_t=197.70 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=2 slot=23->-1 pending_B=38 s=4.321/5.883 rem=1.562 speed=0.020 wait=13.80 dwell=0.00
+[multi_patrol][state] tick=1978 sim_t=197.80 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=2 slot=23->-1 pending_B=38 s=4.325/5.883 rem=1.558 speed=0.040 wait=13.90 dwell=0.00
+[multi_patrol][state] tick=1982 sim_t=198.20 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=2 slot=23->-1 pending_B=38 s=4.347/5.883 rem=1.536 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=2080 sim_t=208.00 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=2 slot=23->-1 pending_B=38 s=5.883/5.883 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=2081 sim_t=208.10 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=2 slot=23->-1 pending_B=38 s=5.883/5.883 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=2130 sim_t=213.00 V1 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=2 slot=23->38 pending_B=-1 s=0.002/4.713 rem=4.711 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=2271 sim_t=227.10 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=2 slot=56->56 pending_B=-1 s=7.361/7.361 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=2272 sim_t=227.20 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=2 slot=56->56 pending_B=-1 s=7.361/7.361 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=2321 sim_t=232.10 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=3 slot=56->-1 pending_B=19 s=0.002/6.945 rem=6.943 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=2408 sim_t=240.80 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=2 slot=38->38 pending_B=-1 s=4.713/4.713 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=2409 sim_t=240.90 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=2 slot=38->38 pending_B=-1 s=4.713/4.713 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=2458 sim_t=245.80 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=3 slot=38->-1 pending_B=42 s=0.002/3.368 rem=3.366 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=2626 sim_t=262.60 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.294/6.945 rem=1.650 speed=0.112 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=2628 sim_t=262.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=3 slot=56->-1 pending_B=19 s=5.308/6.945 rem=1.637 speed=0.052 wait=0.30 dwell=0.00
+[multi_patrol][state] tick=2631 sim_t=263.10 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=3 slot=56->-1 pending_B=19 s=5.312/6.945 rem=1.633 speed=0.020 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=2632 sim_t=263.20 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=3 slot=56->-1 pending_B=19 s=5.316/6.945 rem=1.629 speed=0.040 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=2634 sim_t=263.40 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.323/6.945 rem=1.622 speed=0.020 wait=0.90 dwell=0.00
+[multi_patrol][state] tick=2635 sim_t=263.50 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=3 slot=56->-1 pending_B=19 s=5.323/6.945 rem=1.622 speed=0.000 wait=1.00 dwell=0.00
+[multi_patrol][state] tick=2639 sim_t=263.90 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=3 slot=56->-1 pending_B=19 s=5.325/6.945 rem=1.620 speed=0.020 wait=1.40 dwell=0.00
+[multi_patrol][state] tick=2640 sim_t=264.00 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.325/6.945 rem=1.620 speed=0.000 wait=1.50 dwell=0.00
+[multi_patrol][state] tick=2641 sim_t=264.10 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=3 slot=56->-1 pending_B=19 s=5.325/6.945 rem=1.620 speed=0.000 wait=1.60 dwell=0.00
+[multi_patrol][state] tick=2645 sim_t=264.50 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=3 slot=56->-1 pending_B=19 s=5.327/6.945 rem=1.618 speed=0.020 wait=2.00 dwell=0.00
+[multi_patrol][state] tick=2646 sim_t=264.60 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.327/6.945 rem=1.618 speed=0.000 wait=2.10 dwell=0.00
+[multi_patrol][state] tick=2667 sim_t=266.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.327/6.945 rem=1.618 speed=0.000 wait=4.20 dwell=0.00
+[multi_patrol][state] tick=2668 sim_t=266.80 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=3 slot=38->-1 pending_B=42 s=3.368/3.368 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=2669 sim_t=266.90 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=3 slot=38->-1 pending_B=42 s=3.368/3.368 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=2687 sim_t=268.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.327/6.945 rem=1.618 speed=0.000 wait=6.20 dwell=0.00
+[multi_patrol][state] tick=2708 sim_t=270.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.327/6.945 rem=1.618 speed=0.000 wait=8.30 dwell=0.00
+[multi_patrol][state] tick=2718 sim_t=271.80 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=3 slot=56->-1 pending_B=19 s=5.329/6.945 rem=1.616 speed=0.020 wait=9.30 dwell=0.00
+[multi_patrol][state] tick=2718 sim_t=271.80 V1 mode=ACTIVE phase=TO_B action=STOP reason=brake_V0 blocker=0 task=3 slot=38->42 pending_B=-1 s=0.000/5.845 rem=5.845 speed=0.000 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=2719 sim_t=271.90 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=3 slot=56->-1 pending_B=19 s=5.333/6.945 rem=1.612 speed=0.040 wait=9.40 dwell=0.00
+[multi_patrol][state] tick=2720 sim_t=272.00 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.334/6.945 rem=1.611 speed=0.010 wait=9.50 dwell=0.00
+[multi_patrol][state] tick=2720 sim_t=272.00 V1 mode=ACTIVE phase=TO_B action=STOP reason=action_hold blocker=-1 task=3 slot=38->42 pending_B=-1 s=0.000/5.845 rem=5.845 speed=0.000 wait=0.30 dwell=0.00
+[multi_patrol][state] tick=2723 sim_t=272.30 V1 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=3 slot=38->42 pending_B=-1 s=0.002/5.845 rem=5.843 speed=0.020 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=2724 sim_t=272.40 V1 mode=ACTIVE phase=TO_B action=CREEP reason=action_hold blocker=-1 task=3 slot=38->42 pending_B=-1 s=0.006/5.845 rem=5.839 speed=0.040 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=2728 sim_t=272.80 V1 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=3 slot=38->42 pending_B=-1 s=0.028/5.845 rem=5.817 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=2741 sim_t=274.10 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.334/6.945 rem=1.611 speed=0.000 wait=11.60 dwell=0.00
+[multi_patrol][state] tick=2761 sim_t=276.10 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.334/6.945 rem=1.611 speed=0.000 wait=13.60 dwell=0.00
+[multi_patrol][state] tick=2782 sim_t=278.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.334/6.945 rem=1.611 speed=0.000 wait=15.70 dwell=0.00
+[multi_patrol][state] tick=2802 sim_t=280.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.334/6.945 rem=1.611 speed=0.000 wait=17.70 dwell=0.00
+[multi_patrol][state] tick=2823 sim_t=282.30 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.334/6.945 rem=1.611 speed=0.000 wait=19.80 dwell=0.00
+[multi_patrol][state] tick=2843 sim_t=284.30 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=3 slot=56->-1 pending_B=19 s=5.334/6.945 rem=1.611 speed=0.000 wait=21.80 dwell=0.00
+[multi_patrol][state] tick=2860 sim_t=286.00 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=3 slot=56->-1 pending_B=19 s=5.336/6.945 rem=1.609 speed=0.020 wait=23.50 dwell=0.00
+[multi_patrol][state] tick=2861 sim_t=286.10 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=3 slot=56->-1 pending_B=19 s=5.340/6.945 rem=1.605 speed=0.040 wait=23.60 dwell=0.00
+[multi_patrol][state] tick=2865 sim_t=286.50 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=3 slot=56->-1 pending_B=19 s=5.362/6.945 rem=1.583 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=2966 sim_t=296.60 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=3 slot=56->-1 pending_B=19 s=6.945/6.945 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=2967 sim_t=296.70 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=3 slot=56->-1 pending_B=19 s=6.945/6.945 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=3016 sim_t=301.60 V0 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=3 slot=56->19 pending_B=-1 s=0.002/4.755 rem=4.753 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=3077 sim_t=307.70 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=3 slot=42->42 pending_B=-1 s=5.845/5.845 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=3078 sim_t=307.80 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=3 slot=42->42 pending_B=-1 s=5.845/5.845 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=3127 sim_t=312.70 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=4 slot=42->-1 pending_B=18 s=0.002/5.565 rem=5.563 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=3268 sim_t=326.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=4 slot=42->-1 pending_B=18 s=2.373/5.565 rem=3.192 speed=0.131 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=3269 sim_t=326.90 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=4 slot=42->-1 pending_B=18 s=2.383/5.565 rem=3.182 speed=0.101 wait=0.20 dwell=0.00
+[multi_patrol][state] tick=3273 sim_t=327.30 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=4 slot=42->-1 pending_B=18 s=2.399/5.565 rem=3.166 speed=0.031 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=3274 sim_t=327.40 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=4 slot=42->-1 pending_B=18 s=2.404/5.565 rem=3.161 speed=0.050 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=3278 sim_t=327.80 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=4 slot=42->-1 pending_B=18 s=2.426/5.565 rem=3.139 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=3293 sim_t=329.30 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=3 slot=19->19 pending_B=-1 s=4.755/4.755 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=3294 sim_t=329.40 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=3 slot=19->19 pending_B=-1 s=4.755/4.755 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=3343 sim_t=334.30 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=4 slot=19->-1 pending_B=12 s=0.002/3.198 rem=3.196 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=3455 sim_t=345.50 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.771/3.198 rem=1.428 speed=0.170 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=3459 sim_t=345.90 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=4 slot=19->-1 pending_B=12 s=1.809/3.198 rem=1.390 speed=0.050 wait=0.50 dwell=0.00
+[multi_patrol][state] tick=3460 sim_t=346.00 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=4 slot=19->-1 pending_B=12 s=1.814/3.198 rem=1.385 speed=0.050 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=3461 sim_t=346.10 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=4 slot=19->-1 pending_B=12 s=1.819/3.198 rem=1.380 speed=0.050 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=3462 sim_t=346.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.821/3.198 rem=1.378 speed=0.020 wait=0.80 dwell=0.00
+[multi_patrol][state] tick=3463 sim_t=346.30 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=4 slot=19->-1 pending_B=12 s=1.821/3.198 rem=1.378 speed=0.000 wait=0.90 dwell=0.00
+[multi_patrol][state] tick=3467 sim_t=346.70 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=4 slot=19->-1 pending_B=12 s=1.823/3.198 rem=1.376 speed=0.020 wait=1.30 dwell=0.00
+[multi_patrol][state] tick=3468 sim_t=346.80 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=4 slot=19->-1 pending_B=12 s=1.827/3.198 rem=1.372 speed=0.040 wait=1.40 dwell=0.00
+[multi_patrol][state] tick=3469 sim_t=346.90 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.010 wait=1.50 dwell=0.00
+[multi_patrol][state] tick=3475 sim_t=347.50 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=4 slot=42->-1 pending_B=18 s=5.565/5.565 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=3476 sim_t=347.60 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=4 slot=42->-1 pending_B=18 s=5.565/5.565 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=3489 sim_t=348.90 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=3.50 dwell=0.00
+[multi_patrol][state] tick=3509 sim_t=350.90 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=5.50 dwell=0.00
+[multi_patrol][state] tick=3525 sim_t=352.50 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=7.10 dwell=0.00
+[multi_patrol][state] tick=3525 sim_t=352.50 V1 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=4 slot=42->18 pending_B=-1 s=0.002/3.606 rem=3.604 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=3546 sim_t=354.60 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=9.20 dwell=0.00
+[multi_patrol][state] tick=3567 sim_t=356.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=11.30 dwell=0.00
+[multi_patrol][state] tick=3588 sim_t=358.80 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=13.40 dwell=0.00
+[multi_patrol][state] tick=3609 sim_t=360.90 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=15.50 dwell=0.00
+[multi_patrol][state] tick=3630 sim_t=363.00 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=17.60 dwell=0.00
+[multi_patrol][state] tick=3650 sim_t=365.00 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=19.60 dwell=0.00
+[multi_patrol][state] tick=3671 sim_t=367.10 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=21.70 dwell=0.00
+[multi_patrol][state] tick=3692 sim_t=369.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=23.80 dwell=0.00
+[multi_patrol][state] tick=3712 sim_t=371.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=25.80 dwell=0.00
+[multi_patrol][state] tick=3732 sim_t=373.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=4 slot=19->-1 pending_B=12 s=1.828/3.198 rem=1.371 speed=0.000 wait=27.80 dwell=0.00
+[multi_patrol][state] tick=3750 sim_t=375.00 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=4 slot=18->18 pending_B=-1 s=3.606/3.606 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=3751 sim_t=375.10 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=4 slot=19->-1 pending_B=12 s=1.830/3.198 rem=1.369 speed=0.020 wait=29.70 dwell=0.00
+[multi_patrol][state] tick=3751 sim_t=375.10 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=4 slot=18->18 pending_B=-1 s=3.606/3.606 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=3752 sim_t=375.20 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=4 slot=19->-1 pending_B=12 s=1.834/3.198 rem=1.365 speed=0.040 wait=29.80 dwell=0.00
+[multi_patrol][state] tick=3756 sim_t=375.60 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=4 slot=19->-1 pending_B=12 s=1.856/3.198 rem=1.343 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=3800 sim_t=380.00 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=0.000/3.744 rem=3.744 speed=0.000 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=3821 sim_t=382.10 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=0.000/3.744 rem=3.744 speed=0.000 wait=2.20 dwell=0.00
+[multi_patrol][state] tick=3842 sim_t=384.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=0.000/3.744 rem=3.744 speed=0.000 wait=4.30 dwell=0.00
+[multi_patrol][state] tick=3848 sim_t=384.80 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=5 slot=18->-1 pending_B=23 s=0.002/3.744 rem=3.742 speed=0.020 wait=4.90 dwell=0.00
+[multi_patrol][state] tick=3849 sim_t=384.90 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=4 slot=19->-1 pending_B=12 s=3.198/3.198 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=3849 sim_t=384.90 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=5 slot=18->-1 pending_B=23 s=0.006/3.744 rem=3.738 speed=0.040 wait=5.00 dwell=0.00
+[multi_patrol][state] tick=3850 sim_t=385.00 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=4 slot=19->-1 pending_B=12 s=3.198/3.198 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=3853 sim_t=385.30 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=5 slot=18->-1 pending_B=23 s=0.028/3.744 rem=3.716 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=3899 sim_t=389.90 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=4 slot=19->12 pending_B=-1 s=0.000/3.195 rem=3.195 speed=0.000 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=3920 sim_t=392.00 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=4 slot=19->12 pending_B=-1 s=0.000/3.195 rem=3.195 speed=0.000 wait=2.20 dwell=0.00
+[multi_patrol][state] tick=3937 sim_t=393.70 V0 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=4 slot=19->12 pending_B=-1 s=0.002/3.195 rem=3.193 speed=0.020 wait=3.90 dwell=0.00
+[multi_patrol][state] tick=3938 sim_t=393.80 V0 mode=ACTIVE phase=TO_B action=CREEP reason=action_hold blocker=-1 task=4 slot=19->12 pending_B=-1 s=0.006/3.195 rem=3.189 speed=0.040 wait=4.00 dwell=0.00
+[multi_patrol][state] tick=3942 sim_t=394.20 V0 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=4 slot=19->12 pending_B=-1 s=0.028/3.195 rem=3.167 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=3996 sim_t=399.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=2.363/3.744 rem=1.381 speed=0.170 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=3998 sim_t=399.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=5 slot=18->-1 pending_B=23 s=2.388/3.744 rem=1.356 speed=0.110 wait=0.30 dwell=0.00
+[multi_patrol][state] tick=4001 sim_t=400.10 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=5 slot=18->-1 pending_B=23 s=2.406/3.744 rem=1.338 speed=0.050 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=4002 sim_t=400.20 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=5 slot=18->-1 pending_B=23 s=2.411/3.744 rem=1.333 speed=0.050 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=4005 sim_t=400.50 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=2.423/3.744 rem=1.321 speed=0.020 wait=1.00 dwell=0.00
+[multi_patrol][state] tick=4007 sim_t=400.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=5 slot=18->-1 pending_B=23 s=2.423/3.744 rem=1.321 speed=0.000 wait=1.20 dwell=0.00
+[multi_patrol][state] tick=4010 sim_t=401.00 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=5 slot=18->-1 pending_B=23 s=2.425/3.744 rem=1.319 speed=0.020 wait=1.50 dwell=0.00
+[multi_patrol][state] tick=4011 sim_t=401.10 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=2.425/3.744 rem=1.319 speed=0.000 wait=1.60 dwell=0.00
+[multi_patrol][state] tick=4012 sim_t=401.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=5 slot=18->-1 pending_B=23 s=2.425/3.744 rem=1.319 speed=0.000 wait=1.70 dwell=0.00
+[multi_patrol][state] tick=4016 sim_t=401.60 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=5 slot=18->-1 pending_B=23 s=2.427/3.744 rem=1.317 speed=0.020 wait=2.10 dwell=0.00
+[multi_patrol][state] tick=4017 sim_t=401.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=2.427/3.744 rem=1.317 speed=0.000 wait=2.20 dwell=0.00
+[multi_patrol][state] tick=4038 sim_t=403.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=2.427/3.744 rem=1.317 speed=0.000 wait=4.30 dwell=0.00
+[multi_patrol][state] tick=4058 sim_t=405.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=2.427/3.744 rem=1.317 speed=0.000 wait=6.30 dwell=0.00
+[multi_patrol][state] tick=4079 sim_t=407.90 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=2.427/3.744 rem=1.317 speed=0.000 wait=8.40 dwell=0.00
+[multi_patrol][state] tick=4100 sim_t=410.00 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=2.427/3.744 rem=1.317 speed=0.000 wait=10.50 dwell=0.00
+[multi_patrol][state] tick=4121 sim_t=412.10 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=2.427/3.744 rem=1.317 speed=0.000 wait=12.60 dwell=0.00
+[multi_patrol][state] tick=4142 sim_t=414.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=5 slot=18->-1 pending_B=23 s=2.427/3.744 rem=1.317 speed=0.000 wait=14.70 dwell=0.00
+[multi_patrol][state] tick=4144 sim_t=414.40 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=4 slot=12->12 pending_B=-1 s=3.195/3.195 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=4144 sim_t=414.40 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=5 slot=18->-1 pending_B=23 s=2.429/3.744 rem=1.315 speed=0.020 wait=14.90 dwell=0.00
+[multi_patrol][state] tick=4145 sim_t=414.50 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=4 slot=12->12 pending_B=-1 s=3.195/3.195 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=4145 sim_t=414.50 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=5 slot=18->-1 pending_B=23 s=2.433/3.744 rem=1.311 speed=0.040 wait=15.00 dwell=0.00
+[multi_patrol][state] tick=4149 sim_t=414.90 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=5 slot=18->-1 pending_B=23 s=2.455/3.744 rem=1.289 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=4194 sim_t=419.40 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=5 slot=12->-1 pending_B=14 s=0.000/3.322 rem=3.322 speed=0.000 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=4215 sim_t=421.50 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=5 slot=12->-1 pending_B=14 s=0.000/3.322 rem=3.322 speed=0.000 wait=2.20 dwell=0.00
+[multi_patrol][state] tick=4235 sim_t=423.50 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=5 slot=12->-1 pending_B=14 s=0.000/3.322 rem=3.322 speed=0.000 wait=4.20 dwell=0.00
+[multi_patrol][state] tick=4236 sim_t=423.60 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=5 slot=12->-1 pending_B=14 s=0.002/3.322 rem=3.320 speed=0.020 wait=4.30 dwell=0.00
+[multi_patrol][state] tick=4237 sim_t=423.70 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=5 slot=12->-1 pending_B=14 s=0.006/3.322 rem=3.316 speed=0.040 wait=4.40 dwell=0.00
+[multi_patrol][state] tick=4237 sim_t=423.70 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=5 slot=18->-1 pending_B=23 s=3.744/3.744 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=4238 sim_t=423.80 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=5 slot=18->-1 pending_B=23 s=3.744/3.744 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=4241 sim_t=424.10 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=5 slot=12->-1 pending_B=14 s=0.028/3.322 rem=3.294 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=4287 sim_t=428.70 V1 mode=ACTIVE phase=TO_B action=STOP reason=brake_V0 blocker=0 task=5 slot=18->23 pending_B=-1 s=0.000/6.156 rem=6.156 speed=0.000 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=4308 sim_t=430.80 V1 mode=ACTIVE phase=TO_B action=STOP reason=brake_V0 blocker=0 task=5 slot=18->23 pending_B=-1 s=0.000/6.156 rem=6.156 speed=0.000 wait=2.20 dwell=0.00
+[multi_patrol][state] tick=4312 sim_t=431.20 V1 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=5 slot=18->23 pending_B=-1 s=0.002/6.156 rem=6.154 speed=0.020 wait=2.60 dwell=0.00
+[multi_patrol][state] tick=4313 sim_t=431.30 V1 mode=ACTIVE phase=TO_B action=CREEP reason=action_hold blocker=-1 task=5 slot=18->23 pending_B=-1 s=0.006/6.156 rem=6.150 speed=0.040 wait=2.70 dwell=0.00
+[multi_patrol][state] tick=4317 sim_t=431.70 V1 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=5 slot=18->23 pending_B=-1 s=0.028/6.156 rem=6.128 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=4364 sim_t=436.40 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=clear_block_V1 blocker=1 task=5 slot=12->-1 pending_B=14 s=1.962/3.322 rem=1.360 speed=0.170 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=4372 sim_t=437.20 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=5 slot=12->-1 pending_B=14 s=2.004/3.322 rem=1.318 speed=0.020 wait=0.90 dwell=0.00
+[multi_patrol][state] tick=4373 sim_t=437.30 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=5 slot=12->-1 pending_B=14 s=2.008/3.322 rem=1.314 speed=0.040 wait=1.00 dwell=0.00
+[multi_patrol][state] tick=4377 sim_t=437.70 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=5 slot=12->-1 pending_B=14 s=2.030/3.322 rem=1.292 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=4382 sim_t=438.20 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=5 slot=12->-1 pending_B=14 s=2.090/3.322 rem=1.232 speed=0.120 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=4384 sim_t=438.40 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=5 slot=12->-1 pending_B=14 s=2.105/3.322 rem=1.217 speed=0.060 wait=0.30 dwell=0.00
+[multi_patrol][state] tick=4387 sim_t=438.70 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=5 slot=12->-1 pending_B=14 s=2.110/3.322 rem=1.212 speed=0.020 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=4388 sim_t=438.80 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=5 slot=12->-1 pending_B=14 s=2.114/3.322 rem=1.208 speed=0.040 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=4390 sim_t=439.00 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=5 slot=12->-1 pending_B=14 s=2.121/3.322 rem=1.201 speed=0.020 wait=0.90 dwell=0.00
+[multi_patrol][state] tick=4391 sim_t=439.10 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=5 slot=12->-1 pending_B=14 s=2.121/3.322 rem=1.201 speed=0.000 wait=1.00 dwell=0.00
+[multi_patrol][state] tick=4395 sim_t=439.50 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=5 slot=12->-1 pending_B=14 s=2.123/3.322 rem=1.199 speed=0.020 wait=1.40 dwell=0.00
+[multi_patrol][state] tick=4396 sim_t=439.60 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V1 blocker=1 task=5 slot=12->-1 pending_B=14 s=2.123/3.322 rem=1.199 speed=0.000 wait=1.50 dwell=0.00
+[multi_patrol][state] tick=4397 sim_t=439.70 V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=5 slot=12->-1 pending_B=14 s=2.123/3.322 rem=1.199 speed=0.000 wait=1.60 dwell=0.00
+[multi_patrol][state] tick=4401 sim_t=440.10 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=5 slot=12->-1 pending_B=14 s=2.125/3.322 rem=1.197 speed=0.020 wait=2.00 dwell=0.00
+[multi_patrol][state] tick=4402 sim_t=440.20 V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=5 slot=12->-1 pending_B=14 s=2.129/3.322 rem=1.193 speed=0.040 wait=2.10 dwell=0.00
+[multi_patrol][state] tick=4406 sim_t=440.60 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=5 slot=12->-1 pending_B=14 s=2.151/3.322 rem=1.171 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=4491 sim_t=449.10 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=5 slot=12->-1 pending_B=14 s=3.322/3.322 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=4492 sim_t=449.20 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=5 slot=12->-1 pending_B=14 s=3.322/3.322 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=4541 sim_t=454.10 V0 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=5 slot=12->14 pending_B=-1 s=0.002/3.012 rem=3.010 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=4681 sim_t=468.10 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=5 slot=23->23 pending_B=-1 s=6.156/6.156 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=4682 sim_t=468.20 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=5 slot=23->23 pending_B=-1 s=6.156/6.156 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=4731 sim_t=473.10 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=6 slot=23->-1 pending_B=24 s=0.002/5.883 rem=5.881 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=4740 sim_t=474.00 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=5 slot=14->14 pending_B=-1 s=3.012/3.012 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=4741 sim_t=474.10 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=5 slot=14->14 pending_B=-1 s=3.012/3.012 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=4790 sim_t=479.00 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=6 slot=14->-1 pending_B=20 s=0.002/3.100 rem=3.098 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=4998 sim_t=499.80 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=6 slot=14->-1 pending_B=20 s=3.100/3.100 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=4999 sim_t=499.90 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=6 slot=14->-1 pending_B=20 s=3.100/3.100 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=5007 sim_t=500.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=6 slot=23->-1 pending_B=24 s=4.651/5.883 rem=1.232 speed=0.112 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=5010 sim_t=501.00 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.666/5.883 rem=1.216 speed=0.022 wait=0.40 dwell=0.00
+[multi_patrol][state] tick=5012 sim_t=501.20 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.668/5.883 rem=1.214 speed=0.020 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=5013 sim_t=501.30 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.672/5.883 rem=1.210 speed=0.040 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=5014 sim_t=501.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=6 slot=23->-1 pending_B=24 s=4.673/5.883 rem=1.209 speed=0.010 wait=0.80 dwell=0.00
+[multi_patrol][state] tick=5015 sim_t=501.50 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.673/5.883 rem=1.209 speed=0.000 wait=0.90 dwell=0.00
+[multi_patrol][state] tick=5019 sim_t=501.90 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.675/5.883 rem=1.207 speed=0.020 wait=1.30 dwell=0.00
+[multi_patrol][state] tick=5020 sim_t=502.00 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=6 slot=23->-1 pending_B=24 s=4.675/5.883 rem=1.207 speed=0.000 wait=1.40 dwell=0.00
+[multi_patrol][state] tick=5021 sim_t=502.10 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.675/5.883 rem=1.207 speed=0.000 wait=1.50 dwell=0.00
+[multi_patrol][state] tick=5025 sim_t=502.50 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.677/5.883 rem=1.205 speed=0.020 wait=1.90 dwell=0.00
+[multi_patrol][state] tick=5026 sim_t=502.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=6 slot=23->-1 pending_B=24 s=4.677/5.883 rem=1.205 speed=0.000 wait=2.00 dwell=0.00
+[multi_patrol][state] tick=5046 sim_t=504.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=6 slot=23->-1 pending_B=24 s=4.677/5.883 rem=1.205 speed=0.000 wait=4.00 dwell=0.00
+[multi_patrol][state] tick=5048 sim_t=504.80 V0 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=6 slot=14->20 pending_B=-1 s=0.002/4.313 rem=4.311 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=5048 sim_t=504.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=6 slot=23->-1 pending_B=24 s=4.677/5.883 rem=1.205 speed=0.000 wait=4.20 dwell=0.00
+[multi_patrol][state] tick=5069 sim_t=506.90 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=6 slot=23->-1 pending_B=24 s=4.677/5.883 rem=1.205 speed=0.000 wait=6.30 dwell=0.00
+[multi_patrol][state] tick=5090 sim_t=509.00 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=6 slot=23->-1 pending_B=24 s=4.677/5.883 rem=1.205 speed=0.000 wait=8.40 dwell=0.00
+[multi_patrol][state] tick=5103 sim_t=510.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=clear_block_V0 blocker=0 task=6 slot=23->-1 pending_B=24 s=4.677/5.883 rem=1.205 speed=0.000 wait=9.70 dwell=0.00
+[multi_patrol][state] tick=5107 sim_t=510.70 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.679/5.883 rem=1.203 speed=0.020 wait=10.10 dwell=0.00
+[multi_patrol][state] tick=5108 sim_t=510.80 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.683/5.883 rem=1.199 speed=0.040 wait=10.20 dwell=0.00
+[multi_patrol][state] tick=5112 sim_t=511.20 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.705/5.883 rem=1.177 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=5114 sim_t=511.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=6 slot=23->-1 pending_B=24 s=4.720/5.883 rem=1.162 speed=0.060 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=5117 sim_t=511.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.723/5.883 rem=1.159 speed=0.000 wait=0.40 dwell=0.00
+[multi_patrol][state] tick=5119 sim_t=511.90 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.725/5.883 rem=1.157 speed=0.020 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=5120 sim_t=512.00 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=6 slot=23->-1 pending_B=24 s=4.725/5.883 rem=1.157 speed=0.000 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=5121 sim_t=512.10 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.725/5.883 rem=1.157 speed=0.000 wait=0.80 dwell=0.00
+[multi_patrol][state] tick=5125 sim_t=512.50 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.727/5.883 rem=1.155 speed=0.020 wait=1.20 dwell=0.00
+[multi_patrol][state] tick=5126 sim_t=512.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=brake_V0 blocker=0 task=6 slot=23->-1 pending_B=24 s=4.727/5.883 rem=1.155 speed=0.000 wait=1.30 dwell=0.00
+[multi_patrol][state] tick=5128 sim_t=512.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.727/5.883 rem=1.155 speed=0.000 wait=1.50 dwell=0.00
+[multi_patrol][state] tick=5131 sim_t=513.10 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.729/5.883 rem=1.153 speed=0.020 wait=1.80 dwell=0.00
+[multi_patrol][state] tick=5132 sim_t=513.20 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.733/5.883 rem=1.149 speed=0.040 wait=1.90 dwell=0.00
+[multi_patrol][state] tick=5136 sim_t=513.60 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=6 slot=23->-1 pending_B=24 s=4.755/5.883 rem=1.127 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=5209 sim_t=520.90 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=6 slot=23->-1 pending_B=24 s=5.883/5.883 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=5210 sim_t=521.00 V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=6 slot=23->-1 pending_B=24 s=5.883/5.883 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=5259 sim_t=525.90 V1 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=6 slot=23->24 pending_B=-1 s=0.002/3.875 rem=3.873 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=5306 sim_t=530.60 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=6 slot=20->20 pending_B=-1 s=4.313/4.313 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=5307 sim_t=530.70 V0 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=6 slot=20->20 pending_B=-1 s=4.313/4.313 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=5356 sim_t=535.60 V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=7 slot=20->-1 pending_B=27 s=0.002/3.391 rem=3.389 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=5496 sim_t=549.60 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=unload_dwell blocker=-1 task=6 slot=24->24 pending_B=-1 s=3.875/3.875 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=5497 sim_t=549.70 V1 mode=DWELL phase=UNLOAD_DWELL action=STOP reason=not_active blocker=-1 task=6 slot=24->24 pending_B=-1 s=3.875/3.875 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=5546 sim_t=554.60 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=7 slot=24->-1 pending_B=17 s=0.002/3.474 rem=3.472 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=5567 sim_t=556.70 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=7 slot=20->-1 pending_B=27 s=3.391/3.391 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] tick=5568 sim_t=556.80 V0 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=7 slot=20->-1 pending_B=27 s=3.391/3.391 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] tick=5581 sim_t=558.10 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=0.498/3.474 rem=2.976 speed=0.112 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=5583 sim_t=558.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=7 slot=24->-1 pending_B=17 s=0.511/3.474 rem=2.963 speed=0.052 wait=0.30 dwell=0.00
+[multi_patrol][state] tick=5586 sim_t=558.60 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=7 slot=24->-1 pending_B=17 s=0.516/3.474 rem=2.959 speed=0.020 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=5587 sim_t=558.70 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=7 slot=24->-1 pending_B=17 s=0.520/3.474 rem=2.955 speed=0.040 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=5588 sim_t=558.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=0.521/3.474 rem=2.954 speed=0.010 wait=0.80 dwell=0.00
+[multi_patrol][state] tick=5589 sim_t=558.90 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=7 slot=24->-1 pending_B=17 s=0.521/3.474 rem=2.954 speed=0.000 wait=0.90 dwell=0.00
+[multi_patrol][state] tick=5593 sim_t=559.30 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=7 slot=24->-1 pending_B=17 s=0.523/3.474 rem=2.952 speed=0.020 wait=1.30 dwell=0.00
+[multi_patrol][state] tick=5594 sim_t=559.40 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=7 slot=24->-1 pending_B=17 s=0.527/3.474 rem=2.948 speed=0.040 wait=1.40 dwell=0.00
+[multi_patrol][state] tick=5595 sim_t=559.50 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=0.528/3.474 rem=2.947 speed=0.010 wait=1.50 dwell=0.00
+[multi_patrol][state] tick=5615 sim_t=561.50 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_reserved_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=0.528/3.474 rem=2.947 speed=0.000 wait=3.50 dwell=0.00
+[multi_patrol][state] tick=5617 sim_t=561.70 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=5617 sim_t=561.70 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=7 slot=24->-1 pending_B=17 s=0.530/3.474 rem=2.945 speed=0.020 wait=3.70 dwell=0.00
+[multi_patrol][state] tick=5618 sim_t=561.80 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=7 slot=24->-1 pending_B=17 s=0.534/3.474 rem=2.941 speed=0.040 wait=3.80 dwell=0.00
+[multi_patrol][state] tick=5622 sim_t=562.20 V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=7 slot=24->-1 pending_B=17 s=0.556/3.474 rem=2.919 speed=0.070 wait=0.00 dwell=0.00
+[multi_patrol][state] tick=5638 sim_t=563.80 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=2.20 dwell=0.00
+[multi_patrol][state] tick=5659 sim_t=565.90 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=4.30 dwell=0.00
+[multi_patrol][state] tick=5679 sim_t=567.90 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=6.30 dwell=0.00
+[multi_patrol][state] tick=5700 sim_t=570.00 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=8.40 dwell=0.00
+[multi_patrol][state] tick=5721 sim_t=572.10 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=10.50 dwell=0.00
+[multi_patrol][state] tick=5734 sim_t=573.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.325/3.474 rem=1.149 speed=0.122 wait=0.10 dwell=0.00
+[multi_patrol][state] tick=5737 sim_t=573.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=7 slot=24->-1 pending_B=17 s=2.344/3.474 rem=1.131 speed=0.032 wait=0.40 dwell=0.00
+[multi_patrol][state] tick=5739 sim_t=573.90 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=7 slot=24->-1 pending_B=17 s=2.346/3.474 rem=1.128 speed=0.022 wait=0.60 dwell=0.00
+[multi_patrol][state] tick=5740 sim_t=574.00 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=7 slot=24->-1 pending_B=17 s=2.350/3.474 rem=1.124 speed=0.042 wait=0.70 dwell=0.00
+[multi_patrol][state] tick=5741 sim_t=574.10 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.352/3.474 rem=1.123 speed=0.012 wait=0.80 dwell=0.00
+[multi_patrol][state] tick=5742 sim_t=574.20 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=12.60 dwell=0.00
+[multi_patrol][state] tick=5742 sim_t=574.20 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=7 slot=24->-1 pending_B=17 s=2.352/3.474 rem=1.123 speed=0.000 wait=0.90 dwell=0.00
+[multi_patrol][state] tick=5746 sim_t=574.60 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=7 slot=24->-1 pending_B=17 s=2.354/3.474 rem=1.121 speed=0.020 wait=1.30 dwell=0.00
+[coord_diag][cycle] tick=5747 sim_t=574.70 ring=V0->V1->V0 a1_owner=V0
+[coord_diag][vehicle]  V0 mode=1 phase=TO_B loaded=1 act=0 reason=brake_V1 blk=1 brkr=0 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 spd=0.000 wait=13.1 gen=16
+[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=wait_a1_exit_V0 blk=0 brkr=0 task=7 slot=24->-1 pending_B=17 s=2.354/3.474 rem=1.121 spd=0.000 wait=1.4 gen=15
+[coord_diag][pair] V0<->V1 a1_owner=V0 reservation=V1 following=0 following_leader=V-1 zones=2 all_same_dir=0 nominal_time_overlap=1 | A phase=TO_B s=0.000/7.516 gear=R act=0 blk=V1 gen=16 pending_B=-1 pending_gen=8 | B phase=TO_A1 s=2.354/3.474 gear=F act=0 blk=V0 gen=15 pending_B=17 pending_gen=8
+[coord_diag][envelope] A[0.000,3.625] committed=0 inside_real=1 | B[0.725,3.450] committed=1 inside_real=1 both_inside_same_zone=0
+[coord_diag][zone 0] same_dir=0 phase=R/F xy=(1.329,3.880) | A[0.000,0.625] stop=-0.179 gap=-0.179 inside=1 t=[0.000,3.785] | B[2.850,3.450] stop=2.671 gap=0.317 inside=0 t=[2.087,6.142] overlap=1
+[coord_diag][zone 1] same_dir=0 phase=F/F xy=(0.951,2.934) | A[0.825,3.625] stop=0.646 gap=0.646 inside=0 t=[3.730,18.785] | B[0.725,3.150] stop=0.546 gap=-1.808 inside=1 t=[0.000,4.642] overlap=1
+[multi_patrol][state] tick=5747 sim_t=574.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.354/3.474 rem=1.121 speed=0.000 wait=1.40 dwell=0.00
+[multi_patrol][state] tick=5748 sim_t=574.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=7 slot=24->-1 pending_B=17 s=2.354/3.474 rem=1.121 speed=0.000 wait=1.50 dwell=0.00
+[multi_patrol][state] tick=5752 sim_t=575.20 V1 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 speed=0.020 wait=1.90 dwell=0.00
+[coord_diag][cycle] tick=5753 sim_t=575.30 ring=V0->V1->V0 a1_owner=V0
+[coord_diag][vehicle]  V0 mode=1 phase=TO_B loaded=1 act=0 reason=brake_V1 blk=1 brkr=0 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 spd=0.000 wait=13.7 gen=16
+[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=wait_a1_exit_V0 blk=0 brkr=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 spd=0.000 wait=2.0 gen=15
+[coord_diag][pair] V0<->V1 a1_owner=V0 reservation=V1 following=0 following_leader=V-1 zones=2 all_same_dir=0 nominal_time_overlap=1 | A phase=TO_B s=0.000/7.516 gear=R act=0 blk=V1 gen=16 pending_B=-1 pending_gen=8 | B phase=TO_A1 s=2.356/3.474 gear=F act=0 blk=V0 gen=15 pending_B=17 pending_gen=8
+[coord_diag][envelope] A[0.000,3.625] committed=0 inside_real=1 | B[0.725,3.450] committed=1 inside_real=1 both_inside_same_zone=0
+[coord_diag][zone 0] same_dir=0 phase=R/F xy=(1.329,3.880) | A[0.000,0.625] stop=-0.179 gap=-0.179 inside=1 t=[0.000,3.785] | B[2.850,3.450] stop=2.671 gap=0.315 inside=0 t=[2.077,6.132] overlap=1
+[coord_diag][zone 1] same_dir=0 phase=F/F xy=(0.951,2.934) | A[0.825,3.625] stop=0.646 gap=0.646 inside=0 t=[3.730,18.785] | B[0.725,3.150] stop=0.546 gap=-1.810 inside=1 t=[0.000,4.632] overlap=1
+[multi_patrol][state] tick=5753 sim_t=575.30 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 speed=0.000 wait=2.00 dwell=0.00
+[multi_patrol][state] tick=5763 sim_t=576.30 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=14.70 dwell=0.00
+[multi_patrol][state] tick=5774 sim_t=577.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 speed=0.000 wait=4.10 dwell=0.00
+[multi_patrol][state] tick=5784 sim_t=578.40 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=16.80 dwell=0.00
+[multi_patrol][state] tick=5794 sim_t=579.40 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 speed=0.000 wait=6.10 dwell=0.00
+[coord_diag][cycle] tick=5803 sim_t=580.30 ring=V0->V1->V0 a1_owner=V0
+[coord_diag][vehicle]  V0 mode=1 phase=TO_B loaded=1 act=0 reason=brake_V1 blk=1 brkr=0 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 spd=0.000 wait=18.7 gen=16
+[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=wait_a1_exit_V0 blk=0 brkr=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 spd=0.000 wait=7.0 gen=15
+[coord_diag][pair] V0<->V1 a1_owner=V0 reservation=V1 following=0 following_leader=V-1 zones=2 all_same_dir=0 nominal_time_overlap=1 | A phase=TO_B s=0.000/7.516 gear=R act=0 blk=V1 gen=16 pending_B=-1 pending_gen=8 | B phase=TO_A1 s=2.356/3.474 gear=F act=0 blk=V0 gen=15 pending_B=17 pending_gen=8
+[coord_diag][envelope] A[0.000,3.625] committed=0 inside_real=1 | B[0.725,3.450] committed=1 inside_real=1 both_inside_same_zone=0
+[coord_diag][zone 0] same_dir=0 phase=R/F xy=(1.329,3.880) | A[0.000,0.625] stop=-0.179 gap=-0.179 inside=1 t=[0.000,3.785] | B[2.850,3.450] stop=2.671 gap=0.315 inside=0 t=[2.077,6.132] overlap=1
+[coord_diag][zone 1] same_dir=0 phase=F/F xy=(0.951,2.934) | A[0.825,3.625] stop=0.646 gap=0.646 inside=0 t=[3.730,18.785] | B[0.725,3.150] stop=0.546 gap=-1.810 inside=1 t=[0.000,4.632] overlap=1
+[multi_patrol][state] tick=5805 sim_t=580.50 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=18.90 dwell=0.00
+[multi_patrol][state] tick=5815 sim_t=581.50 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 speed=0.000 wait=8.20 dwell=0.00
+[multi_patrol][state] tick=5826 sim_t=582.60 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=21.00 dwell=0.00
+[multi_patrol][state] tick=5836 sim_t=583.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 speed=0.000 wait=10.30 dwell=0.00
+[multi_patrol][state] tick=5847 sim_t=584.70 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=23.10 dwell=0.00
+[coord_diag][cycle] tick=5853 sim_t=585.30 ring=V0->V1->V0 a1_owner=V0
+[coord_diag][vehicle]  V0 mode=1 phase=TO_B loaded=1 act=0 reason=brake_V1 blk=1 brkr=0 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 spd=0.000 wait=23.7 gen=16
+[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=wait_a1_exit_V0 blk=0 brkr=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 spd=0.000 wait=12.0 gen=15
+[coord_diag][pair] V0<->V1 a1_owner=V0 reservation=V1 following=0 following_leader=V-1 zones=2 all_same_dir=0 nominal_time_overlap=1 | A phase=TO_B s=0.000/7.516 gear=R act=0 blk=V1 gen=16 pending_B=-1 pending_gen=8 | B phase=TO_A1 s=2.356/3.474 gear=F act=0 blk=V0 gen=15 pending_B=17 pending_gen=8
+[coord_diag][envelope] A[0.000,3.625] committed=0 inside_real=1 | B[0.725,3.450] committed=1 inside_real=1 both_inside_same_zone=0
+[coord_diag][zone 0] same_dir=0 phase=R/F xy=(1.329,3.880) | A[0.000,0.625] stop=-0.179 gap=-0.179 inside=1 t=[0.000,3.785] | B[2.850,3.450] stop=2.671 gap=0.315 inside=0 t=[2.077,6.132] overlap=1
+[coord_diag][zone 1] same_dir=0 phase=F/F xy=(0.951,2.934) | A[0.825,3.625] stop=0.646 gap=0.646 inside=0 t=[3.730,18.785] | B[0.725,3.150] stop=0.546 gap=-1.810 inside=1 t=[0.000,4.632] overlap=1
+[multi_patrol][state] tick=5856 sim_t=585.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 speed=0.000 wait=12.30 dwell=0.00
+[multi_patrol][state] tick=5868 sim_t=586.80 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=25.20 dwell=0.00
+[multi_patrol][state] tick=5876 sim_t=587.60 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 speed=0.000 wait=14.30 dwell=0.00
+[multi_patrol][state] tick=5888 sim_t=588.80 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=27.20 dwell=0.00
+[multi_patrol][state] tick=5897 sim_t=589.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 speed=0.000 wait=16.40 dwell=0.00
+[coord_diag][cycle] tick=5903 sim_t=590.30 ring=V0->V1->V0 a1_owner=V0
+[coord_diag][vehicle]  V0 mode=1 phase=TO_B loaded=1 act=0 reason=brake_V1 blk=1 brkr=0 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 spd=0.000 wait=28.7 gen=16
+[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=wait_a1_exit_V0 blk=0 brkr=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 spd=0.000 wait=17.0 gen=15
+[coord_diag][pair] V0<->V1 a1_owner=V0 reservation=V1 following=0 following_leader=V-1 zones=2 all_same_dir=0 nominal_time_overlap=1 | A phase=TO_B s=0.000/7.516 gear=R act=0 blk=V1 gen=16 pending_B=-1 pending_gen=8 | B phase=TO_A1 s=2.356/3.474 gear=F act=0 blk=V0 gen=15 pending_B=17 pending_gen=8
+[coord_diag][envelope] A[0.000,3.625] committed=0 inside_real=1 | B[0.725,3.450] committed=1 inside_real=1 both_inside_same_zone=0
+[coord_diag][zone 0] same_dir=0 phase=R/F xy=(1.329,3.880) | A[0.000,0.625] stop=-0.179 gap=-0.179 inside=1 t=[0.000,3.785] | B[2.850,3.450] stop=2.671 gap=0.315 inside=0 t=[2.077,6.132] overlap=1
+[coord_diag][zone 1] same_dir=0 phase=F/F xy=(0.951,2.934) | A[0.825,3.625] stop=0.646 gap=0.646 inside=0 t=[3.730,18.785] | B[0.725,3.150] stop=0.546 gap=-1.810 inside=1 t=[0.000,4.632] overlap=1
+[multi_patrol][state] tick=5909 sim_t=590.90 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=29.30 dwell=0.00
+[multi_patrol][state] tick=5917 sim_t=591.70 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 speed=0.000 wait=18.40 dwell=0.00
+[multi_patrol][state] tick=5929 sim_t=592.90 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=31.30 dwell=0.00
+[multi_patrol][state] tick=5938 sim_t=593.80 V1 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_exit_V0 blocker=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 speed=0.000 wait=20.50 dwell=0.00
+[multi_patrol][state] tick=5950 sim_t=595.00 V0 mode=ACTIVE phase=TO_B action=STOP reason=brake_V1 blocker=1 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 speed=0.000 wait=33.40 dwell=0.00
+[coord_diag][cycle] tick=5953 sim_t=595.30 ring=V0->V1->V0 a1_owner=V0
+[coord_diag][vehicle]  V0 mode=1 phase=TO_B loaded=1 act=0 reason=brake_V1 blk=1 brkr=0 task=7 slot=20->27 pending_B=-1 s=0.000/7.516 rem=7.516 spd=0.000 wait=33.7 gen=16
+[coord_diag][vehicle]  V1 mode=1 phase=TO_A1 loaded=0 act=0 reason=wait_a1_exit_V0 blk=0 brkr=0 task=7 slot=24->-1 pending_B=17 s=2.356/3.474 rem=1.119 spd=0.000 wait=22.0 gen=15
+[coord_diag][pair] V0<->V1 a1_owner=V0 reservation=V1 following=0 following_leader=V-1 zones=2 all_same_dir=0 nominal_time_overlap=1 | A phase=TO_B s=0.000/7.516 gear=R act=0 blk=V1 gen=16 pending_B=-1 pending_gen=8 | B phase=TO_A1 s=2.356/3.474 gear=F act=0 blk=V0 gen=15 pending_B=17 pending_gen=8
+[coord_diag][envelope] A[0.000,3.625] committed=0 inside_real=1 | B[0.725,3.450] committed=1 inside_real=1 both_inside_same_zone=0
+[coord_diag][zone 0] same_dir=0 phase=R/F xy=(1.329,3.880) | A[0.000,0.625] stop=-0.179 gap=-0.179 inside=1 t=[0.000,3.785] | B[2.850,3.450] stop=2.671 gap=0.315 inside=0 t=[2.077,6.132] overlap=1
+[coord_diag][zone 1] same_dir=0 phase=F/F xy=(0.951,2.934) | A[0.825,3.625] stop=0.646 gap=0.646 inside=0 t=[3.730,18.785] | B[0.725,3.150] stop=0.546 gap=-1.810 inside=1 t=[0.000,4.632] overlap=1

@@ -202,6 +202,13 @@ private:
     };
     mutable std::map<std::pair<int, int>, PendingConflictCacheEntry>
         pending_conflict_cache_;
+    struct A1VerticalGateCacheEntry {
+        int path_gen = -1;
+        double stop_s = 0.0;
+    };
+    // Derived-only geometry cache; path_gen is its invalidation boundary.
+    // It does not affect persistent decisions and needs no SimSnapshot field.
+    std::map<int, A1VerticalGateCacheEntry> a1_vertical_gate_cache_;
 
     // Phase 2 资源模型:资源地图(只读)+ 资源令牌表(跨周期持久,§11.10)。
     const TrafficResourceMap* resmap_ = nullptr;

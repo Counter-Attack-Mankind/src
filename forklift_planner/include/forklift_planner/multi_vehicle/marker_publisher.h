@@ -40,6 +40,8 @@ private:
                         const VehicleAgent& v) const;
     void addVisitedSlotMarkers(visualization_msgs::MarkerArray& arr,
                                const std::vector<bool>& visited_slots) const;
+    void addA1ServiceZoneMarkers(
+        visualization_msgs::MarkerArray& arr) const;
     void addConflictMarkers(visualization_msgs::MarkerArray& arr,
                             const std::vector<ConflictMarker>& conflicts) const;
 
