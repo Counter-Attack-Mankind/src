@@ -25,9 +25,11 @@ struct MultiVehicleConfig {
     // Only the final A1 transaction is serialized. Vehicles may travel from B
     // concurrently. This is the baseline service-request distance; a cached
     // future A1->B leg may arm the transaction earlier when another vehicle
-    // reaches its exact departure-conflict braking gate.
+    // reaches the authoritative gate of the connected A1 transaction chain.
     double a1_request_distance = 1.50;
-    double a1_queue_hold_distance = 1.10;
+    double a1_queue_hold_distance = 1.10;  // fallback when no earlier gate
+    // Minimum owner-side anchor; release waits for rear clearance of the full
+    // connected departure chain, not just this scalar distance.
     double a1_exit_release_distance = 0.75;
     double rolling_horizon = 10.0;          // future planner time 
     double rolling_refresh_period = 2.0;        //  refresh period

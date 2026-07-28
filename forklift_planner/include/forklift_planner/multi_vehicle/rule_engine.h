@@ -18,6 +18,7 @@ namespace multi_vehicle {
 enum class ConflictMarkerKind {
     SAME_DIRECTION,
     CROSSING_OR_OPPOSING,
+    A1_PROTECTED,
 };
 
 struct ConflictMarker {
@@ -29,6 +30,30 @@ struct ConflictMarker {
     int vehicle_a = -1;
     int vehicle_b = -1;
     ConflictMarkerKind kind = ConflictMarkerKind::CROSSING_OR_OPPOSING;
+};
+
+enum class A1GateSource {
+    FIXED,
+    VERTICAL_QUEUE,
+    APPROACH_CHAIN,
+    PENDING_EXIT_CHAIN,
+    ACTIVE_EXIT_CHAIN,
+};
+
+// RViz and diagnostics consume the exact gate that the rule engine used.
+// stop_s/pose are rear-axle-reference coordinates on the waiter's active
+// B->A1 track; no second visualization-only gate calculation is allowed.
+struct A1GateMarker {
+    int owner_id = -1;
+    int waiter_id = -1;
+    double stop_s = 0.0;
+    double x = 0.0;
+    double y = 0.0;
+    double theta = 0.0;
+    A1GateSource source = A1GateSource::FIXED;
+    int approach_zone_count = 0;
+    int departure_zone_count = 0;
+    bool late = false;
 };
 
 class RuleEngine {
@@ -51,11 +76,14 @@ public:
         std::map<int, int> reservation_path_gen;
         double now = 0.0;
         int a1_service_owner = -1;
+        std::vector<ConflictMarker> conflicts;
+        std::vector<A1GateMarker> a1_gate_markers;
     };
     SimSnapshot snapshot() const {
         return SimSnapshot{commit_owner_, following_pairs_, following_leader_,
                            following_phase_, tokens_,
-                           reservation_path_gen_, now_, a1_service_owner_};
+                           reservation_path_gen_, now_, a1_service_owner_,
+                           conflicts_, a1_gate_markers_};
     }
     void restore(const SimSnapshot& s) {
         commit_owner_ = s.commit_owner;
@@ -66,8 +94,14 @@ public:
         reservation_path_gen_ = s.reservation_path_gen;
         now_ = s.now;
         a1_service_owner_ = s.a1_service_owner;
+        conflicts_ = s.conflicts;
+        a1_gate_markers_ = s.a1_gate_markers;
+        a1_gate_plans_.clear();
     }
     const std::vector<ConflictMarker>& conflicts() const { return conflicts_; }
+    const std::vector<A1GateMarker>& a1Gates() const {
+        return a1_gate_markers_;
+    }
 
     int priorityWinner(const VehicleAgent& a, const VehicleAgent& b) const;
 
@@ -121,6 +155,31 @@ private:
     // future leg never pollutes ordinary active-track conflict arbitration.
     const std::vector<ConflictZone>& pendingDepartureConflictBlocks(
         const VehicleAgent& owner, const VehicleAgent& waiter) const;
+    // Full, direction-correct static blocks without current-position clipping.
+    // A1 gates must remain fixed while the owner traverses the protected chain.
+    std::vector<ConflictZone> fullConflictZones(
+        const VehicleAgent& self, const VehicleAgent& other) const;
+    std::vector<ConflictZone> a1DepartureChain(
+        const std::vector<ConflictZone>& zones) const;
+    std::vector<ConflictZone> a1ApproachChain(
+        const VehicleAgent& owner,
+        const std::vector<ConflictZone>& zones) const;
+    double verticalQueueStopS(const VehicleAgent& v);
+
+    struct A1GatePlan {
+        int owner_id = -1;
+        int waiter_id = -1;
+        double stop_s = 0.0;
+        A1GateSource source = A1GateSource::FIXED;
+        std::vector<ConflictZone> approach_zones;
+        std::vector<ConflictZone> departure_zones;
+        bool departure_uses_pending = false;
+    };
+    A1GatePlan buildA1GatePlan(const VehicleAgent& owner,
+                               const VehicleAgent& waiter);
+    bool waiterInsideA1Zones(const VehicleAgent& waiter,
+                             const std::vector<ConflictZone>& zones) const;
+    static const char* a1GateSourceName(A1GateSource source);
     OccupancyInterval occupancyInterval(const VehicleAgent& v,
                                         VehicleAction action,
                                         double zone_enter_s,
@@ -161,6 +220,10 @@ private:
     const MapParam& mp_;
     const MultiVehicleConfig& cfg_;
     std::vector<ConflictMarker> conflicts_;
+    std::vector<A1GateMarker> a1_gate_markers_;
+    // Derived every decision cycle before pairwise arbitration. The map key is
+    // waiter id; A1 has one service owner, hence one authoritative gate/waiter.
+    std::map<int, A1GatePlan> a1_gate_plans_;
 
     // 资源-时间窗调度的预约闭锁表（跨决策周期持久）。
     // key = 两车 id 的有序对 {min,max}；value = 当前持有该共享冲突区路权(预约)

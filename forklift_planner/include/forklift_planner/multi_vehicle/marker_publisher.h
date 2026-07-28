@@ -27,7 +27,8 @@ public:
 
     void publish(const std::vector<VehicleAgent>& vehicles,
                  const std::vector<bool>& visited_slots,
-                 const std::vector<ConflictMarker>& conflicts) const;
+                 const std::vector<ConflictMarker>& conflicts,
+                 const std::vector<A1GateMarker>& a1_gates) const;
 
 private:
     void addPathMarker(visualization_msgs::MarkerArray& arr,
@@ -44,6 +45,9 @@ private:
         visualization_msgs::MarkerArray& arr) const;
     void addConflictMarkers(visualization_msgs::MarkerArray& arr,
                             const std::vector<ConflictMarker>& conflicts) const;
+    void addA1GateMarkers(
+        visualization_msgs::MarkerArray& arr,
+        const std::vector<A1GateMarker>& a1_gates) const;
 
     ros::Publisher pub_;
     const MapParam& mp_;
@@ -52,6 +56,8 @@ private:
     const MultiVehicleConfig& cfg_;
     mutable int last_same_direction_conflict_marker_count_ = 0;
     mutable int last_crossing_opposing_conflict_marker_count_ = 0;
+    mutable int last_a1_protected_conflict_marker_count_ = 0;
+    mutable int last_a1_gate_marker_count_ = 0;
     mutable int publish_seq_ = 0;
 };
 

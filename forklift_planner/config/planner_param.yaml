@@ -54,8 +54,8 @@ forklift_planner:
     pickup_dwell_time: 5.0        # s，A1取货作业时间
     unload_dwell_time: 5.0        # s，B库位卸货作业时间
     a1_request_distance: 1.50     # m，基础A1请求线；若候车更早接近待执行离场路径的精确制动门，也会触发服务顺序裁决
-    a1_queue_hold_distance: 1.10  # m，无竖直候车段时的后备排队距离；正常优先停在1/2走廊竖直双车道中部
-    a1_exit_release_distance: 0.75 # m，装载车沿A1->B驶出该距离后释放下一车
+    a1_queue_hold_distance: 1.10  # m，无竖直候车段/受保护冲突链时的后备排队距离
+    a1_exit_release_distance: 0.75 # m，A1离场保护链的最小锚定长度；实际服务权保持到车尾清出整条连通冲突链
     rolling_horizon: 10.0         # s，每次生成未来多长时间的轨迹
     rolling_refresh_period: 2.0   # s，每隔多久重新计算并覆盖发布轨迹
 
@@ -112,7 +112,8 @@ forklift_planner:
     log_invalid_task_pairs: false
     quiet_task_filter_precompute: true
 
-    # 运输业务状态机：空载B->A1，取货后才分配目标B，再满载A1->B。
+    # 运输业务状态机：离开B前预约目标B并缓存A1->B；活动track仍只运行空载B->A1，
+    # A1取货结束后原子切换到已缓存的满载A1->B。
     use_a1_cycle: true
     save_a1_cycle_catalog: true
 

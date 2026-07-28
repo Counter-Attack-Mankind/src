@@ -146,6 +146,7 @@ private:
     using VehicleAgent = forklift_planner::multi_vehicle::VehicleAgent;
     using VehicleAction = forklift_planner::multi_vehicle::VehicleAction;
     using VehicleMode = forklift_planner::multi_vehicle::VehicleMode;
+    using A1GateSource = forklift_planner::multi_vehicle::A1GateSource;
     using MissionPhase = forklift_planner::multi_vehicle::MissionPhase;
     using LegTargetKind = forklift_planner::multi_vehicle::LegTargetKind;
 
@@ -1408,6 +1409,35 @@ private:
             const VehicleAgent* v = agentById_c(id);
             if (v != nullptr) coordLog("[coord_diag][vehicle]" + vehLine(*v));
         }
+        auto gateSourceName = [](A1GateSource source) {
+            switch (source) {
+                case A1GateSource::FIXED: return "fixed";
+                case A1GateSource::VERTICAL_QUEUE: return "vertical";
+                case A1GateSource::APPROACH_CHAIN: return "approach_chain";
+                case A1GateSource::PENDING_EXIT_CHAIN:
+                    return "pending_exit_chain";
+                case A1GateSource::ACTIVE_EXIT_CHAIN:
+                    return "active_exit_chain";
+            }
+            return "unknown";
+        };
+        for (const auto& gate : rule_engine_->a1Gates()) {
+            if (signature.count(gate.owner_id) == 0 &&
+                signature.count(gate.waiter_id) == 0) {
+                continue;
+            }
+            char line[320];
+            std::snprintf(
+                line, sizeof(line),
+                "[coord_diag][a1_gate] owner=V%d waiter=V%d "
+                "stop_s=%.3f xy=(%.3f,%.3f) source=%s "
+                "approach_zones=%d departure_zones=%d late=%d",
+                gate.owner_id, gate.waiter_id, gate.stop_s,
+                gate.x, gate.y, gateSourceName(gate.source),
+                gate.approach_zone_count, gate.departure_zone_count,
+                static_cast<int>(gate.late));
+            coordLog(line);
+        }
 
         const std::vector<int> ids(signature.begin(), signature.end());
         for (size_t i = 0; i < ids.size(); ++i) {
@@ -1433,7 +1463,9 @@ private:
         // 1. 实车模式---未摆放好姿态模式
         if (cfg_.real_mode) {
             if (!rb_started_) {
-                marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());   //发布车辆、地图
+                marker_pub_->publish(agents_, visited_slots_,
+                                     rule_engine_->conflicts(),
+                                     rule_engine_->a1Gates());   //发布车辆、地图
                 publishRealTrailMarkers();  //发布真实车身尾迹
                 logPlacementStatus();       //打印摆车状态
                 return;
@@ -1453,7 +1485,9 @@ private:
                 realAdvance(dt);        //根据真实车身位置重新定位
                 logCoordinationCycleDiagnostics();
                 logAgentStatus();
-                marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());
+                marker_pub_->publish(agents_, visited_slots_,
+                                     rule_engine_->conflicts(),
+                                     rule_engine_->a1Gates());
                 publishRealTrailMarkers();
                 return;
             }
@@ -1470,7 +1504,9 @@ private:
                 force_horizon_refresh_ = false;
             }
             publishRealOutputs(dt);
-            marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());
+            marker_pub_->publish(agents_, visited_slots_,
+                                 rule_engine_->conflicts(),
+                                 rule_engine_->a1Gates());
             publishRealTrailMarkers();
             return;
         }
@@ -1502,7 +1538,9 @@ private:
 
         logAgentStatus();
         logStuckDiagnostics();
-        marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());
+        marker_pub_->publish(agents_, visited_slots_,
+                             rule_engine_->conflicts(),
+                             rule_engine_->a1Gates());
     }
     
     //===========================================================================

@@ -310,6 +310,7 @@ void MarkerPublisher::addConflictMarkers(
     const std::vector<ConflictMarker>& conflicts) const {
     const char* same_ns = "conflict_same_direction";
     const char* mutual_ns = "conflict_crossing_or_opposing";
+    const char* a1_ns = "conflict_a1_protected";
     auto deleteMarkers = [&](const char* marker_ns, int count) {
         for (int id = 0; id < count; ++id) {
             visualization_msgs::Marker m;
@@ -327,21 +328,35 @@ void MarkerPublisher::addConflictMarkers(
                       last_same_direction_conflict_marker_count_);
         deleteMarkers(mutual_ns,
                       last_crossing_opposing_conflict_marker_count_);
+        deleteMarkers(a1_ns,
+                      last_a1_protected_conflict_marker_count_);
         last_same_direction_conflict_marker_count_ = 0;
         last_crossing_opposing_conflict_marker_count_ = 0;
+        last_a1_protected_conflict_marker_count_ = 0;
         return;
     }
 
     int same_id = 0;
     int mutual_id = 0;
+    int a1_id = 0;
     for (const ConflictMarker& c : conflicts) {
         const bool same_direction =
             c.kind == ConflictMarkerKind::SAME_DIRECTION;
+        const bool a1_protected =
+            c.kind == ConflictMarkerKind::A1_PROTECTED;
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
         m.header.stamp = ros::Time::now();
-        m.ns = same_direction ? same_ns : mutual_ns;
-        m.id = same_direction ? same_id++ : mutual_id++;
+        if (a1_protected) {
+            m.ns = a1_ns;
+            m.id = a1_id++;
+        } else if (same_direction) {
+            m.ns = same_ns;
+            m.id = same_id++;
+        } else {
+            m.ns = mutual_ns;
+            m.id = mutual_id++;
+        }
         m.type = visualization_msgs::Marker::CUBE;
         m.action = visualization_msgs::Marker::ADD;
         m.pose.position.x = c.x;
@@ -351,7 +366,11 @@ void MarkerPublisher::addConflictMarkers(
         m.scale.x = c.scale_x;
         m.scale.y = c.scale_y;
         m.scale.z = 0.012;
-        if (same_direction) {
+        if (a1_protected) {
+            // Light purple: exact blocks belonging to the authoritative A1
+            // approach/load/departure transaction.
+            m.color = rgba(0.78f, 0.48f, 1.00f, 0.34f);
+        } else if (same_direction) {
             // Light cyan: longitudinal following arbitration.
             m.color = rgba(0.35f, 0.82f, 1.00f, 0.28f);
         } else {
@@ -382,8 +401,92 @@ void MarkerPublisher::addConflictMarkers(
         m.action = visualization_msgs::Marker::DELETE;
         arr.markers.push_back(m);
     }
+    for (int stale = a1_id;
+         stale < last_a1_protected_conflict_marker_count_; ++stale) {
+        visualization_msgs::Marker m;
+        m.header.frame_id = pp_.frame_id;
+        m.header.stamp = ros::Time::now();
+        m.ns = a1_ns;
+        m.id = stale;
+        m.action = visualization_msgs::Marker::DELETE;
+        arr.markers.push_back(m);
+    }
     last_same_direction_conflict_marker_count_ = same_id;
     last_crossing_opposing_conflict_marker_count_ = mutual_id;
+    last_a1_protected_conflict_marker_count_ = a1_id;
+}
+
+void MarkerPublisher::addA1GateMarkers(
+    visualization_msgs::MarkerArray& arr,
+    const std::vector<A1GateMarker>& a1_gates) const {
+    const char* gate_ns = "a1_authoritative_gate";
+    int marker_id = 0;
+    auto sourceName = [](A1GateSource source) {
+        switch (source) {
+            case A1GateSource::FIXED: return "FIXED";
+            case A1GateSource::VERTICAL_QUEUE: return "VERT";
+            case A1GateSource::APPROACH_CHAIN: return "APP";
+            case A1GateSource::PENDING_EXIT_CHAIN: return "P-EXIT";
+            case A1GateSource::ACTIVE_EXIT_CHAIN: return "A-EXIT";
+        }
+        return "?";
+    };
+
+    for (const A1GateMarker& gate : a1_gates) {
+        const std_msgs::ColorRGBA color =
+            gate.late ? rgba(1.00f, 0.16f, 0.26f, 0.98f)
+                      : rgba(0.90f, 0.58f, 1.00f, 0.98f);
+        const double half_width =
+            std::max(0.12, 0.75 * mp_.vehicle_width);
+        const double dx = -std::sin(gate.theta) * half_width;
+        const double dy = std::cos(gate.theta) * half_width;
+
+        visualization_msgs::Marker line;
+        line.header.frame_id = pp_.frame_id;
+        line.header.stamp = ros::Time::now();
+        line.ns = gate_ns;
+        line.id = marker_id++;
+        line.type = visualization_msgs::Marker::LINE_STRIP;
+        line.action = visualization_msgs::Marker::ADD;
+        line.pose.orientation.w = 1.0;
+        line.scale.x = 0.034;
+        line.color = color;
+        line.points.push_back(pt3(gate.x - dx, gate.y - dy, 0.034));
+        line.points.push_back(pt3(gate.x + dx, gate.y + dy, 0.034));
+        arr.markers.push_back(line);
+
+        visualization_msgs::Marker label;
+        label.header.frame_id = pp_.frame_id;
+        label.header.stamp = ros::Time::now();
+        label.ns = gate_ns;
+        label.id = marker_id++;
+        label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+        label.action = visualization_msgs::Marker::ADD;
+        label.pose.position.x = gate.x;
+        label.pose.position.y = gate.y;
+        label.pose.position.z = 0.105;
+        label.pose.orientation.w = 1.0;
+        label.scale.z = 0.052;
+        label.color = color;
+        std::ostringstream text;
+        text << "A1 GATE V" << gate.waiter_id << "->V" << gate.owner_id
+             << " " << sourceName(gate.source)
+             << " A" << gate.approach_zone_count
+             << "/D" << gate.departure_zone_count;
+        label.text = text.str();
+        arr.markers.push_back(label);
+    }
+
+    for (int stale = marker_id; stale < last_a1_gate_marker_count_; ++stale) {
+        visualization_msgs::Marker m;
+        m.header.frame_id = pp_.frame_id;
+        m.header.stamp = ros::Time::now();
+        m.ns = gate_ns;
+        m.id = stale;
+        m.action = visualization_msgs::Marker::DELETE;
+        arr.markers.push_back(m);
+    }
+    last_a1_gate_marker_count_ = marker_id;
 }
 
 void MarkerPublisher::addOriginAxes(visualization_msgs::MarkerArray& arr) const {
@@ -434,7 +537,8 @@ void MarkerPublisher::addOriginAxes(visualization_msgs::MarkerArray& arr) const 
 void MarkerPublisher::publish(
     const std::vector<VehicleAgent>& vehicles,
     const std::vector<bool>& visited_slots,
-    const std::vector<ConflictMarker>& conflicts) const {
+    const std::vector<ConflictMarker>& conflicts,
+    const std::vector<A1GateMarker>& a1_gates) const {
     ++publish_seq_;
     visualization_msgs::MarkerArray arr;
     addA1ServiceZoneMarkers(arr);
@@ -448,6 +552,7 @@ void MarkerPublisher::publish(
         addLabelMarker(arr, v);
     }
     addConflictMarkers(arr, conflicts);
+    addA1GateMarkers(arr, a1_gates);
     pub_.publish(arr);
 }
 
