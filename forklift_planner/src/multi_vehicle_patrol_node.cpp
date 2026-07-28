@@ -733,10 +733,17 @@ private:
                 v.current_speed = 0.0;
                 if (v.dwell_remaining > 1e-9) continue;
 
-                // A rollout may predict arrival at A1, but it must not invent
-                // a B assignment before the real pickup event. Hold at A1 and
-                // force a new rollout after the real task transition.
+                // A rollout must not invent a new B assignment. It may,
+                // however, activate the drop-off leg that was already reserved
+                // before this vehicle left its source B slot; this lets a
+                // 10-second horizon cross the pickup boundary faithfully.
                 if (sim_mode_) {
+                    if (v.mission_phase == MissionPhase::PICKUP_DWELL &&
+                        v.hasPendingDropoff()) {
+                        v.loaded = true;
+                        v.mission_phase = MissionPhase::WAIT_DROPOFF_TASK;
+                        allocator_->assignDropoffLeg(v, agents_);
+                    }
                     v.dwell_remaining = 0.0;
                     continue;
                 }
@@ -772,7 +779,7 @@ private:
                     v.leg_target = LegTargetKind::A1;
                     v.mode = VehicleMode::NEED_TASK;
                     const int old_gen = v.path_gen;
-                    allocator_->assignPickupLeg(v);
+                    allocator_->assignPickupLeg(v, agents_);
                     if (v.path_gen != old_gen) force_horizon_refresh_ = true;
                     continue;
                 }
@@ -1291,13 +1298,15 @@ private:
                 buf, sizeof(buf),
                 "[multi_patrol][state] tick=%llu sim_t=%.2f V%d "
                 "mode=%s phase=%s action=%s reason=%s "
-                "blocker=%d task=%d slot=%d->%d s=%.3f/%.3f rem=%.3f "
+                "blocker=%d task=%d slot=%d->%d pending_B=%d "
+                "s=%.3f/%.3f rem=%.3f "
                 "speed=%.3f wait=%.2f dwell=%.2f",
                 static_cast<unsigned long long>(tick_count_), sim_time_,
                 v.id, modeName(v.mode), missionPhaseName(v.mission_phase),
                 actionName(v.action),
                 v.reason.empty() ? "-" : v.reason.c_str(), v.blocker_id,
-                v.task_count, v.current_slot, v.target_slot, v.path_s,
+                v.task_count, v.current_slot, v.target_slot,
+                v.pending_target_slot, v.path_s,
                 length, rem, v.current_speed, v.wait_time,
                 v.dwell_remaining);
             ROS_INFO("%s", buf);
@@ -2030,12 +2039,13 @@ public:
         char buf[320];
         snprintf(buf, sizeof(buf),
                  "  V%d mode=%d phase=%s loaded=%d act=%d reason=%s blk=%d "
-                 "brkr=%d task=%d slot=%d->%d "
+                 "brkr=%d task=%d slot=%d->%d pending_B=%d "
                  "s=%.3f/%.3f rem=%.3f spd=%.3f wait=%.1f gen=%d",
                  v.id, (int)v.mode, missionPhaseName(v.mission_phase), (int)v.loaded,
                  (int)v.action, v.reason.c_str(), v.blocker_id,
                  (int)v.deadlock_breaker, v.task_count, v.current_slot,
-                 v.target_slot, v.path_s, v.track.length(), v.remainingS(),
+                 v.target_slot, v.pending_target_slot,
+                 v.path_s, v.track.length(), v.remainingS(),
                  v.current_speed, v.wait_time, v.path_gen);
         return buf;
     }

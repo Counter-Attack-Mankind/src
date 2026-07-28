@@ -27,7 +27,8 @@ enum class VehicleMode {
 
 // VehicleMode describes motion; MissionPhase describes the logistics workflow.
 // In A1-cycle mode a transport is deliberately split into two independent
-// tracks: B->A1 (empty) and, only after pickup, A1->B (loaded).
+// tracks. B->A1 is the only active motion track; A1->B is selected and cached
+// in advance, but is not activated until pickup finishes.
 enum class MissionPhase {
     DIRECT_TO_B,          // legacy B->B mode
     TO_A1,
@@ -91,6 +92,13 @@ struct VehicleAgent {
     int path_gen = 0;
 
     PathTrack track;
+    // A1-cycle two-leg plan. The drop-off slot/path are reserved when the
+    // vehicle leaves its current B slot, while track remains the independent
+    // B->A1 leg. RuleEngine may inspect this path only to protect A1's future
+    // exit; ordinary pairwise arbitration must continue to use track alone.
+    int pending_target_slot = -1;
+    int pending_path_gen = 0;
+    PathTrack pending_dropoff_track;
     std_msgs::ColorRGBA color;
     std::vector<int> recent_targets;
     std::vector<int> recent_rows;
@@ -103,6 +111,9 @@ struct VehicleAgent {
 
     bool active() const { return mode == VehicleMode::ACTIVE && !track.empty(); }
     double remainingS() const { return track.empty() ? 0.0 : track.length() - path_s; }
+    bool hasPendingDropoff() const {
+        return pending_target_slot >= 0 && !pending_dropoff_track.empty();
+    }
 };
 
 inline bool moreRestrictive(VehicleAction a, VehicleAction b) {

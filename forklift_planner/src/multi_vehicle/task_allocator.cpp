@@ -837,6 +837,9 @@ bool TaskAllocator::slotReservedByOther(const VehicleAgent& vehicle,
             (o.mode == VehicleMode::ACTIVE || o.mode == VehicleMode::DWELL)) {
             return true;
         }
+        if (o.hasPendingDropoff() && o.pending_target_slot == slot) {
+            return true;
+        }
         if (o.current_slot == slot &&
             poseInSlotSweep(vehicleCurrentPose(o), map_.slots().at(slot))) {
             return true;
@@ -1121,7 +1124,8 @@ bool TaskAllocator::hasValidPickupLeg(int slot) const {
     return leg.ready && leg.valid && !leg.path.empty();
 }
 
-bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
+bool TaskAllocator::assignPickupLeg(
+    VehicleAgent& vehicle, const std::vector<VehicleAgent>& all) {
     if (!cfg_.use_a1_cycle) return false;
     if (vehicle.current_slot < 0 ||
         vehicle.current_slot >= static_cast<int>(map_.slots().size())) {
@@ -1142,6 +1146,23 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
         return false;
     }
 
+    // Decide and softly reserve the next B destination before leaving the
+    // current slot. This does NOT concatenate the two legs and does NOT replace
+    // the active track: ordinary coordination will still see B->A1 only.
+    if (!reserveDropoffLeg(vehicle, all)) {
+        vehicle.mode = VehicleMode::NEED_TASK;
+        vehicle.action = VehicleAction::STOP;
+        vehicle.requested_action = VehicleAction::STOP;
+        vehicle.current_speed = 0.0;
+        vehicle.reason = "no_reserved_dropoff";
+        ROS_WARN_THROTTLE(
+            1.0,
+            "[multi_patrol][A1] V%d waits at B%d: no dropoff slot/path can be "
+            "reserved before departure",
+            vehicle.id, vehicle.current_slot);
+        return false;
+    }
+
     vehicle.track.set(leg.path);
     ++vehicle.path_gen;
     vehicle.path_s = 0.0;
@@ -1156,8 +1177,94 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
     vehicle.action = VehicleAction::NOMINAL;
     vehicle.requested_action = VehicleAction::NOMINAL;
     vehicle.reason = "new_pickup_leg";
-    ROS_INFO("[multi_patrol][A1] V%d pickup leg: B%d -> A1  wpts=%zu len=%.3f",
-             vehicle.id, vehicle.current_slot, vehicle.track.path().size(),
+    ROS_INFO("[multi_patrol][A1] V%d pickup leg: B%d -> A1  "
+             "reserved_dropoff=B%d pending_wpts=%zu wpts=%zu len=%.3f",
+             vehicle.id, vehicle.current_slot, vehicle.pending_target_slot,
+             vehicle.pending_dropoff_track.path().size(),
+             vehicle.track.path().size(), vehicle.track.length());
+    return true;
+}
+
+bool TaskAllocator::reserveDropoffLeg(
+    VehicleAgent& vehicle, const std::vector<VehicleAgent>& all) {
+    if (!cfg_.use_a1_cycle) return false;
+    if (vehicle.hasPendingDropoff()) return true;
+
+    const bool prefer_no_arc = cfg_.skip_arc_fallback_paths;
+    int target = chooseNextTarget(vehicle, all, prefer_no_arc);
+
+    // Preserve the first-cycle preset, but reserve it at B departure instead
+    // of waiting until pickup has finished.
+    if (vehicle.task_count == 0 &&
+        vehicle.id >= 0 &&
+        vehicle.id < static_cast<int>(cfg_.target_slots.size())) {
+        const int preset = cfg_.target_slots[vehicle.id];
+        if (preset >= 0 &&
+            preset < static_cast<int>(map_.slots().size()) &&
+            preset != vehicle.current_slot &&
+            !slotReservedByOther(vehicle, all, preset) &&
+            planAvailable(vehicle, preset, prefer_no_arc)) {
+            target = preset;
+        }
+    }
+
+    auto reserve = [&](int candidate, bool require_no_arc) {
+        if (candidate < 0 ||
+            candidate >= static_cast<int>(map_.slots().size())) {
+            return false;
+        }
+        ensureA1LegCache();
+        const DepotLegCache& leg =
+            a1_to_b_leg_cache_.at(static_cast<size_t>(candidate));
+        if (!leg.ready || !leg.valid || leg.path.empty()) return false;
+        if (require_no_arc && leg.info.used_arc_fallback) return false;
+
+        vehicle.pending_target_slot = candidate;
+        vehicle.pending_dropoff_track.set(leg.path);
+        ++vehicle.pending_path_gen;
+        ROS_INFO("[multi_patrol][A1] V%d reserved future dropoff: "
+                 "A1 -> B%d  wpts=%zu len=%.3f pending_gen=%d",
+                 vehicle.id, candidate,
+                 vehicle.pending_dropoff_track.path().size(),
+                 vehicle.pending_dropoff_track.length(),
+                 vehicle.pending_path_gen);
+        return true;
+    };
+
+    if (reserve(target, prefer_no_arc)) return true;
+    if (prefer_no_arc && !cfg_.reject_curvature_discontinuity) {
+        target = chooseNextTarget(vehicle, all, false);
+        if (reserve(target, false)) return true;
+    }
+    return false;
+}
+
+bool TaskAllocator::activateReservedDropoffLeg(VehicleAgent& vehicle) {
+    if (!vehicle.hasPendingDropoff()) return false;
+
+    const int target = vehicle.pending_target_slot;
+    rememberTask(vehicle, target);
+    vehicle.target_slot = target;
+    vehicle.track = vehicle.pending_dropoff_track;
+    ++vehicle.path_gen;
+    vehicle.path_s = 0.0;
+    vehicle.current_speed = 0.0;
+    vehicle.wait_time = 0.0;
+    vehicle.dwell_remaining = 0.0;
+    vehicle.loaded = true;
+    vehicle.leg_target = LegTargetKind::B_SLOT;
+    vehicle.mission_phase = MissionPhase::TO_B;
+    vehicle.mode = VehicleMode::ACTIVE;
+    vehicle.action = VehicleAction::NOMINAL;
+    vehicle.requested_action = VehicleAction::NOMINAL;
+    vehicle.reason = "activate_reserved_dropoff";
+
+    vehicle.pending_target_slot = -1;
+    vehicle.pending_dropoff_track = PathTrack{};
+
+    ROS_INFO("[multi_patrol][A1] V%d activated reserved dropoff: "
+             "A1 -> B%d  wpts=%zu len=%.3f",
+             vehicle.id, target, vehicle.track.path().size(),
              vehicle.track.length());
     return true;
 }
@@ -1198,33 +1305,13 @@ bool TaskAllocator::tryPlanFromA1(VehicleAgent& vehicle, int target,
 bool TaskAllocator::assignDropoffLeg(
     VehicleAgent& vehicle, const std::vector<VehicleAgent>& all) {
     if (!cfg_.use_a1_cycle) return false;
-    const bool prefer_no_arc = cfg_.skip_arc_fallback_paths;
-    int target = chooseNextTarget(vehicle, all, prefer_no_arc);
-
-    // Preserve the existing first-cycle preset semantics, but apply it only
-    // now, after pickup at A1, rather than before the vehicle leaves its B slot.
-    if (vehicle.task_count == 0 &&
-        vehicle.id >= 0 &&
-        vehicle.id < static_cast<int>(cfg_.target_slots.size())) {
-        const int preset = cfg_.target_slots[vehicle.id];
-        if (preset >= 0 &&
-            preset < static_cast<int>(map_.slots().size()) &&
-            preset != vehicle.current_slot &&
-            !slotReservedByOther(vehicle, all, preset) &&
-            planAvailable(vehicle, preset, prefer_no_arc)) {
-            target = preset;
-        }
-    }
-
-    if (target >= 0 &&
-        tryPlanFromA1(vehicle, target, prefer_no_arc)) {
+    // Normal path: the destination and A1->B path were reserved before the
+    // vehicle left its source B slot. A fallback reservation is retained only
+    // for old/restored states created before this invariant existed.
+    if ((vehicle.hasPendingDropoff() ||
+         reserveDropoffLeg(vehicle, all)) &&
+        activateReservedDropoffLeg(vehicle)) {
         return true;
-    }
-    if (prefer_no_arc && !cfg_.reject_curvature_discontinuity) {
-        target = chooseNextTarget(vehicle, all, false);
-        if (target >= 0 && tryPlanFromA1(vehicle, target, false)) {
-            return true;
-        }
     }
 
     vehicle.mode = VehicleMode::DWELL;
@@ -1244,7 +1331,7 @@ bool TaskAllocator::assignNextTask(VehicleAgent& vehicle,
             vehicle.mission_phase == MissionPhase::WAIT_DROPOFF_TASK) {
             return assignDropoffLeg(vehicle, all);
         }
-        return assignPickupLeg(vehicle);
+        return assignPickupLeg(vehicle, all);
     }
 
     if (vehicle.mode == VehicleMode::ACTIVE) {
@@ -1372,7 +1459,11 @@ bool TaskAllocator::replanFromPose(VehicleAgent& vehicle,
     auto slotTaken = [&](int t) {
         for (const VehicleAgent& o : all)
             if (o.id != vehicle.id &&
-                (o.target_slot == t || o.current_slot == t)) return true;
+                (o.target_slot == t || o.current_slot == t ||
+                 (o.hasPendingDropoff() &&
+                  o.pending_target_slot == t))) {
+                return true;
+            }
         return false;
     };
 
@@ -1412,6 +1503,8 @@ bool TaskAllocator::replanFromPose(VehicleAgent& vehicle,
     vehicle.action = VehicleAction::NOMINAL;
     vehicle.requested_action = VehicleAction::NOMINAL;
     vehicle.reason = "deadlock_replan";
+    vehicle.pending_target_slot = -1;
+    vehicle.pending_dropoff_track = PathTrack{};
     ROS_WARN("[deadlock-replan] V%d 从位姿(%.2f,%.2f,%.0fdeg)重规划 -> slot %d "
              "wpts=%zu len=%.2f arc=%d",
              vehicle.id, p.x, p.y, theta * 180.0 / kPi, target,

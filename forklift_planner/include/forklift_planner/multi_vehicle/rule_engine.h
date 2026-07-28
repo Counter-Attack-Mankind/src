@@ -107,6 +107,11 @@ private:
     // 返回的块以 self=lo、other=hi 的朝向存储(s_self_*=lo 路径弧长)。
     const std::vector<ConflictZone>& conflictBlocksCanonical(
         const VehicleAgent& lo, const VehicleAgent& hi) const;
+    // Exact geometry between an A1 owner's cached future A1->B leg and a
+    // waiter's current B->A1 leg. Kept in a separate cache so inspecting a
+    // future leg never pollutes ordinary active-track conflict arbitration.
+    const std::vector<ConflictZone>& pendingDepartureConflictBlocks(
+        const VehicleAgent& owner, const VehicleAgent& waiter) const;
     OccupancyInterval occupancyInterval(const VehicleAgent& v,
                                         VehicleAction action,
                                         double zone_enter_s,
@@ -174,6 +179,13 @@ private:
         std::vector<ConflictZone> blocks;  // canonical: s_self_*=lo, s_other_*=hi
     };
     mutable std::map<std::pair<int, int>, ConflictCacheEntry> conflict_cache_;
+    struct PendingConflictCacheEntry {
+        int owner_pending_gen = -1;
+        int waiter_path_gen = -1;
+        std::vector<ConflictZone> blocks;  // self=owner pending, other=waiter active
+    };
+    mutable std::map<std::pair<int, int>, PendingConflictCacheEntry>
+        pending_conflict_cache_;
 
     // Phase 2 资源模型:资源地图(只读)+ 资源令牌表(跨周期持久,§11.10)。
     const TrafficResourceMap* resmap_ = nullptr;

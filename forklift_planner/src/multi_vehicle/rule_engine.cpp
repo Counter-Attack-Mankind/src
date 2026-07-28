@@ -321,6 +321,25 @@ const std::vector<RuleEngine::ConflictZone>& RuleEngine::conflictBlocksCanonical
     return e.blocks;
 }
 
+const std::vector<RuleEngine::ConflictZone>&
+RuleEngine::pendingDepartureConflictBlocks(
+    const VehicleAgent& owner, const VehicleAgent& waiter) const {
+    const std::pair<int, int> key{owner.id, waiter.id};
+    PendingConflictCacheEntry& e = pending_conflict_cache_[key];
+    if (e.owner_pending_gen != owner.pending_path_gen ||
+        e.waiter_path_gen != waiter.path_gen) {
+        VehicleAgent departure = owner;
+        departure.track = owner.pending_dropoff_track;
+        departure.path_s = 0.0;
+        e.blocks = departure.track.empty()
+                       ? std::vector<ConflictZone>{}
+                       : computeConflictZonesFull(departure, waiter);
+        e.owner_pending_gen = owner.pending_path_gen;
+        e.waiter_path_gen = waiter.path_gen;
+    }
+    return e.blocks;
+}
+
 std::vector<RuleEngine::ConflictZone> RuleEngine::findConflictZones(
     const VehicleAgent& self, const VehicleAgent& other) const {
     // 取静态 C_ij(缓存),按 self/other 朝向取用,再按当前位置裁剪——产物与历史
@@ -504,11 +523,15 @@ std::vector<std::string> RuleEngine::debugConflictLines(
          << " act=" << static_cast<int>(a.action)
          << " blk=V" << a.blocker_id
          << " gen=" << a.path_gen
+         << " pending_B=" << a.pending_target_slot
+         << " pending_gen=" << a.pending_path_gen
          << " | B phase=" << phaseName(b.mission_phase)
          << " s=" << b.path_s << "/" << b.track.length()
          << " act=" << static_cast<int>(b.action)
          << " blk=V" << b.blocker_id
-         << " gen=" << b.path_gen;
+         << " gen=" << b.path_gen
+         << " pending_B=" << b.pending_target_slot
+         << " pending_gen=" << b.pending_path_gen;
     lines.push_back(head.str());
 
     if (!zones.empty()) {
@@ -1153,8 +1176,10 @@ void RuleEngine::resolveA1ApproachQueue(
 
     if (owner == nullptr) {
         // 节点若在装载/离场中重建，先恢复现场占用者。普通 TO_A1 车辆只有进入
-        // A1 请求线后才成为候选；请求线外不提前占有服务权。若同周期有多辆候选，
-        // 选择进入更深(remainingS 更小)者，完全相同时以 id 确定。
+        // A1 请求线，或另一辆车已经接近其待执行离场路径的精确制动门时，才成为
+        // 候选。后者只是提前锁定服务顺序，让候车来得及在门外刹停，不会把两段
+        // track 拼接，也不会把整条 B->A1 串行化。若同周期有多辆候选，选择进入
+        // 更深(remainingS 更小)者，完全相同时以 id 确定。
         for (VehicleAgent& v : vehicles) {
             if (!isLoading(v)) continue;
             if (owner == nullptr || v.id < owner->id) owner = &v;
@@ -1166,9 +1191,69 @@ void RuleEngine::resolveA1ApproachQueue(
             }
         }
         if (owner == nullptr) {
+            std::set<int> requesters;
             for (VehicleAgent& v : vehicles) {
                 if (!isApproaching(v)) continue;
-                if (v.remainingS() > request_distance) continue;
+                if (v.remainingS() <= request_distance) {
+                    requesters.insert(v.id);
+                }
+            }
+
+            // A future exit gate may lie farther upstream than the fixed A1
+            // request line (the B52 case is about 3m from A1). Arm the service
+            // transaction one braking cycle before any approaching vehicle
+            // reaches such a gate. Add both vehicles to the request set, then
+            // let remainingS decide which one actually serves first.
+            for (VehicleAgent& possible_owner : vehicles) {
+                if (!isApproaching(possible_owner) ||
+                    !possible_owner.hasPendingDropoff()) {
+                    continue;
+                }
+                for (VehicleAgent& possible_waiter : vehicles) {
+                    if (possible_waiter.id == possible_owner.id ||
+                        !isApproaching(possible_waiter)) {
+                        continue;
+                    }
+                    const std::vector<ConflictZone>& future_zones =
+                        pendingDepartureConflictBlocks(
+                            possible_owner, possible_waiter);
+                    double gate_s = std::numeric_limits<double>::infinity();
+                    for (const ConflictZone& z : future_zones) {
+                        const double waiter_rem_at_exit =
+                            possible_waiter.track.length() - z.s_other_exit;
+                        if (waiter_rem_at_exit >
+                            hold_distance + 1e-9) {
+                            continue;
+                        }
+                        gate_s = std::min(
+                            gate_s,
+                            std::max(0.0, z.s_other_enter -
+                                              mp_.body_front_ext()));
+                    }
+                    if (!std::isfinite(gate_s)) continue;
+
+                    const double waiter_speed =
+                        std::max(0.0, possible_waiter.current_speed);
+                    const double waiter_braking =
+                        waiter_speed * waiter_speed /
+                        (2.0 * std::max(1e-6, cfg_.max_decel));
+                    const double waiter_reaction =
+                        waiter_speed * std::max(0.0, dt);
+                    const double distance_to_gate =
+                        gate_s - possible_waiter.path_s;
+                    if (distance_to_gate <=
+                        waiter_braking + waiter_reaction + 0.05) {
+                        requesters.insert(possible_owner.id);
+                        requesters.insert(possible_waiter.id);
+                    }
+                }
+            }
+
+            for (VehicleAgent& v : vehicles) {
+                if (!isApproaching(v) ||
+                    requesters.count(v.id) == 0) {
+                    continue;
+                }
                 if (owner == nullptr ||
                     v.remainingS() < owner->remainingS() - 1e-9 ||
                     (std::abs(v.remainingS() - owner->remainingS()) <= 1e-9 &&
@@ -1183,20 +1268,76 @@ void RuleEngine::resolveA1ApproachQueue(
     if (owner == nullptr) return;
 
     // 非 owner 在其余路段照常运行，仅在 A1 前停止线制动，为装载车倒退离场保留扫掠空间。
+    // 若 owner 已在离开源 B 时缓存了未来 A1->B 航段，则固定距离停止线还要与该航段
+    // 对候车造成的「最早真实冲突入口」取更靠前者。未来路径只在这里用于 A1 出口保护，
+    // 不写入活动 track，也不参与普通两车全路径仲裁。
     for (VehicleAgent& v : vehicles) {
         if (v.id == a1_service_owner_ || !isApproaching(v)) continue;
 
-        const double distance_to_stop_line =
-            v.remainingS() - hold_distance;
+        double stop_line_s =
+            std::max(0.0, v.track.length() - hold_distance);
+        bool has_exact_exit_gate = false;
+        std::vector<ConflictZone> protected_zones;
+        VehicleAgent pending_departure;
+        if (owner->hasPendingDropoff()) {
+            const std::vector<ConflictZone>& future_zones =
+                pendingDepartureConflictBlocks(*owner, v);
+            protected_zones.reserve(future_zones.size());
+            for (const ConflictZone& z : future_zones) {
+                // Only protect conflicts belonging to the A1 terminal
+                // transaction. Far-away crossings on A1->B remain ordinary
+                // time-window/pairwise coordination problems.
+                const double waiter_rem_at_exit =
+                    v.track.length() - z.s_other_exit;
+                if (waiter_rem_at_exit > hold_distance + 1e-9) continue;
+                has_exact_exit_gate = true;
+                protected_zones.push_back(z);
+                stop_line_s = std::min(
+                    stop_line_s,
+                    std::max(0.0, z.s_other_enter - mp_.body_front_ext()));
+            }
+            if (has_exact_exit_gate) {
+                pending_departure = *owner;
+                pending_departure.track = owner->pending_dropoff_track;
+                pending_departure.path_s = 0.0;
+                recordConflictZones(
+                    pending_departure, v, protected_zones,
+                    ConflictMarkerKind::CROSSING_OR_OPPOSING);
+            }
+        }
+
+        const double distance_to_stop_line = stop_line_s - v.path_s;
+        if (has_exact_exit_gate && distance_to_stop_line < -1e-3) {
+            ROS_WARN_THROTTLE(
+                2.0,
+                "[multi_patrol][A1 gate late] V%d already passed reserved "
+                "exit gate for owner V%d: s=%.3f gate=%.3f overrun=%.3f "
+                "owner_pending_B=%d",
+                v.id, a1_service_owner_, v.path_s, stop_line_s,
+                -distance_to_stop_line, owner->pending_target_slot);
+        }
         const double speed = std::max(0.0, v.current_speed);
         const double braking_distance =
             speed * speed / (2.0 * std::max(1e-6, cfg_.max_decel));
         const double reaction_distance = speed * std::max(0.0, dt);
         if (distance_to_stop_line <=
             braking_distance + reaction_distance + 0.02) {
+            if (has_exact_exit_gate) {
+                ROS_INFO_THROTTLE(
+                    2.0,
+                    "[multi_patrol][A1 reserved gate] owner=V%d pending_B=%d "
+                    "waiter=V%d waiter_s=%.3f stop_line=%.3f "
+                    "distance=%.3f protected_zones=%zu",
+                    a1_service_owner_, owner->pending_target_slot,
+                    v.id, v.path_s, stop_line_s, distance_to_stop_line,
+                    protected_zones.size());
+            }
             applyActionRequest(
                 v, VehicleAction::STOP,
-                "wait_a1_exit_V" + std::to_string(a1_service_owner_),
+                std::string(has_exact_exit_gate
+                                ? "wait_a1_reserved_exit_V"
+                                : "wait_a1_exit_V") +
+                    std::to_string(a1_service_owner_),
                 a1_service_owner_);
         }
     }

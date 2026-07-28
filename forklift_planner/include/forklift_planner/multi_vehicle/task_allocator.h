@@ -47,7 +47,8 @@ public:
     void buildCache();
     bool assignNextTask(VehicleAgent& vehicle,
                         const std::vector<VehicleAgent>& all);
-    bool assignPickupLeg(VehicleAgent& vehicle);
+    bool assignPickupLeg(VehicleAgent& vehicle,
+                         const std::vector<VehicleAgent>& all);
     bool assignDropoffLeg(VehicleAgent& vehicle,
                           const std::vector<VehicleAgent>& all);
 
@@ -120,6 +121,9 @@ private:
     bool tryPlan(VehicleAgent& vehicle, int target, bool require_no_arc);
     bool tryPlanFromA1(VehicleAgent& vehicle, int target,
                        bool require_no_arc);
+    bool reserveDropoffLeg(VehicleAgent& vehicle,
+                           const std::vector<VehicleAgent>& all);
+    bool activateReservedDropoffLeg(VehicleAgent& vehicle);
     void rememberTask(VehicleAgent& vehicle, int target);
     bool containsRecent(const std::vector<int>& values, int value) const;
     double deterministicJitter(const VehicleAgent& vehicle, int target) const;
