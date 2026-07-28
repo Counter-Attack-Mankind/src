@@ -2114,6 +2114,17 @@ public:
         for (int id : members) {
             const VehicleAgent* a = agentById_c(id);
             if (!a) continue;
+            if (cfg_.use_a1_cycle &&
+                (id == rule_engine_->a1ServiceOwner() ||
+                 a->mission_phase == MissionPhase::TO_A1 ||
+                 a->mission_phase == MissionPhase::PICKUP_DWELL ||
+                 a->mission_phase == MissionPhase::WAIT_DROPOFF_TASK)) {
+                // Never turn an empty A1-bound vehicle into a synthetic TO_B
+                // mission, and never re-route the protected A1 transaction
+                // owner. Repair the coordination relation instead of
+                // corrupting the logistics state machine.
+                continue;
+            }
             auto it = last_replan_t_.find(id);
             if (it != last_replan_t_.end() && sim_time_ - it->second < kCooldown) continue;
             if (a->wait_time > worst_wait) { worst_wait = a->wait_time; victim = id; }

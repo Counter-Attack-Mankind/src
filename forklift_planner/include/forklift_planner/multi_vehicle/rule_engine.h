@@ -45,18 +45,21 @@ public:
     struct SimSnapshot {
         std::map<std::pair<int, int>, int> commit_owner;
         std::set<std::pair<int, int>> following_pairs;
+        std::map<std::pair<int, int>, int> following_leader;
         ResourceTokenTable tokens;
         std::map<int, int> reservation_path_gen;
         double now = 0.0;
         int a1_service_owner = -1;
     };
     SimSnapshot snapshot() const {
-        return SimSnapshot{commit_owner_, following_pairs_, tokens_,
+        return SimSnapshot{commit_owner_, following_pairs_, following_leader_,
+                           tokens_,
                            reservation_path_gen_, now_, a1_service_owner_};
     }
     void restore(const SimSnapshot& s) {
         commit_owner_ = s.commit_owner;
         following_pairs_ = s.following_pairs;
+        following_leader_ = s.following_leader;
         tokens_ = s.tokens;
         reservation_path_gen_ = s.reservation_path_gen;
         now_ = s.now;
@@ -169,6 +172,10 @@ private:
     // 管纵向跟距),否则一律由原子门门控。保证「被跳过 ⟺ 被 following 接管」,杜绝两层
     // 判据不一致留下的缝隙(V1↔V4 / V0↔V7 / V1↔V5 头对头/汇入对撞的根因)。
     std::set<std::pair<int, int>> following_pairs_;
+    // Unique directed order for each active same-lane relation. value=leader
+    // vehicle id; the other member is the sole follower. Recomputed every
+    // cycle together with following_pairs_.
+    std::map<std::pair<int, int>, int> following_leader_;
 
     // 静态冲突集 C_ij 缓存(协调图第一步)。key={lo.id,hi.id};块以 self=lo 朝向存储。
     // gen_lo/gen_hi 记录算定时两车的 path_gen;任一方 path_gen 变(换了固定路径)即失效

@@ -453,6 +453,11 @@ std::vector<std::string> RuleEngine::debugConflictLines(
     auto it = commit_owner_.find(pkey);
     if (it != commit_owner_.end()) owner = it->second;
     const bool following = following_pairs_.count(pkey) > 0;
+    int following_leader = -1;
+    auto leader_it = following_leader_.find(pkey);
+    if (leader_it != following_leader_.end()) {
+        following_leader = leader_it->second;
+    }
     const double front = mp_.body_front_ext();
     const double rear = mp_.body_rear_ext();
 
@@ -515,6 +520,7 @@ std::vector<std::string> RuleEngine::debugConflictLines(
          << " a1_owner=V" << a1_service_owner_
          << " reservation=V" << owner
          << " following=" << static_cast<int>(following)
+         << " following_leader=V" << following_leader
          << " zones=" << zones.size()
          << " all_same_dir=" << static_cast<int>(all_same)
          << " nominal_time_overlap=" << static_cast<int>(nominal_time_overlap)
@@ -740,7 +746,14 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         const double braking_dist =
             (v_cur * v_cur) / (2.0 * std::max(1e-6, cfg_.max_decel));
         const double reaction_dist = v_cur * dt;
-        if (dist_to_zone <= braking_dist + reaction_dist) {
+        // A pure braking-distance test becomes false again after the vehicle
+        // has stopped a few millimetres before the line (v=0 => RHS=0).
+        // action_hold would then relax STOP->CREEP and let it nibble across the
+        // gate. Keep a small static latch band so STOP remains asserted at the
+        // line until the owner actually releases the region.
+        constexpr double kStopLineLatch = 0.02;
+        if (dist_to_zone <=
+            braking_dist + reaction_dist + kStopLineLatch) {
             applyActionRequest(v, VehicleAction::STOP,
                                "brake_V" + std::to_string(other_id), other_id);
         }
@@ -786,7 +799,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             if (!b.active()) continue;
 
             // 先取缓存的冲突块(静态 C_ij + 当前位置裁剪),后续跟车判定/门控都基于它。
-            const std::vector<ConflictZone> zones = findConflictZones(a, b);
+            std::vector<ConflictZone> zones = findConflictZones(a, b);
             const std::pair<int, int> pkey{std::min(a.id, b.id),
                                            std::max(a.id, b.id)};
             if (zones.empty()) {
@@ -794,13 +807,27 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 continue;
             }
 
-            // 协调图第4步(改):同向同车道跟车交 resolveFollowing 管纵向跟距。是否跳过
-            // 完全以 resolveFollowing 本周期认定的 following_pairs_ 为唯一事实源——
-            // 「被跳过 ⟺ 被 following 接管」,杜绝两层判据不一致留下的缝隙(旧版 pairwise
-            // 用块处/瞬时朝向自行判定,与 following 的判据不符 → 某些对被 pairwise 跳过却
-            // 无人接管 → 头对头/汇入对撞,实测 V1↔V4 / V0↔V7 / V1↔V5)。不在该集合中的对
-            // 一律由下方原子门门控,绝不漏。
-            if (following_pairs_.count(pkey)) continue;
+            // 同向共享块由唯一 leader/follower 跟车关系接管；同一车对若在更远处还
+            // 有交叉/对向块，只移除同向块，剩余块仍继续走原子门仲裁。不能再像旧版
+            // 那样因为 pair 在 following_pairs_ 就跳过整对所有区域。
+            if (following_pairs_.count(pkey)) {
+                zones.erase(
+                    std::remove_if(
+                        zones.begin(), zones.end(),
+                        [&](const ConflictZone& z) {
+                            return z.same_dir &&
+                                   std::min(z.s_self_exit -
+                                                z.s_self_enter,
+                                            z.s_other_exit -
+                                                z.s_other_enter) >=
+                                       mp_.vehicle_length;
+                        }),
+                    zones.end());
+                if (zones.empty()) {
+                    commit_owner_.erase(pkey);
+                    continue;
+                }
+            }
 
             // 协调图第3步:时间窗用「两车都按 NOMINAL」预测占用——回答的是「若双方都
             // 正常行驶,会不会在同一冲突块里相遇」这一与当前谁停谁走无关的客观问题。
@@ -1030,17 +1057,13 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
 }
 
 void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
-    // 本周期重新认定"真·同向同车道跟车对",供 resolvePairwiseConflicts 决定是否跳过。
-    // 这是跟车判据的唯一事实源 → 杜绝两层判据不一致的缝隙。
+    // 每个无序车对只判一次，并产生唯一 leader/follower。旧版对 (a,b) 与
+    // (b,a) 各判一次，在弯曲/汇入段可能同时得到 following_Va 与 following_Vb，
+    // 直接形成双向等待。这里用同向共享块上的归一化弧长进度确定唯一前后顺序。
+    const std::map<std::pair<int, int>, int> previous_leaders =
+        following_leader_;
     following_pairs_.clear();
-    auto motionHeading = [](const VehicleAgent& v) {
-        constexpr double kPi = 3.14159265358979323846;
-        double heading = v.track.poseAtS(v.path_s).theta;
-        if (v.track.typeAtS(v.path_s) == WpType::REVERSE) {
-            heading += kPi;
-        }
-        return heading;
-    };
+    following_leader_.clear();
 
     auto terminalDocking = [&](const VehicleAgent& v) {
         if (!v.active()) return false;
@@ -1049,63 +1072,149 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
         return v.remainingS() <= terminal_distance;
     };
 
-    for (VehicleAgent& v : vehicles) {
-        if (!v.active()) continue;
-        if (terminalDocking(v)) continue;
+    auto a1TransactionPair = [&](const VehicleAgent& a,
+                                 const VehicleAgent& b) {
+        if (!cfg_.use_a1_cycle || a1_service_owner_ < 0) return false;
+        const VehicleAgent* owner = nullptr;
+        const VehicleAgent* waiter = nullptr;
+        if (a.id == a1_service_owner_ && b.mission_phase == MissionPhase::TO_A1) {
+            owner = &a;
+            waiter = &b;
+        } else if (b.id == a1_service_owner_ &&
+                   a.mission_phase == MissionPhase::TO_A1) {
+            owner = &b;
+            waiter = &a;
+        }
+        if (owner == nullptr || waiter == nullptr) return false;
+        return owner->mission_phase == MissionPhase::TO_A1 ||
+               (owner->mission_phase == MissionPhase::TO_B &&
+                owner->loaded);
+    };
 
-        const RoughWp pose_v = v.track.poseAtS(v.path_s);
-        const double heading_v = motionHeading(v);
+    const double front = mp_.body_front_ext();
+    const double rear = mp_.body_rear_ext();
+    const double lookahead =
+        std::max(cfg_.following_normal_distance, mp_.vehicle_length);
+    auto distanceToSpan = [](double s, double enter, double exit) {
+        if (s < enter) return enter - s;
+        if (s > exit) return s - exit;
+        return 0.0;
+    };
 
-        for (const VehicleAgent& other : vehicles) {
-            if (other.id == v.id || !other.active()) continue;
-            const RoughWp pose_o = other.track.poseAtS(other.path_s);
-            // 同向跟车判定用「静态冲突块的对角方向 same_dir」而非当前瞬时朝向——后者在
-            // 交叉/汇入处会瞬时对齐,把真正交叉的两车误判成跟车;而 pairwise 据此(following_pairs_)
-            // 跳过 → 该对无任何交叉门控 → 让行方在 action_hold 回弹下蹭过停止线、撞上停着的车
-            // (实测 V1↔V5)。块 same_dir 是纯几何静态量,稳定不闪。要求两车确有共享冲突块且
-            // 每块都同向,才算同车道跟车;否则(交叉/对向/无重叠)一律交原子门门控。
-            const std::vector<ConflictZone> fzones = findConflictZones(v, other);
-            if (fzones.empty()) continue;
-            bool all_same_dir = true;
-            for (const ConflictZone& z : fzones) {
-                if (!z.same_dir) { all_same_dir = false; break; }
+    for (size_t i = 0; i < vehicles.size(); ++i) {
+        VehicleAgent& a = vehicles[i];
+        if (!a.active() || terminalDocking(a)) continue;
+        for (size_t j = i + 1; j < vehicles.size(); ++j) {
+            VehicleAgent& b = vehicles[j];
+            if (!b.active() || terminalDocking(b)) continue;
+
+            // A1进场/离场事务优先于普通跟车。该车对必须留给 pairwise 的
+            // A1 owner override，不能因登记 following 后把 pairwise 整层绕过。
+            if (a1TransactionPair(a, b)) continue;
+
+            const std::vector<ConflictZone> zones =
+                findConflictZones(a, b);
+            std::vector<ConflictZone> active_same;
+            ConflictZone order_zone;
+            bool has_order_zone = false;
+            double best_score = std::numeric_limits<double>::infinity();
+            for (const ConflictZone& z : zones) {
+                if (!z.same_dir) continue;
+                const double a_zone_len =
+                    z.s_self_exit - z.s_self_enter;
+                const double b_zone_len =
+                    z.s_other_exit - z.s_other_enter;
+                // A short tangential touch at an acute crossing may also have
+                // a positive tangent dot. Require a continuous overlap at
+                // least one vehicle long before calling it a shared lane.
+                if (std::min(a_zone_len, b_zone_len) <
+                    mp_.vehicle_length) {
+                    continue;
+                }
+                const bool a_relevant =
+                    a.path_s + front + lookahead >= z.s_self_enter &&
+                    a.path_s - rear <= z.s_self_exit;
+                const bool b_relevant =
+                    b.path_s + front + lookahead >= z.s_other_enter &&
+                    b.path_s - rear <= z.s_other_exit;
+                if (!a_relevant || !b_relevant) continue;
+                active_same.push_back(z);
+                const double score =
+                    distanceToSpan(a.path_s, z.s_self_enter, z.s_self_exit) +
+                    distanceToSpan(b.path_s, z.s_other_enter, z.s_other_exit);
+                if (score < best_score) {
+                    best_score = score;
+                    order_zone = z;
+                    has_order_zone = true;
+                }
             }
-            if (!all_same_dir) continue;
+            if (!has_order_zone) continue;
 
-            const double dx = pose_o.x - pose_v.x;
-            const double dy = pose_o.y - pose_v.y;
-            const double fwd = dx * std::cos(heading_v) +
-                               dy * std::sin(heading_v);
-            if (fwd <= 0.0) continue;
+            const double a_span =
+                std::max(1e-6, order_zone.s_self_exit -
+                                  order_zone.s_self_enter);
+            const double b_span =
+                std::max(1e-6, order_zone.s_other_exit -
+                                  order_zone.s_other_enter);
+            const double a_progress =
+                (a.path_s - order_zone.s_self_enter) / a_span;
+            const double b_progress =
+                (b.path_s - order_zone.s_other_enter) / b_span;
+            const std::pair<int, int> key{
+                std::min(a.id, b.id), std::max(a.id, b.id)};
+            auto previous = previous_leaders.find(key);
+            // Nearly side-by-side/indistinguishable progress is a merge
+            // arbitration problem unless a continuous relation already locked
+            // the order in an earlier cycle.
+            if (std::abs(a_progress - b_progress) <= 0.01 &&
+                previous == previous_leaders.end()) {
+                continue;
+            }
+            int leader_id =
+                a_progress > b_progress ? a.id : b.id;
+            if (previous != previous_leaders.end() &&
+                (previous->second == a.id ||
+                 previous->second == b.id)) {
+                // No overtaking inside one shared lane: keep the established
+                // order until this relation disappears/clears.
+                leader_id = previous->second;
+            }
+            VehicleAgent& leader =
+                leader_id == a.id ? a : b;
+            VehicleAgent& follower =
+                leader_id == a.id ? b : a;
+            following_pairs_.insert(key);
+            following_leader_[key] = leader.id;
 
-            const double lat = std::abs(-dx * std::sin(heading_v) +
-                                         dy * std::cos(heading_v));
-            if (lat > mp_.vehicle_width) continue;
+            // Display the same-direction shared region whenever the relation
+            // exists, even when the gap is large and no speed reduction is
+            // required. Visualization must not be coupled to braking.
+            recordConflictZones(
+                a, b, active_same, ConflictMarkerKind::SAME_DIRECTION);
 
-            // 确认 v 真在同车道跟随 other(同向、other 在正前方、横向≤一个车宽)。登记此对
-            // 为跟车对——即使下面因间距大而暂不刹车,也要登记,使 pairwise 一致地跳过它
-            // (否则大间距跟车对会被 pairwise 当交叉、两车都 committed→双刹楔死)。
-            following_pairs_.insert({std::min(v.id, other.id),
-                                     std::max(v.id, other.id)});
+            const RoughWp p_leader =
+                leader.track.poseAtS(leader.path_s);
+            const RoughWp p_follower =
+                follower.track.poseAtS(follower.path_s);
+            const double gap =
+                std::hypot(p_leader.x - p_follower.x,
+                           p_leader.y - p_follower.y) -
+                mp_.vehicle_length;
 
-            const double dist = std::hypot(dx, dy);
-            const double gap = dist - mp_.vehicle_length;
-
-            VehicleAction follow_action;
+            VehicleAction follow_action = VehicleAction::NOMINAL;
             if (gap <= cfg_.following_min_distance) {
                 follow_action = VehicleAction::STOP;
             } else if (gap <= cfg_.following_creep_distance) {
                 follow_action = VehicleAction::CREEP;
             } else if (gap <= cfg_.following_normal_distance) {
                 follow_action = VehicleAction::YIELD;
-            } else {
-                continue;
             }
-            recordConflictZones(v, other, fzones,
-                                ConflictMarkerKind::SAME_DIRECTION);
-            applyActionRequest(v, follow_action,
-                               "following_V" + std::to_string(other.id),
-                               other.id);
+            if (follow_action != VehicleAction::NOMINAL) {
+                applyActionRequest(
+                    follower, follow_action,
+                    "following_V" + std::to_string(leader.id),
+                    leader.id);
+            }
         }
     }
 }
@@ -1382,6 +1491,16 @@ void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles) {
             for (const VehicleAgent& o : vehicles) {
                 if (o.id == v.id) continue;
                 if (o.mode == VehicleMode::NEED_TASK || o.track.empty()) continue;
+                const std::pair<int, int> pair_key{
+                    std::min(v.id, o.id), std::max(v.id, o.id)};
+                auto leader = following_leader_.find(pair_key);
+                if (leader != following_leader_.end() &&
+                    leader->second == v.id) {
+                    // The unique leader must not be stopped by its own
+                    // follower. The follower remains subject to this clearance
+                    // guard and to the longitudinal following controller.
+                    continue;
+                }
                 if (overlaps(body, bodyAt(o, currentS(o)))) {
                     block_id = o.id;
                     break;

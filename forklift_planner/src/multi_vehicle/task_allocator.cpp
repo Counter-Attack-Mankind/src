@@ -1429,6 +1429,12 @@ bool TaskAllocator::assignNextTask(VehicleAgent& vehicle,
 bool TaskAllocator::replanFromPose(VehicleAgent& vehicle,
                                    const std::vector<VehicleAgent>& all) {
     // 死锁恢复(C):从卡死车的「当前实际位姿」重规划到一个空库位,使其驶离争用区。
+    if (cfg_.use_a1_cycle && !vehicle.loaded) {
+        // An empty TO_A1 vehicle has not picked up its load. Replanning it
+        // directly to a B slot would create the invalid state
+        // loaded=false && mission_phase=TO_B and discard its pending task.
+        return false;
+    }
     if (vehicle.track.empty()) return false;
     constexpr double kPi = 3.14159265358979323846;
     const RoughWp p = vehicle.track.poseAtS(vehicle.path_s);
