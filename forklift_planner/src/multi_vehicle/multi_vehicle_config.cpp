@@ -3,6 +3,7 @@
 #include <XmlRpcValue.h>
 
 #include <algorithm>
+#include <cctype>
 
 namespace forklift_planner {
 namespace multi_vehicle {
@@ -34,6 +35,10 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
 
     nh.param(ns + "vehicle_count", c.vehicle_count, c.vehicle_count);
     nh.param(ns + "random_seed", c.random_seed, c.random_seed);
+    nh.param(ns + "task_assignment_mode", c.task_assignment_mode,
+             c.task_assignment_mode);
+    nh.param(ns + "task_random_seed", c.task_random_seed,
+             c.task_random_seed);
     nh.param(ns + "nominal_speed", c.nominal_speed, c.nominal_speed);
     nh.param(ns + "max_speed", c.max_speed, c.max_speed);
     nh.param(ns + "max_accel", c.max_accel, c.max_accel);
@@ -131,6 +136,20 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
                                   {0, 8, 17, 22, 33, 42, 49, 58});
     c.target_slots = readIntVector(nh, ns + "target_slots", {});
     nh.param(ns + "randomize_start", c.randomize_start, c.randomize_start);
+
+    std::transform(c.task_assignment_mode.begin(),
+                   c.task_assignment_mode.end(),
+                   c.task_assignment_mode.begin(),
+                   [](unsigned char ch) {
+                       return static_cast<char>(std::tolower(ch));
+                   });
+    if (c.task_assignment_mode != "random" &&
+        c.task_assignment_mode != "deterministic") {
+        ROS_WARN("[multi_patrol][task] unknown task_assignment_mode='%s'; "
+                 "using deterministic",
+                 c.task_assignment_mode.c_str());
+        c.task_assignment_mode = "deterministic";
+    }
 
     c.vehicle_count = std::max(1, std::min(c.vehicle_count, 8));
     c.prediction_step = std::max(0.02, c.prediction_step);

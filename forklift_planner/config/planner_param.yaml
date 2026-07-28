@@ -29,12 +29,18 @@ forklift_planner:
   multi_vehicle:
     # 多车基础配置
     vehicle_count: 8
+    # 任务目标分配模式：
+    #   random        每次用系统随机源抽取，适合压力/覆盖测试；
+    #   deterministic 固定种子按“车辆+任务序号”独立排序，适合版本对比复现。
+    task_assignment_mode: "deterministic"
+    task_random_seed: 20260728
+    # 仅用于随机起始库位；与上面的任务目标随机序列相互独立。
     random_seed: 2026
 
-    # 预设起点/终点货位。车辆 i 使用 start_slots[i] -> target_slots[i]
-    # 当前这组是 8 对互不冲突、较长距离的全程前进测试任务。
+    # 预设起点；target_slots 非空时会强制覆盖各车第一轮目标，不参与随机模式。
+    # 测试 random/deterministic 分配时保持 target_slots: []。
     start_slots:  [38, 20, 36, 35, 56, 40, 57, 21]
-    target_slots: [ 9, 10,  8,  41, 52, 55, 42, 64]
+    target_slots: []
     randomize_start: false
 
     # 简化实车冒烟测试：为每辆车选择较近且全程前进的目标，覆盖上面的 target_slots。

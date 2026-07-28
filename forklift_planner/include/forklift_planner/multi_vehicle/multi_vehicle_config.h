@@ -11,6 +11,11 @@ namespace multi_vehicle {
 struct MultiVehicleConfig {
     int vehicle_count = 8;
     int random_seed = 42;
+    // Task target selection only. "random" draws from std::random_device on
+    // every assignment; "deterministic" ranks candidates from a stateless
+    // hash of (seed, vehicle id, completed-task count, target id).
+    std::string task_assignment_mode = "deterministic";
+    int task_random_seed = 20260728;
 
     double nominal_speed = 0.20;
     double max_speed = 0.26;

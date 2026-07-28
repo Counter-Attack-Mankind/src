@@ -179,6 +179,9 @@ private:
                                const VehicleAgent& waiter);
     bool waiterInsideA1Zones(const VehicleAgent& waiter,
                              const std::vector<ConflictZone>& zones) const;
+    bool conflictZoneInA1Chain(
+        const ConflictZone& pair_zone, bool owner_is_self,
+        const std::vector<ConflictZone>& owner_waiter_chain) const;
     static const char* a1GateSourceName(A1GateSource source);
     OccupancyInterval occupancyInterval(const VehicleAgent& v,
                                         VehicleAction action,

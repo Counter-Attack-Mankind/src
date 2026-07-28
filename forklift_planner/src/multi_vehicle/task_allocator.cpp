@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -88,6 +89,10 @@ TaskAllocator::TaskAllocator(const MapParam& mp, const PlannerParam& pp,
     outbound_valid_counts_.assign(n, 0);
     outbound_cross_row_counts_.assign(n, 0);
     a1_to_b_leg_cache_.assign(n, DepotLegCache{});
+    ROS_INFO("[multi_patrol][task] assignment_mode=%s task_seed=%d "
+             "(start_seed=%d)",
+             cfg_.task_assignment_mode.c_str(), cfg_.task_random_seed,
+             cfg_.random_seed);
     b_to_a1_leg_cache_.assign(n, DepotLegCache{});
 }
 
@@ -768,17 +773,27 @@ bool TaskAllocator::containsRecent(const std::vector<int>& values,
     return std::find(values.begin(), values.end(), value) != values.end();
 }
 
-double TaskAllocator::deterministicJitter(const VehicleAgent& vehicle,
-                                          int target) const {
-    unsigned int x = static_cast<unsigned int>(
-        (vehicle.id + 1) * 73856093u ^
-        (vehicle.task_count + 1) * 19349663u ^
-        (target + 1) * 83492791u ^
-        (cfg_.random_seed + 1) * 2654435761u);
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    return static_cast<double>(x % 1000u) / 1000.0;
+std::uint64_t TaskAllocator::deterministicRank(
+    const VehicleAgent& vehicle, int target) const {
+    // SplitMix64 finalizer. There is deliberately no mutable RNG state here:
+    // one vehicle completing a task earlier cannot shift another vehicle's
+    // random stream during an asynchronous multi-vehicle run.
+    std::uint64_t x =
+        static_cast<std::uint64_t>(
+            static_cast<std::uint32_t>(cfg_.task_random_seed));
+    x ^= (static_cast<std::uint64_t>(
+              static_cast<std::uint32_t>(vehicle.id + 1))
+          << 32);
+    x ^= static_cast<std::uint64_t>(
+             static_cast<std::uint32_t>(vehicle.task_count + 1)) *
+         0x9e3779b97f4a7c15ULL;
+    x ^= static_cast<std::uint64_t>(
+             static_cast<std::uint32_t>(target + 1)) *
+         0xbf58476d1ce4e5b9ULL;
+    x += 0x9e3779b97f4a7c15ULL;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+    return x ^ (x >> 31);
 }
 
 int TaskAllocator::activeTargetCount(const VehicleAgent& vehicle,
@@ -925,9 +940,44 @@ int TaskAllocator::chooseNextTarget(const VehicleAgent& vehicle,
 
     if (candidates.empty()) return -1;
 
-    std::random_device rd;
-    std::uniform_int_distribution<size_t> pick(0, candidates.size() - 1);
-    return candidates[pick(rd)];
+    int selected = -1;
+    std::vector<int> selection_order = candidates;
+    if (cfg_.task_assignment_mode == "random") {
+        std::random_device rd;
+        std::uniform_int_distribution<size_t> pick(0,
+                                                    candidates.size() - 1);
+        selected = candidates[pick(rd)];
+    } else {
+        std::sort(
+            selection_order.begin(), selection_order.end(),
+            [&](int lhs, int rhs) {
+                const std::uint64_t lhs_rank =
+                    deterministicRank(vehicle, lhs);
+                const std::uint64_t rhs_rank =
+                    deterministicRank(vehicle, rhs);
+                return lhs_rank != rhs_rank ? lhs_rank < rhs_rank
+                                            : lhs < rhs;
+            });
+        selected = selection_order.front();
+    }
+    std::ostringstream selection_log;
+    selection_log << "[multi_patrol][task_select] mode="
+                  << cfg_.task_assignment_mode
+                  << " seed=" << cfg_.task_random_seed
+                  << " V" << vehicle.id
+                  << " task_index=" << vehicle.task_count
+                  << " source=B" << vehicle.current_slot
+                  << " selected=B" << selected
+                  << " feasible=" << candidates.size();
+    if (cfg_.task_assignment_mode == "deterministic") {
+        selection_log << " ranked=";
+        for (size_t i = 0; i < selection_order.size(); ++i) {
+            if (i > 0) selection_log << ',';
+            selection_log << 'B' << selection_order[i];
+        }
+    }
+    ROS_INFO("%s", selection_log.str().c_str());
+    return selected;
 }
 
 void TaskAllocator::rememberTask(VehicleAgent& vehicle, int target) {
@@ -1191,7 +1241,7 @@ bool TaskAllocator::reserveDropoffLeg(
     if (vehicle.hasPendingDropoff()) return true;
 
     const bool prefer_no_arc = cfg_.skip_arc_fallback_paths;
-    int target = chooseNextTarget(vehicle, all, prefer_no_arc);
+    int target = -1;
 
     // Preserve the first-cycle preset, but reserve it at B departure instead
     // of waiting until pickup has finished.
@@ -1205,7 +1255,14 @@ bool TaskAllocator::reserveDropoffLeg(
             !slotReservedByOther(vehicle, all, preset) &&
             planAvailable(vehicle, preset, prefer_no_arc)) {
             target = preset;
+            ROS_INFO("[multi_patrol][task_select] source=preset V%d "
+                     "task_index=%d source=B%d selected=B%d",
+                     vehicle.id, vehicle.task_count, vehicle.current_slot,
+                     target);
         }
+    }
+    if (target < 0) {
+        target = chooseNextTarget(vehicle, all, prefer_no_arc);
     }
 
     auto reserve = [&](int candidate, bool require_no_arc) {

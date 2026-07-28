@@ -1000,6 +1000,20 @@ private:
                     }
 
                     any_overlap = true;
+                    const double guard_proposed_i_s = plannedS(i);
+                    const double guard_proposed_j_s = plannedS(j);
+                    const bool guard_current_overlap =
+                        overlapsAt(i, agents_[i].path_s,
+                                   j, agents_[j].path_s);
+                    const bool guard_i_only_overlap =
+                        overlapsAt(i, guard_proposed_i_s,
+                                   j, agents_[j].path_s);
+                    const bool guard_j_only_overlap =
+                        overlapsAt(i, agents_[i].path_s,
+                                   j, guard_proposed_j_s);
+                    const bool guard_both_next_overlap =
+                        overlapsAt(i, guard_proposed_i_s,
+                                   j, guard_proposed_j_s);
                     const bool i_active = agents_[i].active();
                     const bool j_active = agents_[j].active();
                     if (i_active && !j_active) {
@@ -1082,15 +1096,101 @@ private:
                     }
                     if (!sim_mode_) {  // 前瞻仿真中只要其物理挡停效果,不计数/不打日志
                         ++hard_guard_events_;
-                        hard_guard_pairs_.insert(
-                            {std::min(agents_[i].id, agents_[j].id),
-                             std::max(agents_[i].id, agents_[j].id)});
+                        const std::pair<int, int> guard_pair{
+                            std::min(agents_[i].id, agents_[j].id),
+                            std::max(agents_[i].id, agents_[j].id)};
+                        hard_guard_pairs_.insert(guard_pair);
+                        const bool ids_in_order =
+                            agents_[i].id <= agents_[j].id;
+                        const std::tuple<int, int, int, int> guard_diag_key{
+                            guard_pair.first, guard_pair.second,
+                            ids_in_order ? agents_[i].path_gen
+                                         : agents_[j].path_gen,
+                            ids_in_order ? agents_[j].path_gen
+                                         : agents_[i].path_gen};
+                        const bool first_for_geometry =
+                            hard_guard_diag_keys_.insert(
+                                guard_diag_key).second;
                         if (first_guard_tick_ == 0) first_guard_tick_ = tick_count_;
                         ROS_ERROR_THROTTLE(
                             1.0,
                             "[multi_patrol] hard collision guard: V%d vs V%d; "
                             "minimal stop applied",
                             agents_[i].id, agents_[j].id);
+                        if (first_for_geometry) {
+                            const RoughWp i_now =
+                                agents_[i].track.poseAtS(agents_[i].path_s);
+                            const RoughWp j_now =
+                                agents_[j].track.poseAtS(agents_[j].path_s);
+                            const RoughWp i_next =
+                                agents_[i].track.poseAtS(guard_proposed_i_s);
+                            const RoughWp j_next =
+                                agents_[j].track.poseAtS(guard_proposed_j_s);
+                            ROS_ERROR(
+                                "[coord_diag][hard_guard_geometry] V%d "
+                                "mode=%d phase=%d action=%d blocker=%d "
+                                "s=%.3f proposed=%.3f gear=%d "
+                                "pose=(%.3f,%.3f,%.3f) "
+                                "next=(%.3f,%.3f,%.3f) | V%d "
+                                "mode=%d phase=%d action=%d blocker=%d "
+                                "s=%.3f proposed=%.3f gear=%d "
+                                "pose=(%.3f,%.3f,%.3f) "
+                                "next=(%.3f,%.3f,%.3f) | "
+                                "overlap current=%d i_only=%d j_only=%d "
+                                "both_next=%d a1_owner=V%d",
+                                agents_[i].id,
+                                static_cast<int>(agents_[i].mode),
+                                static_cast<int>(agents_[i].mission_phase),
+                                static_cast<int>(agents_[i].action),
+                                agents_[i].blocker_id,
+                                agents_[i].path_s, guard_proposed_i_s,
+                                static_cast<int>(
+                                    agents_[i].track.typeAtS(
+                                        agents_[i].path_s)),
+                                i_now.x, i_now.y, i_now.theta,
+                                i_next.x, i_next.y, i_next.theta,
+                                agents_[j].id,
+                                static_cast<int>(agents_[j].mode),
+                                static_cast<int>(agents_[j].mission_phase),
+                                static_cast<int>(agents_[j].action),
+                                agents_[j].blocker_id,
+                                agents_[j].path_s, guard_proposed_j_s,
+                                static_cast<int>(
+                                    agents_[j].track.typeAtS(
+                                        agents_[j].path_s)),
+                                j_now.x, j_now.y, j_now.theta,
+                                j_next.x, j_next.y, j_next.theta,
+                                guard_current_overlap ? 1 : 0,
+                                guard_i_only_overlap ? 1 : 0,
+                                guard_j_only_overlap ? 1 : 0,
+                                guard_both_next_overlap ? 1 : 0,
+                                rule_engine_->a1ServiceOwner());
+                            for (const auto& gate : rule_engine_->a1Gates()) {
+                                if ((gate.owner_id == agents_[i].id &&
+                                     gate.waiter_id == agents_[j].id) ||
+                                    (gate.owner_id == agents_[j].id &&
+                                     gate.waiter_id == agents_[i].id)) {
+                                    ROS_ERROR(
+                                        "[coord_diag][hard_guard_geometry] "
+                                        "a1_gate owner=V%d waiter=V%d "
+                                        "stop_s=%.3f source=%d approach=%d "
+                                        "departure=%d late=%d",
+                                        gate.owner_id, gate.waiter_id,
+                                        gate.stop_s,
+                                        static_cast<int>(gate.source),
+                                        gate.approach_zone_count,
+                                        gate.departure_zone_count,
+                                        gate.late ? 1 : 0);
+                                }
+                            }
+                            for (const std::string& line :
+                                 rule_engine_->debugConflictLines(
+                                     agents_[i], agents_[j])) {
+                                ROS_ERROR(
+                                    "[coord_diag][hard_guard_geometry] %s",
+                                    line.c_str());
+                            }
+                        }
                     }
                 }
             }
@@ -2063,6 +2163,9 @@ private:
     unsigned long long hard_guard_events_ = 0;        // 硬护栏触发(碰撞)累计次数
     unsigned long long first_guard_tick_ = 0;         // 首次碰撞所在 tick(0=从未)
     std::set<std::pair<int, int>> hard_guard_pairs_;  // 涉及碰撞的车对
+    // 每组“车辆对+双方固定路径代次”只输出一次完整诊断；同一车辆对换任务后
+    // 若再次触发，仍会记录新的现场，而不是被运行早期事件永久屏蔽。
+    std::set<std::tuple<int, int, int, int>> hard_guard_diag_keys_;
     unsigned long long deadlock_ticks_ = 0;           // 检测到持续死锁环的拍数累计
     unsigned long long deadlock_recoveries_ = 0;      // 成功重规划脱困次数
     bool sim_mode_ = false;                           // 前瞻仿真中:屏蔽计数/日志副作用

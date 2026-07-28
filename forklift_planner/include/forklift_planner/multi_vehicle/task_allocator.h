@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -126,7 +127,8 @@ private:
     bool activateReservedDropoffLeg(VehicleAgent& vehicle);
     void rememberTask(VehicleAgent& vehicle, int target);
     bool containsRecent(const std::vector<int>& values, int value) const;
-    double deterministicJitter(const VehicleAgent& vehicle, int target) const;
+    std::uint64_t deterministicRank(const VehicleAgent& vehicle,
+                                    int target) const;
     int activeTargetCount(const VehicleAgent& vehicle,
                           const std::vector<VehicleAgent>& all,
                           int target) const;
