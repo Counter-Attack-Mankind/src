@@ -1499,9 +1499,11 @@ private:
         char header[256];
         std::snprintf(
             header, sizeof(header),
-            "[coord_diag][cycle] tick=%llu sim_t=%.2f ring=%s a1_owner=V%d",
+            "[coord_diag][cycle] tick=%llu sim_t=%.2f ring=%s "
+            "a1_reserved=V%d a1_owner=V%d",
             static_cast<unsigned long long>(tick_count_), sim_time_,
-            ring.c_str(), rule_engine_->a1ServiceOwner());
+            ring.c_str(), rule_engine_->a1ReservedOwner(),
+            rule_engine_->a1ServiceOwner());
         coordLog(header);
         ROS_WARN("%s", header);
 

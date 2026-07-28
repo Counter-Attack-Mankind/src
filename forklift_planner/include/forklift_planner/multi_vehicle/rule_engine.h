@@ -75,6 +75,7 @@ public:
         ResourceTokenTable tokens;
         std::map<int, int> reservation_path_gen;
         double now = 0.0;
+        int a1_reserved_owner = -1;
         int a1_service_owner = -1;
         std::vector<ConflictMarker> conflicts;
         std::vector<A1GateMarker> a1_gate_markers;
@@ -82,7 +83,8 @@ public:
     SimSnapshot snapshot() const {
         return SimSnapshot{commit_owner_, following_pairs_, following_leader_,
                            following_phase_, tokens_,
-                           reservation_path_gen_, now_, a1_service_owner_,
+                           reservation_path_gen_, now_, a1_reserved_owner_,
+                           a1_service_owner_,
                            conflicts_, a1_gate_markers_};
     }
     void restore(const SimSnapshot& s) {
@@ -93,6 +95,7 @@ public:
         tokens_ = s.tokens;
         reservation_path_gen_ = s.reservation_path_gen;
         now_ = s.now;
+        a1_reserved_owner_ = s.a1_reserved_owner;
         a1_service_owner_ = s.a1_service_owner;
         conflicts_ = s.conflicts;
         a1_gate_markers_ = s.a1_gate_markers;
@@ -113,6 +116,7 @@ public:
     std::vector<std::string> debugConflictLines(
         const VehicleAgent& a, const VehicleAgent& b) const;
     int a1ServiceOwner() const { return a1_service_owner_; }
+    int a1ReservedOwner() const { return a1_reserved_owner_; }
 
 private:
     struct ConflictZone {
@@ -170,6 +174,10 @@ private:
         int owner_id = -1;
         int waiter_id = -1;
         double stop_s = 0.0;
+        double fixed_stop_s = 0.0;
+        double vertical_stop_s = 0.0;
+        double approach_stop_s = 0.0;
+        double departure_stop_s = 0.0;
         A1GateSource source = A1GateSource::FIXED;
         std::vector<ConflictZone> approach_zones;
         std::vector<ConflictZone> departure_zones;
@@ -280,6 +288,9 @@ private:
     const TrafficResourceMap* resmap_ = nullptr;
     ResourceTokenTable tokens_;
     double now_ = 0.0;  // 内部仿真时钟(每 decide 累加 dt),供令牌防抖/超时用
+    // Early scheduling hint only. It never issues motion commands or overrides
+    // ordinary (orange) arbitration.
+    int a1_reserved_owner_ = -1;
     // 仅门控 A1 最后一段进场、装载和初始离场，不串行化整条 B→A1 路径。
     int a1_service_owner_ = -1;
 };

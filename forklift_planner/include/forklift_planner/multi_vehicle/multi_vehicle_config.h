@@ -28,9 +28,8 @@ struct MultiVehicleConfig {
     double pickup_dwell_time = 5.0; // A1 pickup operation
     double unload_dwell_time = 5.0; // B-slot unload operation
     // Only the final A1 transaction is serialized. Vehicles may travel from B
-    // concurrently. This is the baseline service-request distance; a cached
-    // future A1->B leg may arm the transaction earlier when another vehicle
-    // reaches the authoritative gate of the connected A1 transaction chain.
+    // concurrently. A cached future A1->B leg may create an early scheduling
+    // hint, but active A1 motion control starts only inside this distance.
     double a1_request_distance = 1.50;
     double a1_queue_hold_distance = 1.10;  // fallback when no earlier gate
     // Minimum owner-side anchor; release waits for rear clearance of the full
