@@ -850,6 +850,26 @@ private:
     void handleLegArrival(VehicleAgent& v) {
         v.current_speed = 0.0;
         v.wait_time = 0.0;
+        if (cfg_.use_a1_cycle &&
+            v.leg_target == LegTargetKind::A1 &&
+            rule_engine_->a1ServiceOwner() != v.id) {
+            // Last invariant: reaching the geometric endpoint is not enough
+            // to start pickup. The cached A1->B egress chain must have been
+            // secured and this vehicle must own the committed transaction.
+            v.mode = VehicleMode::ACTIVE;
+            v.path_s = std::max(
+                0.0, v.track.length() - 1e-4);
+            v.action = VehicleAction::STOP;
+            v.requested_action = VehicleAction::STOP;
+            v.reason = "wait_a1_transaction_commit";
+            v.blocker_id = rule_engine_->a1EgressOwner();
+            ROS_ERROR_THROTTLE(
+                2.0,
+                "[multi_patrol][A1 arrival blocked] V%d reached A1 "
+                "without committed service ownership; egress_owner=V%d",
+                v.id, rule_engine_->a1EgressOwner());
+            return;
+        }
         v.mode = VehicleMode::DWELL;
         v.action = VehicleAction::STOP;
         v.requested_action = VehicleAction::STOP;
@@ -893,6 +913,18 @@ private:
             planned_s[i] = v.path_s;
             next_speed[i] = v.current_speed;
             if (!v.active()) continue;
+
+            if (v.a1_egress_retreat) {
+                const double desired_speed =
+                    rule_engine_->speedForAction(VehicleAction::CREEP);
+                next_speed[i] =
+                    limitedSpeed(v.current_speed, desired_speed, dt);
+                next_s[i] = std::max(
+                    v.a1_egress_retreat_target_s,
+                    v.path_s - next_speed[i] * dt);
+                planned_s[i] = next_s[i];
+                continue;
+            }
 
             // 规划速度=动作档,再被曲率限速卡住(与实车 coord_speed 同一套,sim 才能真实验证)。
             const double desired_speed = std::min(rule_engine_->speedForAction(v.action),
@@ -944,6 +976,7 @@ private:
         auto tryClearBlocker = [&](size_t idx, int blocker_id) {
             VehicleAgent& v = agents_[idx];
             if (!v.active()) return false;
+            if (v.a1_egress_retreat) return false;
             if (next_s[idx] > v.path_s + 1e-9) return false;
 
             const double creep_speed =
@@ -1022,9 +1055,11 @@ private:
                         changed = blockVehicle(j) || changed;
                     } else if (i_active && j_active) {
                         const bool i_moves =
-                            next_s[i] > agents_[i].path_s + 1e-9;
+                            std::abs(next_s[i] -
+                                     agents_[i].path_s) > 1e-9;
                         const bool j_moves =
-                            next_s[j] > agents_[j].path_s + 1e-9;
+                            std::abs(next_s[j] -
+                                     agents_[j].path_s) > 1e-9;
                         const bool i_only_safe =
                             i_moves &&
                             !overlapsAt(i, next_s[i], j, agents_[j].path_s);
@@ -1208,7 +1243,9 @@ private:
         for (size_t i = 0; i < agents_.size(); ++i) {
             if (!agents_[i].active()) continue;
             any_blocked_active = any_blocked_active || blocked[i];
-            if (!blocked[i] && planned_s[i] > agents_[i].path_s + 1e-9) {
+            if (!blocked[i] &&
+                std::abs(planned_s[i] -
+                         agents_[i].path_s) > 1e-9) {
                 any_active_motion = true;
             }
         }
@@ -1241,6 +1278,9 @@ private:
             for (size_t i = 0; i < agents_.size(); ++i) {
                 VehicleAgent& v = agents_[i];
                 if (!v.active()) continue;
+                // A1 egress recovery already has an explicit reverse motion.
+                // The generic forward stall release must never cancel it.
+                if (v.a1_egress_retreat) continue;
                 if (!blocked[i] && planned_s[i] > v.path_s + 1e-9) continue;
                 const double creep_speed =
                     limitedSpeed(v.current_speed,
@@ -1293,6 +1333,7 @@ private:
             for (size_t i = 0; i < agents_.size(); ++i) {
                 VehicleAgent& v = agents_[i];
                 if (!v.active() || v.wait_time < kReverseWait) continue;
+                if (v.a1_egress_retreat) continue;
                 const int bk = forwardBlocker(i);
                 if (bk < 0) continue;
                 const VehicleAgent& b = agents_[bk];
@@ -1401,7 +1442,8 @@ private:
                 "mode=%s phase=%s action=%s reason=%s "
                 "blocker=%d task=%d slot=%d->%d pending_B=%d "
                 "s=%.3f/%.3f rem=%.3f "
-                "speed=%.3f wait=%.2f dwell=%.2f",
+                "speed=%.3f wait=%.2f dwell=%.2f "
+                "a1_retreat=%d retreat_owner=%d retreat_target=%.3f",
                 static_cast<unsigned long long>(tick_count_), sim_time_,
                 v.id, modeName(v.mode), missionPhaseName(v.mission_phase),
                 actionName(v.action),
@@ -1409,7 +1451,9 @@ private:
                 v.task_count, v.current_slot, v.target_slot,
                 v.pending_target_slot, v.path_s,
                 length, rem, v.current_speed, v.wait_time,
-                v.dwell_remaining);
+                v.dwell_remaining, v.a1_egress_retreat ? 1 : 0,
+                v.a1_egress_retreat_owner,
+                v.a1_egress_retreat_target_s);
             ROS_INFO("%s", buf);
             coordLog(buf);
 
@@ -1500,9 +1544,10 @@ private:
         std::snprintf(
             header, sizeof(header),
             "[coord_diag][cycle] tick=%llu sim_t=%.2f ring=%s "
-            "a1_reserved=V%d a1_owner=V%d",
+            "a1_reserved=V%d a1_egress=V%d a1_owner=V%d",
             static_cast<unsigned long long>(tick_count_), sim_time_,
             ring.c_str(), rule_engine_->a1ReservedOwner(),
+            rule_engine_->a1EgressOwner(),
             rule_engine_->a1ServiceOwner());
         coordLog(header);
         ROS_WARN("%s", header);
@@ -1924,9 +1969,15 @@ private:
             const double lo = std::max(0.0, rb_prev_path_s_[i] - 0.10);
             const double hi = std::min(v.track.length(), rb_prev_path_s_[i] + 0.50);
             double new_s = projectOntoTrackRange(v.track, real_x_[i], real_y_[i], lo, hi);
-            new_s = std::max(new_s, rb_prev_path_s_[i]);  // 单调不减(沿固定路径只前进)
-            v.current_speed = std::max(0.0, std::min((new_s - rb_prev_path_s_[i]) / dt,
-                                                     cfg_.max_speed));
+            if (v.a1_egress_retreat) {
+                new_s = std::min(new_s, rb_prev_path_s_[i]);
+            } else {
+                new_s = std::max(new_s, rb_prev_path_s_[i]);
+            }
+            v.current_speed = std::max(
+                0.0,
+                std::min(std::abs(new_s - rb_prev_path_s_[i]) / dt,
+                         cfg_.max_speed));
             v.path_s = new_s;
             rb_prev_path_s_[i] = new_s;
             // 到库→DWELL —— 复刻 advanceVehicles 705-714(实车容差 cfg_.real_arrive_tol)
@@ -2020,6 +2071,7 @@ private:
                                      == WpType::REVERSE;
                 if (rev) dir = -1.0;
             }
+            if (v.a1_egress_retreat) dir = -dir;
             double target = dir * mag;
             // 动捕看门狗:该车位姿失联(>0.5s)→ 强制目标速度 0。否则控制器拿陈旧位姿
             // 盲走、底盘又无超时 → 跑飞。只压这一辆的输出速度,协调逻辑/其它车不受影响
@@ -2179,17 +2231,21 @@ private:
 public:
     // 一辆车的紧凑状态行(诊断用,信息尽量全)。
     std::string vehLine(const VehicleAgent& v) const {
-        char buf[320];
+        char buf[384];
         snprintf(buf, sizeof(buf),
                  "  V%d mode=%d phase=%s loaded=%d act=%d reason=%s blk=%d "
                  "brkr=%d task=%d slot=%d->%d pending_B=%d "
-                 "s=%.3f/%.3f rem=%.3f spd=%.3f wait=%.1f gen=%d",
+                 "s=%.3f/%.3f rem=%.3f spd=%.3f wait=%.1f gen=%d "
+                 "a1_retreat=%d(owner=V%d target=%.3f)",
                  v.id, (int)v.mode, missionPhaseName(v.mission_phase), (int)v.loaded,
                  (int)v.action, v.reason.c_str(), v.blocker_id,
                  (int)v.deadlock_breaker, v.task_count, v.current_slot,
                  v.target_slot, v.pending_target_slot,
                  v.path_s, v.track.length(), v.remainingS(),
-                 v.current_speed, v.wait_time, v.path_gen);
+                 v.current_speed, v.wait_time, v.path_gen,
+                 v.a1_egress_retreat ? 1 : 0,
+                 v.a1_egress_retreat_owner,
+                 v.a1_egress_retreat_target_s);
         return buf;
     }
     std::string fleetSnapshot() const {

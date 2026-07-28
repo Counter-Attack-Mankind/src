@@ -60,13 +60,18 @@ int RuleEngine::priorityWinner(const VehicleAgent& a,
 
     // A1 服务权必须贯穿最后进场、装载驻留和初始离场。该 override 只在 A1 收口附近
     // 生效，避免影响两车在较远 B→A1 路段上的正常冲突仲裁。
-    if (cfg_.use_a1_cycle && a1_service_owner_ >= 0) {
+    const int transaction_owner =
+        a1_service_owner_ >= 0
+            ? a1_service_owner_
+            : a1_egress_owner_;
+    if (cfg_.use_a1_cycle && transaction_owner >= 0) {
         const VehicleAgent* owner = nullptr;
         const VehicleAgent* waiter = nullptr;
-        if (a.id == a1_service_owner_ && b.id != a1_service_owner_) {
+        if (a.id == transaction_owner && b.id != transaction_owner) {
             owner = &a;
             waiter = &b;
-        } else if (b.id == a1_service_owner_ && a.id != a1_service_owner_) {
+        } else if (b.id == transaction_owner &&
+                   a.id != transaction_owner) {
             owner = &b;
             waiter = &a;
         }
@@ -80,7 +85,16 @@ int RuleEngine::priorityWinner(const VehicleAgent& a,
             const bool owner_departing =
                 owner->mission_phase == MissionPhase::TO_B &&
                 owner->loaded;
-            if (owner_approaching || owner_loading || owner_departing) {
+            const bool committed =
+                owner->id == a1_service_owner_;
+            const bool exact_egress_wait =
+                waiter->blocker_id == owner->id &&
+                waiter->reason.rfind(
+                    "wait_a1_reserved_exit_V", 0) == 0;
+            if ((committed &&
+                 (owner_approaching || owner_loading ||
+                  owner_departing)) ||
+                exact_egress_wait) {
                 return owner->id;
             }
         }
@@ -858,6 +872,7 @@ std::vector<std::string> RuleEngine::debugConflictLines(
     head.precision(3);
     head << "[coord_diag][pair] V" << a.id << "<->V" << b.id
          << " a1_reserved=V" << a1_reserved_owner_
+         << " a1_egress=V" << a1_egress_owner_
          << " a1_owner=V" << a1_service_owner_
          << " reservation=V" << owner
          << " following=" << static_cast<int>(following)
@@ -1159,6 +1174,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             // enforceForwardClearance(沿前向 0 余量净空、真要贴上才停)、硬护栏(0 余量兜底)。
             // 故此处 DWELL/inactive 一律跳过;b 通过后必为 ACTIVE。
             if (!b.active()) continue;
+            if (a.a1_egress_retreat || b.a1_egress_retreat) continue;
 
             // 先取缓存的冲突块(静态 C_ij + 当前位置裁剪),后续跟车判定/门控都基于它。
             std::vector<ConflictZone> zones = findConflictZones(a, b);
@@ -1337,11 +1353,15 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             // remains enabled and can still stop unsafe physical motion.
             VehicleAgent* a1_pair_owner = nullptr;
             VehicleAgent* a1_pair_waiter = nullptr;
-            if (a.id == a1_service_owner_ &&
+            const int pair_transaction_owner =
+                a1_service_owner_ >= 0
+                    ? a1_service_owner_
+                    : a1_egress_owner_;
+            if (a.id == pair_transaction_owner &&
                 b.mission_phase == MissionPhase::TO_A1) {
                 a1_pair_owner = &a;
                 a1_pair_waiter = &b;
-            } else if (b.id == a1_service_owner_ &&
+            } else if (b.id == pair_transaction_owner &&
                        a.mission_phase == MissionPhase::TO_A1) {
                 a1_pair_owner = &b;
                 a1_pair_waiter = &a;
@@ -1361,8 +1381,9 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     ROS_ERROR_THROTTLE(
                         2.0,
                         "[multi_patrol][A1 deadlock override] "
-                        "pair=V%d/V%d a1_owner=V%d orange_owner=V%d "
-                        "waiter_reason=%s; A1 service has precedence",
+                        "pair=V%d/V%d transaction_owner=V%d "
+                        "orange_owner=V%d waiter_reason=%s; "
+                        "A1 transaction has precedence",
                         a.id, b.id, a1_pair_owner->id,
                         reservation->second,
                         a1_pair_waiter->reason.c_str());
@@ -1541,6 +1562,7 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
         for (size_t j = i + 1; j < vehicles.size(); ++j) {
             VehicleAgent& b = vehicles[j];
             if (!b.active() || terminalDocking(b)) continue;
+            if (a.a1_egress_retreat || b.a1_egress_retreat) continue;
 
             const std::vector<ConflictZone> zones =
                 findConflictZones(a, b);
@@ -1729,8 +1751,14 @@ void RuleEngine::resolveA1ApproachQueue(
     a1_gate_plans_.clear();
     a1_gate_markers_.clear();
     a1_reserved_owner_ = -1;
+    const int service_owner_at_cycle_start = a1_service_owner_;
     if (!cfg_.use_a1_cycle) {
+        a1_egress_owner_ = -1;
         a1_service_owner_ = -1;
+        for (VehicleAgent& v : vehicles) {
+            v.a1_egress_retreat = false;
+            v.a1_egress_retreat_owner = -1;
+        }
         return;
     }
 
@@ -1782,6 +1810,18 @@ void RuleEngine::resolveA1ApproachQueue(
         return false;
     };
 
+    VehicleAgent* scheduled_egress_owner =
+        findById(a1_egress_owner_);
+    if (scheduled_egress_owner == nullptr ||
+        !(isApproaching(*scheduled_egress_owner) ||
+          isLoading(*scheduled_egress_owner) ||
+          isDeparting(*scheduled_egress_owner)) ||
+        (isApproaching(*scheduled_egress_owner) &&
+         !scheduled_egress_owner->hasPendingDropoff())) {
+        a1_egress_owner_ = -1;
+        scheduled_egress_owner = nullptr;
+    }
+
     // 跨 A1 换轨保持服务权；载货车沿新 A1→B 轨迹驶出释放距离后才交给下一辆车。
     VehicleAgent* owner = findById(a1_service_owner_);
     if (owner == nullptr ||
@@ -1789,6 +1829,10 @@ void RuleEngine::resolveA1ApproachQueue(
           isDeparting(*owner))) {
         a1_service_owner_ = -1;
         owner = nullptr;
+    }
+    if (owner != nullptr) {
+        a1_egress_owner_ = owner->id;
+        scheduled_egress_owner = owner;
     }
 
     if (owner == nullptr) {
@@ -1861,19 +1905,27 @@ void RuleEngine::resolveA1ApproachQueue(
                         rhs.id < lhs->id);
             };
 
-            VehicleAgent* reserved = nullptr;
+            VehicleAgent* reserved =
+                scheduled_egress_owner != nullptr &&
+                        isApproaching(*scheduled_egress_owner)
+                    ? scheduled_egress_owner
+                    : nullptr;
             const bool has_directional =
                 !directional_reservations.empty();
-            for (VehicleAgent& v : vehicles) {
-                if (!isApproaching(v)) continue;
-                if (has_directional &&
-                    directional_reservations.count(v.id) == 0) {
-                    continue;
+            if (reserved == nullptr) {
+                for (VehicleAgent& v : vehicles) {
+                    if (!isApproaching(v)) continue;
+                    if (has_directional &&
+                        directional_reservations.count(v.id) == 0) {
+                        continue;
+                    }
+                    if (betterApproach(reserved, v)) reserved = &v;
                 }
-                if (betterApproach(reserved, v)) reserved = &v;
             }
             if (reserved != nullptr) {
                 a1_reserved_owner_ = reserved->id;
+                a1_egress_owner_ = reserved->id;
+                scheduled_egress_owner = reserved;
             }
 
             if (!requesters.empty()) {
@@ -1896,8 +1948,8 @@ void RuleEngine::resolveA1ApproachQueue(
 
                 const bool prefer_reserved =
                     committed_requesters.empty() &&
-                    a1_reserved_owner_ >= 0 &&
-                    requesters.count(a1_reserved_owner_) != 0;
+                    a1_egress_owner_ >= 0 &&
+                    requesters.count(a1_egress_owner_) != 0;
                 for (VehicleAgent& v : vehicles) {
                     if (!isApproaching(v) ||
                         requesters.count(v.id) == 0) {
@@ -1908,7 +1960,7 @@ void RuleEngine::resolveA1ApproachQueue(
                         continue;
                     }
                     if (prefer_reserved &&
-                        v.id != a1_reserved_owner_) {
+                        v.id != a1_egress_owner_) {
                         continue;
                     }
                     if (betterApproach(owner, v)) owner = &v;
@@ -1917,8 +1969,11 @@ void RuleEngine::resolveA1ApproachQueue(
                 if (owner != nullptr) {
                     a1_service_owner_ = owner->id;
                     a1_reserved_owner_ = owner->id;
-                    ROS_INFO(
-                        "[multi_patrol][A1 activate] owner=V%d "
+                    a1_egress_owner_ = owner->id;
+                    scheduled_egress_owner = owner;
+                    ROS_INFO_THROTTLE(
+                        2.0,
+                        "[multi_patrol][A1 candidate] owner=V%d "
                         "remaining=%.3f boundary=%.3f requesters=%zu "
                         "orange_handoff=%d",
                         owner->id, owner->remainingS(), request_distance,
@@ -1939,9 +1994,176 @@ void RuleEngine::resolveA1ApproachQueue(
         } else {
             a1_service_owner_ = owner->id;
             a1_reserved_owner_ = owner->id;
+            a1_egress_owner_ = owner->id;
+            scheduled_egress_owner = owner;
         }
     } else {
         a1_reserved_owner_ = owner->id;
+        a1_egress_owner_ = owner->id;
+        scheduled_egress_owner = owner;
+    }
+
+    for (VehicleAgent& v : vehicles) {
+        if (v.a1_egress_retreat &&
+            v.a1_egress_retreat_owner != a1_egress_owner_) {
+            v.a1_egress_retreat = false;
+            v.a1_egress_retreat_owner = -1;
+        }
+    }
+
+    VehicleAgent* egress_owner = findById(a1_egress_owner_);
+    bool egress_ready = true;
+    int invaded_waiter_id = -1;
+    if (egress_owner != nullptr &&
+        (egress_owner->hasPendingDropoff() ||
+         isDeparting(*egress_owner))) {
+        for (VehicleAgent& v : vehicles) {
+            if (v.id == egress_owner->id || !isApproaching(v)) continue;
+
+            A1GatePlan gate = buildA1GatePlan(*egress_owner, v);
+            if (gate.departure_zones.empty() ||
+                !std::isfinite(gate.departure_stop_s)) {
+                if (v.a1_egress_retreat_owner == egress_owner->id) {
+                    v.a1_egress_retreat = false;
+                    v.a1_egress_retreat_owner = -1;
+                }
+                continue;
+            }
+
+            a1_gate_plans_[v.id] = gate;
+            VehicleAgent departure_view = *egress_owner;
+            if (gate.departure_uses_pending) {
+                departure_view.track =
+                    egress_owner->pending_dropoff_track;
+                departure_view.path_s = 0.0;
+            }
+            recordConflictZones(
+                departure_view, v, gate.departure_zones,
+                ConflictMarkerKind::A1_PROTECTED);
+
+            const RoughWp gate_pose =
+                v.track.poseAtS(gate.departure_stop_s);
+            const bool departure_gate_late =
+                v.path_s >
+                gate.departure_stop_s + kA1GateLateTolerance;
+            a1_gate_markers_.push_back(
+                A1GateMarker{
+                    egress_owner->id, v.id,
+                    gate.departure_stop_s,
+                    gate_pose.x, gate_pose.y, gate_pose.theta,
+                    gate.departure_uses_pending
+                        ? A1GateSource::PENDING_EXIT_CHAIN
+                        : A1GateSource::ACTIVE_EXIT_CHAIN,
+                    0,
+                    static_cast<int>(gate.departure_zones.size()),
+                    departure_gate_late});
+
+            bool departure_chain_cleared = true;
+            for (const ConflictZone& z : gate.departure_zones) {
+                if (v.path_s - mp_.body_rear_ext() <=
+                    z.s_other_exit + 1e-9) {
+                    departure_chain_cleared = false;
+                    break;
+                }
+            }
+            const bool invaded =
+                departure_gate_late && !departure_chain_cleared;
+            if (invaded) {
+                egress_ready = false;
+                if (invaded_waiter_id < 0) invaded_waiter_id = v.id;
+                const double retreat_target =
+                    std::max(0.0, gate.departure_stop_s - 0.02);
+                const bool new_recovery =
+                    !v.a1_egress_retreat ||
+                    v.a1_egress_retreat_owner != egress_owner->id ||
+                    std::abs(v.a1_egress_retreat_target_s -
+                             retreat_target) > 1e-6;
+                v.a1_egress_retreat = true;
+                v.a1_egress_retreat_owner = egress_owner->id;
+                v.a1_egress_retreat_target_s = retreat_target;
+                v.requested_action = VehicleAction::CREEP;
+                v.reason =
+                    "retreat_a1_egress_V" +
+                    std::to_string(egress_owner->id);
+                v.blocker_id = -1;
+                if (new_recovery) {
+                    ROS_ERROR(
+                        "[multi_patrol][A1 egress recovery] "
+                        "owner=V%d waiter=V%d waiter_s=%.3f "
+                        "safe_gate=%.3f retreat_target=%.3f "
+                        "zones=%zu; reverse along active B->A1 track",
+                        egress_owner->id, v.id, v.path_s,
+                        gate.departure_stop_s, retreat_target,
+                        gate.departure_zones.size());
+                }
+                continue;
+            }
+
+            if (v.a1_egress_retreat_owner == egress_owner->id) {
+                ROS_INFO(
+                    "[multi_patrol][A1 egress recovered] "
+                    "owner=V%d waiter=V%d s=%.3f target=%.3f",
+                    egress_owner->id, v.id, v.path_s,
+                    v.a1_egress_retreat_target_s);
+                v.a1_egress_retreat = false;
+                v.a1_egress_retreat_owner = -1;
+                // The retreat controller stores speed as a magnitude. Clear
+                // it at the upstream gate so the normal forward integrator
+                // cannot use residual reverse speed to drift back across the
+                // line on the next cycle.
+                v.current_speed = 0.0;
+            }
+
+            // Reservation exists from the moment this owner becomes the next
+            // A1 transaction candidate. Motion remains free until the waiter
+            // reaches the last braking point of its exact departure gate.
+            if (!departure_gate_late) {
+                const double speed = std::max(0.0, v.current_speed);
+                const double braking =
+                    speed * speed /
+                    (2.0 * std::max(1e-6, cfg_.max_decel));
+                const double reaction =
+                    speed * std::max(0.0, dt);
+                const double distance =
+                    gate.departure_stop_s - v.path_s;
+                if (distance <= braking + reaction + 0.02) {
+                    applyActionRequest(
+                        v, VehicleAction::STOP,
+                        "wait_a1_reserved_exit_V" +
+                            std::to_string(egress_owner->id),
+                        egress_owner->id);
+                }
+            }
+        }
+    }
+
+    if (!egress_ready && owner != nullptr &&
+        owner->mission_phase == MissionPhase::TO_A1) {
+        applyActionRequest(
+            *owner, VehicleAction::STOP,
+            "wait_a1_egress_clear_V" +
+                std::to_string(invaded_waiter_id),
+            invaded_waiter_id);
+        if (service_owner_at_cycle_start != owner->id) {
+            ROS_WARN_THROTTLE(
+                2.0,
+                "[multi_patrol][A1 commit deferred] candidate=V%d "
+                "invaded_by=V%d; egress must be clear before A1 entry",
+                owner->id, invaded_waiter_id);
+            a1_service_owner_ = -1;
+            owner = nullptr;
+        }
+    }
+
+    if (owner != nullptr &&
+        service_owner_at_cycle_start != owner->id) {
+        ROS_INFO(
+            "[multi_patrol][A1 activate] owner=V%d "
+            "egress_ready=%d target_B=%d",
+            owner->id, egress_ready ? 1 : 0,
+            owner->hasPendingDropoff()
+                ? owner->pending_target_slot
+                : owner->target_slot);
     }
 
     if (owner == nullptr) return;
@@ -1950,9 +2172,29 @@ void RuleEngine::resolveA1ApproachQueue(
     // override, diagnostics, protected-zone color and RViz stop line.
     for (VehicleAgent& v : vehicles) {
         if (v.id == a1_service_owner_ || !isApproaching(v)) continue;
+        if (v.a1_egress_retreat) continue;
 
         A1GatePlan gate = buildA1GatePlan(*owner, v);
         a1_gate_plans_[v.id] = gate;
+
+        // While this waiter is still anywhere before or inside the owner's
+        // departure chain, the dedicated future-egress gate above is the only
+        // A1 control authority. Do not replace its upstream stop line with a
+        // nearer combined/vertical gate. Once the waiter's rear has passed
+        // every departure block, it no longer obstructs this exit and may be
+        // controlled by the ordinary local A1 approach gate again.
+        bool departure_chain_cleared = true;
+        for (const ConflictZone& z : gate.departure_zones) {
+            if (v.path_s - mp_.body_rear_ext() <=
+                z.s_other_exit + 1e-9) {
+                departure_chain_cleared = false;
+                break;
+            }
+        }
+        if (!gate.departure_zones.empty() &&
+            !departure_chain_cleared) {
+            continue;
+        }
 
         const bool approach_enforceable =
             std::isfinite(gate.approach_stop_s) &&
@@ -2084,6 +2326,7 @@ void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles) {
     };
     for (VehicleAgent& v : vehicles) {
         if (!v.active()) continue;
+        if (v.a1_egress_retreat) continue;
         if (v.deadlock_breaker) continue;  // 破环车豁免:它正被授权冲出环
         if (v.requested_action == VehicleAction::STOP) continue;
         const double v_cur = std::max(0.0, v.current_speed);

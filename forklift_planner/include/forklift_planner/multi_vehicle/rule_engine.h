@@ -76,6 +76,7 @@ public:
         std::map<int, int> reservation_path_gen;
         double now = 0.0;
         int a1_reserved_owner = -1;
+        int a1_egress_owner = -1;
         int a1_service_owner = -1;
         std::vector<ConflictMarker> conflicts;
         std::vector<A1GateMarker> a1_gate_markers;
@@ -84,7 +85,7 @@ public:
         return SimSnapshot{commit_owner_, following_pairs_, following_leader_,
                            following_phase_, tokens_,
                            reservation_path_gen_, now_, a1_reserved_owner_,
-                           a1_service_owner_,
+                           a1_egress_owner_, a1_service_owner_,
                            conflicts_, a1_gate_markers_};
     }
     void restore(const SimSnapshot& s) {
@@ -96,6 +97,7 @@ public:
         reservation_path_gen_ = s.reservation_path_gen;
         now_ = s.now;
         a1_reserved_owner_ = s.a1_reserved_owner;
+        a1_egress_owner_ = s.a1_egress_owner;
         a1_service_owner_ = s.a1_service_owner;
         conflicts_ = s.conflicts;
         a1_gate_markers_ = s.a1_gate_markers;
@@ -117,6 +119,7 @@ public:
         const VehicleAgent& a, const VehicleAgent& b) const;
     int a1ServiceOwner() const { return a1_service_owner_; }
     int a1ReservedOwner() const { return a1_reserved_owner_; }
+    int a1EgressOwner() const { return a1_egress_owner_; }
 
 private:
     struct ConflictZone {
@@ -291,6 +294,10 @@ private:
     // Early scheduling hint only. It never issues motion commands or overrides
     // ordinary (orange) arbitration.
     int a1_reserved_owner_ = -1;
+    // Owner of the cached future A1->B critical egress chain. This reservation
+    // may become active before local A1 service control so approaching traffic
+    // can still stop at an upstream gate.
+    int a1_egress_owner_ = -1;
     // 仅门控 A1 最后一段进场、装载和初始离场，不串行化整条 B→A1 路径。
     int a1_service_owner_ = -1;
 };
