@@ -39,6 +39,9 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
              c.task_assignment_mode);
     nh.param(ns + "task_random_seed", c.task_random_seed,
              c.task_random_seed);
+    nh.param(ns + "initial_dispatch_interval",
+             c.initial_dispatch_interval,
+             c.initial_dispatch_interval);
     nh.param(ns + "nominal_speed", c.nominal_speed, c.nominal_speed);
     nh.param(ns + "max_speed", c.max_speed, c.max_speed);
     nh.param(ns + "max_accel", c.max_accel, c.max_accel);
@@ -139,6 +142,9 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     c.start_slots = readIntVector(nh, ns + "start_slots",
                                   {0, 8, 17, 22, 33, 42, 49, 58});
     c.target_slots = readIntVector(nh, ns + "target_slots", {});
+    c.disabled_task_slots =
+        readIntVector(nh, ns + "disabled_task_slots",
+                      c.disabled_task_slots);
     nh.param(ns + "randomize_start", c.randomize_start, c.randomize_start);
 
     std::transform(c.task_assignment_mode.begin(),
@@ -167,6 +173,8 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     c.dwell_time = std::max(0.0, c.dwell_time);
     c.pickup_dwell_time = std::max(0.0, c.pickup_dwell_time);
     c.unload_dwell_time = std::max(0.0, c.unload_dwell_time);
+    c.initial_dispatch_interval =
+        std::max(0.0, c.initial_dispatch_interval);
     c.a1_queue_hold_distance =
         std::max(0.05, c.a1_queue_hold_distance);
     c.a1_exit_release_distance =

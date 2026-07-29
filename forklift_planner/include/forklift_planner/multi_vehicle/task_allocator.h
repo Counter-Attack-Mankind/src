@@ -124,6 +124,7 @@ private:
     int chooseNextTarget(const VehicleAgent& vehicle,
                          const std::vector<VehicleAgent>& all,
                          bool require_no_arc) const;
+    bool taskTargetDisabled(int target) const;
     // 简单测试版选靶:返回「路径最短且全程前进(无 REVERSE 段=无尖点)」的可达目标,无则 -1。
     int chooseNearestForwardTarget(const VehicleAgent& vehicle,
                                    const std::vector<VehicleAgent>& all) const;

@@ -599,11 +599,9 @@ TaskPlanCache TaskAllocator::makeTaskPlanFromPose(const VehicleAgent& vehicle,
     const Slot& src_slot = map_.slots().at(vehicle.current_slot);
     const Slot& target = map_.slots().at(target_id);
     const RoughWp p = vehicleCurrentPose(vehicle);
-    double theta = p.theta;
-    if (!vehicle.track.empty() &&
-        vehicle.track.typeAtS(std::min(vehicle.path_s, vehicle.track.length())) == WpType::REVERSE) {
-        theta = normAngle(theta + kPi);
-    }
+    // RoughWp::theta is the physical body yaw. REVERSE changes the direction
+    // of travel, not the vehicle pose, so adding pi here is a 180-degree jump.
+    const double theta = normAngle(p.theta);
 
     out.path = generator_.generateFromPose(p.x, p.y, theta, target, &out.info);
     out.reject_reason = validatePath(out.path, out.info, src_slot, target);
@@ -865,7 +863,9 @@ bool TaskAllocator::slotReservedByOther(const VehicleAgent& vehicle,
 
 bool TaskAllocator::planAvailable(const VehicleAgent& vehicle, int target,
                                   bool require_no_arc) const {
-    if (target == vehicle.current_slot) return false;
+    if (target == vehicle.current_slot || taskTargetDisabled(target)) {
+        return false;
+    }
     if (cfg_.precompute_task_filter) {
         const TaskPlanCache& cached = cacheAt(vehicle.current_slot, target);
         if (!cached.valid) return false;
@@ -875,6 +875,12 @@ bool TaskAllocator::planAvailable(const VehicleAgent& vehicle, int target,
     TaskPlanCache plan = makeTaskPlan(vehicle.current_slot, target);
     if (!plan.valid) return false;
     return !require_no_arc || !plan.info.used_arc_fallback;
+}
+
+bool TaskAllocator::taskTargetDisabled(int target) const {
+    return std::find(cfg_.disabled_task_slots.begin(),
+                     cfg_.disabled_task_slots.end(),
+                     target) != cfg_.disabled_task_slots.end();
 }
 
 int TaskAllocator::chooseNextTarget(const VehicleAgent& vehicle,
@@ -887,6 +893,10 @@ int TaskAllocator::chooseNextTarget(const VehicleAgent& vehicle,
     rejected.reserve(static_cast<size_t>(n));
 
     for (int target = 0; target < n; ++target) {
+        if (taskTargetDisabled(target)) {
+            rejected.push_back({target, "disabled_corner_slot"});
+            continue;
+        }
         if (target == vehicle.current_slot) {
             rejected.push_back({target, "same_slot"});
             continue;
@@ -1008,7 +1018,9 @@ void TaskAllocator::rememberTask(VehicleAgent& vehicle, int target) {
 
 bool TaskAllocator::tryPlan(VehicleAgent& vehicle, int target,
                             bool require_no_arc) {
-    if (target == vehicle.current_slot) return false;
+    if (target == vehicle.current_slot || taskTargetDisabled(target)) {
+        return false;
+    }
 
     TaskPlanCache plan;
     const bool continue_from_current_pose =
@@ -1109,7 +1121,7 @@ int TaskAllocator::nearestForwardTargetLen(const VehicleAgent& vehicle,
     int best = -1;
     double best_len = std::numeric_limits<double>::infinity();
     for (int t = 0; t < n; ++t) {
-        if (t == vehicle.current_slot) continue;
+        if (t == vehicle.current_slot || taskTargetDisabled(t)) continue;
         if (!hasValidOutbound(t)) continue;                 // 别派进出不来的陷阱位
         if (slotReservedByOther(vehicle, all, t)) continue; // 已被别车预约/占用
         TaskPlanCache plan;
@@ -1140,7 +1152,7 @@ void TaskAllocator::forwardTargets(int slot, std::vector<int>& out,
     if (out_len) out_len->clear();
     const int n = static_cast<int>(map_.slots().size());
     for (int t = 0; t < n; ++t) {
-        if (t == slot) continue;
+        if (t == slot || taskTargetDisabled(t)) continue;
         TaskPlanCache plan;
         if (cfg_.precompute_task_filter) plan = cacheAt(slot, t);
         else plan = makeTaskPlan(slot, t);
@@ -1238,7 +1250,14 @@ bool TaskAllocator::assignPickupLeg(
 bool TaskAllocator::reserveDropoffLeg(
     VehicleAgent& vehicle, const std::vector<VehicleAgent>& all) {
     if (!cfg_.use_a1_cycle) return false;
-    if (vehicle.hasPendingDropoff()) return true;
+    if (vehicle.hasPendingDropoff() &&
+        !taskTargetDisabled(vehicle.pending_target_slot)) {
+        return true;
+    }
+    if (vehicle.hasPendingDropoff()) {
+        vehicle.pending_target_slot = -1;
+        vehicle.pending_dropoff_track = PathTrack{};
+    }
 
     const bool prefer_no_arc = cfg_.skip_arc_fallback_paths;
     int target = -1;
@@ -1251,6 +1270,7 @@ bool TaskAllocator::reserveDropoffLeg(
         const int preset = cfg_.target_slots[vehicle.id];
         if (preset >= 0 &&
             preset < static_cast<int>(map_.slots().size()) &&
+            !taskTargetDisabled(preset) &&
             preset != vehicle.current_slot &&
             !slotReservedByOther(vehicle, all, preset) &&
             planAvailable(vehicle, preset, prefer_no_arc)) {
@@ -1267,7 +1287,8 @@ bool TaskAllocator::reserveDropoffLeg(
 
     auto reserve = [&](int candidate, bool require_no_arc) {
         if (candidate < 0 ||
-            candidate >= static_cast<int>(map_.slots().size())) {
+            candidate >= static_cast<int>(map_.slots().size()) ||
+            taskTargetDisabled(candidate)) {
             return false;
         }
         ensureA1LegCache();
@@ -1344,6 +1365,7 @@ bool TaskAllocator::prepareClearDropoffLegAtA1(
     int old_blocker = -1;
     const bool old_path_clear =
         vehicle.hasPendingDropoff() &&
+        !taskTargetDisabled(old_target) &&
         dropoffPathClearNow(vehicle, vehicle.pending_dropoff_track, all,
                             &old_blocker);
     if (!force_reselect && old_path_clear) {
@@ -1355,7 +1377,8 @@ bool TaskAllocator::prepareClearDropoffLegAtA1(
         std::vector<int> candidates;
         candidates.reserve(static_cast<size_t>(n));
         for (int target = 0; target < n; ++target) {
-            if (target == vehicle.current_slot ||
+            if (taskTargetDisabled(target) ||
+                target == vehicle.current_slot ||
                 target == old_target ||
                 slotReservedByOther(vehicle, all, target)) {
                 continue;
@@ -1436,7 +1459,10 @@ bool TaskAllocator::prepareClearDropoffLegAtA1(
 }
 
 bool TaskAllocator::activateReservedDropoffLeg(VehicleAgent& vehicle) {
-    if (!vehicle.hasPendingDropoff()) return false;
+    if (!vehicle.hasPendingDropoff() ||
+        taskTargetDisabled(vehicle.pending_target_slot)) {
+        return false;
+    }
 
     const int target = vehicle.pending_target_slot;
     rememberTask(vehicle, target);
@@ -1468,7 +1494,8 @@ bool TaskAllocator::activateReservedDropoffLeg(VehicleAgent& vehicle) {
 bool TaskAllocator::tryPlanFromA1(VehicleAgent& vehicle, int target,
                                   bool require_no_arc) {
     if (target < 0 ||
-        target >= static_cast<int>(map_.slots().size())) {
+        target >= static_cast<int>(map_.slots().size()) ||
+        taskTargetDisabled(target)) {
         return false;
     }
     ensureA1LegCache();
@@ -1556,7 +1583,8 @@ bool TaskAllocator::assignNextTask(VehicleAgent& vehicle,
         if (vehicle.id >= 0 &&
             vehicle.id < static_cast<int>(cfg_.target_slots.size())) {
             const int pt = cfg_.target_slots[vehicle.id];
-            if (pt >= 0 && pt != vehicle.current_slot &&
+            if (pt >= 0 && !taskTargetDisabled(pt) &&
+                pt != vehicle.current_slot &&
                 !slotReservedByOther(vehicle, all, pt)) {
                 std::vector<int> ft; forwardTargets(vehicle.current_slot, ft);
                 if (std::find(ft.begin(), ft.end(), pt) != ft.end()) t = pt;
@@ -1585,7 +1613,8 @@ bool TaskAllocator::assignNextTask(VehicleAgent& vehicle,
         const int pt = cfg_.target_slots[vehicle.id];
         const bool target_in_range =
             pt >= 0 && pt < static_cast<int>(map_.slots().size());
-        if (target_in_range && pt != vehicle.current_slot &&
+        if (target_in_range && !taskTargetDisabled(pt) &&
+            pt != vehicle.current_slot &&
             !slotReservedByOther(vehicle, all, pt) &&
             planAvailable(vehicle, pt, prefer_no_arc)) {
             target = pt;
@@ -1634,8 +1663,9 @@ bool TaskAllocator::replanFromPose(VehicleAgent& vehicle,
     if (vehicle.track.empty()) return false;
     constexpr double kPi = 3.14159265358979323846;
     const RoughWp p = vehicle.track.poseAtS(vehicle.path_s);
-    double theta = p.theta;  // 取车身行进朝向(REVERSE 段 +π),保证新路径从该朝向起步
-    if (vehicle.track.typeAtS(vehicle.path_s) == WpType::REVERSE) theta += kPi;
+    // poseAtS returns physical body yaw for both FORWARD and REVERSE points.
+    // Preserve it exactly; converting to motion heading would rotate by pi.
+    const double theta = normAngle(p.theta);
 
     // 「别往堵着的口子钻」:候选目标里,选第一条「起步段(前 ~1.5m)不压上任何他车车身」的
     // 路径——避开与他车在库位口对穿的路(死锁恢复反复换到又对穿的路=churn 根因)。
@@ -1679,7 +1709,10 @@ bool TaskAllocator::replanFromPose(VehicleAgent& vehicle,
     RoughPath path;
     PathGenerationInfo info;
     for (int t : cands) {
-        if (t < 0 || t == vehicle.current_slot || slotTaken(t)) continue;
+        if (t < 0 || taskTargetDisabled(t) ||
+            t == vehicle.current_slot || slotTaken(t)) {
+            continue;
+        }
         RoughPath cp = generator_.generateFromPose(p.x, p.y, theta,
                                                    map_.slots().at(t), &info);
         if (cp.size() < 2) continue;

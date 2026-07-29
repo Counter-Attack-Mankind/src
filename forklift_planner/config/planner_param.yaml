@@ -34,6 +34,8 @@ forklift_planner:
     #   deterministic 固定种子按“车辆+任务序号”独立排序，适合版本对比复现。
     task_assignment_mode: "deterministic"
     task_random_seed: 20260728
+    # 仅程序启动后的第一轮生效：V0立即发车，其余车辆每隔2s依次解除库位等待。
+    initial_dispatch_interval: 2.0
     # 仅用于随机起始库位；与上面的任务目标随机序列相互独立。
     random_seed: 2026
 
@@ -41,6 +43,8 @@ forklift_planner:
     # 测试 random/deterministic 分配时保持 target_slots: []。
     start_slots:  [38, 20, 36, 35, 56, 40, 57, 21]
     target_slots: []
+    # Corner slots may be used as current/start slots, but never as new goals.
+    disabled_task_slots: [10, 11, 18, 19, 28, 29, 30, 31, 46, 47, 48, 49]
     randomize_start: false
 
     # 简化实车冒烟测试：为每辆车选择较近且全程前进的目标，覆盖上面的 target_slots。

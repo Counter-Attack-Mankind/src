@@ -335,17 +335,54 @@ private:
 
         int enabled_count = 0;
         int assigned_count = 0;
+        int first_release_id = -1;
+        initial_dispatch_pending_.assign(agents_.size(), false);
+        initial_dispatch_release_time_.assign(agents_.size(), 0.0);
         for (VehicleAgent& v : agents_) {
             if (targetEnabled(v.id)) {
                 ++enabled_count;
                 if (allocator_->assignNextTask(v, agents_)) {
+                    const int release_rank = assigned_count;
+                    if (release_rank == 0) first_release_id = v.id;
                     ++assigned_count;
+                    const bool stagger_this_vehicle =
+                        cfg_.use_a1_cycle &&
+                        target_only_ < 0 &&
+                        cfg_.initial_dispatch_interval > 1e-9 &&
+                        release_rank > 0;
+                    if (stagger_this_vehicle) {
+                        const size_t idx = static_cast<size_t>(v.id);
+                        initial_dispatch_pending_[idx] = true;
+                        initial_dispatch_release_time_[idx] =
+                            release_rank *
+                            cfg_.initial_dispatch_interval;
+                        v.mode = VehicleMode::WAIT_DISPATCH;
+                        v.path_s = 0.0;
+                        v.current_speed = 0.0;
+                        v.action = VehicleAction::STOP;
+                        v.requested_action = VehicleAction::STOP;
+                        v.dwell_remaining = 0.0;
+                        v.reason = "wait_initial_dispatch";
+                        v.blocker_id = -1;
+                    }
                 }
             }
         }
         if (cfg_.use_a1_cycle) {
             ROS_INFO("[multi_patrol][A1] initial pickup legs assigned: %d/%d",
                      assigned_count, enabled_count);
+            if (assigned_count > 1 &&
+                cfg_.initial_dispatch_interval > 1e-9 &&
+                target_only_ < 0) {
+                ROS_INFO("[multi_patrol][startup_dispatch] staged=%d "
+                         "interval=%.2fs first=V%d@0.00s "
+                         "last_release=%.2fs",
+                         assigned_count,
+                         cfg_.initial_dispatch_interval,
+                         first_release_id,
+                         (assigned_count - 1) *
+                             cfg_.initial_dispatch_interval);
+            }
             if (assigned_count != enabled_count) {
                 ROS_ERROR("[multi_patrol][A1] %d enabled vehicle(s) have no "
                           "initial B->A1 task; inspect the preceding path errors",
@@ -785,6 +822,20 @@ private:
                     v.action = VehicleAction::STOP;
                     v.requested_action = VehicleAction::STOP;
                     v.current_speed = 0.0;
+                    const size_t idx = static_cast<size_t>(v.id);
+                    if (idx < initial_dispatch_pending_.size() &&
+                        initial_dispatch_pending_[idx]) {
+                        if (sim_mode_ ||
+                            sim_time_ + 1e-9 <
+                                initial_dispatch_release_time_[idx]) {
+                            continue;
+                        }
+                        initial_dispatch_pending_[idx] = false;
+                        coordLog(
+                            "[multi_patrol][startup_dispatch] release V" +
+                            std::to_string(v.id) + " at sim_t=" +
+                            std::to_string(sim_time_));
+                    }
                     v.dwell_remaining =
                         std::max(0.0, v.dwell_remaining - dt);
                     if (sim_mode_ || v.dwell_remaining > 1e-9) continue;
@@ -1277,9 +1328,15 @@ private:
                             for (const std::string& line :
                                  rule_engine_->debugConflictLines(
                                      agents_[i], agents_[j])) {
-                                ROS_ERROR(
-                                    "[coord_diag][hard_guard_geometry] %s",
-                                    line.c_str());
+                                if (line.find("[coord_diag][zone ") == 0) {
+                                    ROS_WARN(
+                                        "[coord_diag][hard_guard_geometry] %s",
+                                        line.c_str());
+                                } else {
+                                    ROS_ERROR(
+                                        "[coord_diag][hard_guard_geometry] %s",
+                                        line.c_str());
+                                }
                             }
                         }
                     }
@@ -2209,6 +2266,8 @@ private:
     std::unique_ptr<forklift_planner::multi_vehicle::MarkerPublisher> marker_pub_;
     std::unique_ptr<forklift_planner::multi_vehicle::TrafficResourceMap> resource_map_;
     std::vector<VehicleAgent> agents_;
+    std::vector<bool> initial_dispatch_pending_;
+    std::vector<double> initial_dispatch_release_time_;
     std::vector<bool> visited_slots_;
     int target_only_ = -1;  // realbridge debug: -1 = all vehicles, otherwise control only this id
     std::string coord_log_file_;
@@ -2270,7 +2329,7 @@ private:
     unsigned long long deadlock_recoveries_ = 0;      // 成功重规划脱困次数
     bool sim_mode_ = false;                           // 前瞻仿真中:屏蔽计数/日志副作用
     std::map<int, int> predict_holds_;                // 车id→连续"预测性错峰扣车"次数(防极端饥饿)
-    bool deadlock_logged_ = false;                    // 首次死锁是否已详打
+    std::set<int> active_deadlock_members_;           // 当前持续死锁环；解除后清空
     std::set<std::set<int>> dumped_clusters_;         // 已详打过的死锁簇(按成员集去重,编目用)
     std::map<int, double> last_replan_t_;             // 车id→上次重规划 sim_t(冷却用)
     std::map<int, double> last_a1_task_reroute_t_;     // A1兜底换库位冷却
@@ -2348,8 +2407,46 @@ public:
         constexpr double kDeadlockWait = 25.0;  // 持续卡 >此秒数才算真死锁
         constexpr double kCooldown = 8.0;       // 同一辆两次重规划的最小间隔(给它时间驶离)
         const std::set<int> members = findDeadlockMembers(kDeadlockWait);
-        if (members.empty()) return;
+        if (members.empty()) {
+            active_deadlock_members_.clear();
+            return;
+        }
         ++deadlock_ticks_;
+
+        // 先报告死锁，再执行任何可能提前 return 的 A1 兜底。每次环从无到有
+        // 或成员发生变化都输出一次 ERROR；同一持续环不按 0.5s 周期刷屏。
+        if (members != active_deadlock_members_) {
+            active_deadlock_members_ = members;
+            std::string member_text;
+            for (int id : members) {
+                const VehicleAgent* v = agentById_c(id);
+                if (!member_text.empty()) member_text += " ";
+                member_text += "V" + std::to_string(id);
+                if (v != nullptr) {
+                    member_text += "(" + v->reason + "->V" +
+                                   std::to_string(v->blocker_id) + ")";
+                }
+            }
+            ROS_ERROR("[multi_patrol][DEADLOCK] tick=%llu sim_t=%.1fs "
+                      "members=[%s] threshold=%.1fs",
+                      tick_count_, sim_time_, member_text.c_str(),
+                      kDeadlockWait);
+            coordLog("[multi_patrol][DEADLOCK] tick=" +
+                     std::to_string(tick_count_) + " sim_t=" +
+                     std::to_string(sim_time_) + " members=[" +
+                     member_text + "]");
+            const std::vector<int> ids(members.begin(), members.end());
+            for (size_t i = 0; i < ids.size(); ++i) {
+                for (size_t j = i + 1; j < ids.size(); ++j) {
+                    const VehicleAgent* a = agentById_c(ids[i]);
+                    const VehicleAgent* b = agentById_c(ids[j]);
+                    if (a != nullptr && b != nullptr) {
+                        // debugDumpConflict uses ROS_WARN for pair/envelope/zone.
+                        rule_engine_->debugDumpConflict(*a, *b);
+                    }
+                }
+            }
+        }
 
         // A1-specific last resort. Keep every B->A1 path untouched and never
         // reverse a waiting vehicle. If a persistent wait cycle contains the
@@ -2520,13 +2617,6 @@ public:
             if (a->wait_time > worst_wait) { worst_wait = a->wait_time; victim = id; }
         }
         if (victim < 0) return;  // 全在冷却 → 等下一拍
-        if (!deadlock_logged_) {
-            deadlock_logged_ = true;
-            std::string ms;
-            for (int id : members) ms += "V" + std::to_string(id) + " ";
-            ROS_ERROR("[DEADLOCK] @tick=%llu sim_t=%.1fs 环成员=[%s] 首个受害车=V%d",
-                      tick_count_, sim_time_, ms.c_str(), victim);
-        }
         // 编目:每种不同的死锁簇(按成员集去重)各全面 dump 一次,catalog 出"到底几种特例"。
         if (dumped_clusters_.size() < 15 && dumped_clusters_.insert(members).second) {
             ROS_ERROR("[CLUSTER-CATALOG] 第 %zu 种 @tick=%llu sim_t=%.1fs",

@@ -16,6 +16,10 @@ struct MultiVehicleConfig {
     // hash of (seed, vehicle id, completed-task count, target id).
     std::string task_assignment_mode = "deterministic";
     int task_random_seed = 20260728;
+    // Startup only: release initially staged B->A1 tasks one by one. Once a
+    // vehicle's first release time has passed, all later tasks are unaffected.
+    // Set <= 0 to disable.
+    double initial_dispatch_interval = 2.0;
 
     double nominal_speed = 0.20;
     double max_speed = 0.26;
@@ -133,6 +137,11 @@ struct MultiVehicleConfig {
     std::vector<int> start_slots;
     // 简单测试版:每车预设终点库位(与 start_slots 同序,车 i → target_slots[i])。空=自动选最近前进目标。
     std::vector<int> target_slots;
+    // Corner slots whose docking/undocking geometry intrudes into a main
+    // corridor turn. They may remain start/source slots so a parked vehicle
+    // can leave, but no new task may select them as a destination.
+    std::vector<int> disabled_task_slots{
+        10, 11, 18, 19, 28, 29, 30, 31, 46, 47, 48, 49};
     bool randomize_start = false;  // true: draw distinct start slots from random_seed
 
     static MultiVehicleConfig fromROSParam(ros::NodeHandle& nh);
