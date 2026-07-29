@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <deque>
@@ -704,6 +705,58 @@ private:
     }
 
     //==============《任务指派与路径生成函数》===================================
+    bool tryStartA1PickupFromCurrentB(VehicleAgent& v) {
+        VehicleAgent proposal = v;
+        const bool already_staged =
+            v.mission_phase == MissionPhase::TO_A1 &&
+            v.reason.rfind("wait_a1_dispatch_V", 0) == 0 &&
+            !v.track.empty() && v.hasPendingDropoff();
+
+        if (!already_staged &&
+            !allocator_->assignPickupLeg(proposal, agents_)) {
+            v = std::move(proposal);
+            return false;
+        }
+
+        int protected_owner = -1;
+        if (!rule_engine_->a1PickupDispatchAllowed(
+                proposal, agents_, &protected_owner)) {
+            // The task is staged but not started. The B->A1 path remains at
+            // s=0 and the vehicle stays physically parked in its B slot.
+            v = std::move(proposal);
+            v.mode = VehicleMode::DWELL;
+            v.mission_phase = MissionPhase::TO_A1;
+            v.leg_target = LegTargetKind::A1;
+            v.path_s = 0.0;
+            v.dwell_remaining = 0.5;
+            v.current_speed = 0.0;
+            v.action = VehicleAction::STOP;
+            v.requested_action = VehicleAction::STOP;
+            v.reason =
+                "wait_a1_dispatch_V" +
+                std::to_string(protected_owner);
+            v.blocker_id = protected_owner;
+            if (!sim_mode_ && !already_staged) {
+                coordLog(
+                    "[multi_patrol][a1_dispatch] hold V" +
+                    std::to_string(v.id) + " at B" +
+                    std::to_string(v.current_slot) +
+                    " for protected transaction V" +
+                    std::to_string(protected_owner));
+            }
+            return false;
+        }
+
+        v = std::move(proposal);
+        v.mode = VehicleMode::ACTIVE;
+        v.action = VehicleAction::NOMINAL;
+        v.requested_action = VehicleAction::NOMINAL;
+        v.reason = already_staged ? "a1_dispatch_released"
+                                  : "new_pickup_leg";
+        v.blocker_id = -1;
+        return true;
+    }
+
     void updateDwellAndTasks(double dt) {
         for (VehicleAgent& v : agents_) {
 
@@ -722,7 +775,7 @@ private:
                 if (v.mode == VehicleMode::NEED_TASK) {
                     if (sim_mode_) continue;
                     const int old_gen = v.path_gen;
-                    allocator_->assignNextTask(v, agents_);
+                    tryStartA1PickupFromCurrentB(v);
                     if (v.path_gen != old_gen) force_horizon_refresh_ = true;
                     continue;
                 }
@@ -781,7 +834,14 @@ private:
                     v.leg_target = LegTargetKind::A1;
                     v.mode = VehicleMode::NEED_TASK;
                     const int old_gen = v.path_gen;
-                    allocator_->assignPickupLeg(v, agents_);
+                    tryStartA1PickupFromCurrentB(v);
+                    if (v.path_gen != old_gen) force_horizon_refresh_ = true;
+                    continue;
+                }
+
+                if (v.mission_phase == MissionPhase::TO_A1) {
+                    const int old_gen = v.path_gen;
+                    tryStartA1PickupFromCurrentB(v);
                     if (v.path_gen != old_gen) force_horizon_refresh_ = true;
                     continue;
                 }
@@ -850,7 +910,6 @@ private:
 
     void handleLegArrival(VehicleAgent& v) {
         v.current_speed = 0.0;
-        v.wait_time = 0.0;
         if (cfg_.use_a1_cycle &&
             v.leg_target == LegTargetKind::A1 &&
             rule_engine_->a1ServiceOwner() != v.id) {
@@ -863,14 +922,13 @@ private:
             v.action = VehicleAction::STOP;
             v.requested_action = VehicleAction::STOP;
             v.reason = "wait_a1_transaction_commit";
-            v.blocker_id = rule_engine_->a1EgressOwner();
-            ROS_ERROR_THROTTLE(
-                2.0,
-                "[multi_patrol][A1 arrival blocked] V%d reached A1 "
-                "without committed service ownership; egress_owner=V%d",
-                v.id, rule_engine_->a1EgressOwner());
+            v.blocker_id =
+                rule_engine_->a1AdmissionCandidate() == v.id
+                    ? rule_engine_->a1AdmissionBlocker()
+                    : rule_engine_->a1EgressOwner();
             return;
         }
+        v.wait_time = 0.0;
         v.mode = VehicleMode::DWELL;
         v.action = VehicleAction::STOP;
         v.requested_action = VehicleAction::STOP;
@@ -1419,20 +1477,20 @@ private:
             char buf[512];
             std::snprintf(
                 buf, sizeof(buf),
-                "[multi_patrol][state] tick=%llu sim_t=%.2f V%d "
+                "[multi_patrol][state] sim_t=%.2fs V%d "
                 "mode=%s phase=%s action=%s reason=%s "
                 "blocker=%d task=%d slot=%d->%d pending_B=%d "
                 "s=%.3f/%.3f rem=%.3f "
                 "speed=%.3f wait=%.2f dwell=%.2f",
-                static_cast<unsigned long long>(tick_count_), sim_time_,
-                v.id, modeName(v.mode), missionPhaseName(v.mission_phase),
+                sim_time_, v.id, modeName(v.mode),
+                missionPhaseName(v.mission_phase),
                 actionName(v.action),
                 v.reason.empty() ? "-" : v.reason.c_str(), v.blocker_id,
                 v.task_count, v.current_slot, v.target_slot,
                 v.pending_target_slot, v.path_s,
                 length, rem, v.current_speed, v.wait_time,
                 v.dwell_remaining);
-            ROS_INFO("%s", buf);
+            std::cout << buf << std::endl;
             coordLog(buf);
 
             last_logged_mode_[i] = v.mode;
@@ -2290,7 +2348,9 @@ public:
                     ? rule_engine_->a1ServiceOwner()
                     : (rule_engine_->a1EgressOwner() >= 0
                            ? rule_engine_->a1EgressOwner()
-                           : rule_engine_->a1ReservedOwner());
+                           : (rule_engine_->a1AdmissionCandidate() >= 0
+                                  ? rule_engine_->a1AdmissionCandidate()
+                                  : rule_engine_->a1ReservedOwner()));
             VehicleAgent* owner = agentById(owner_id);
             const bool owner_has_pending_leg =
                 owner != nullptr && owner->hasPendingDropoff() &&
@@ -2404,6 +2464,15 @@ public:
                             ? owner->target_slot
                             : owner->pending_target_slot,
                         old_wait_time);
+                    coordLog(
+                        "[multi_patrol][a1_deadlock_fallback] owner=V" +
+                        std::to_string(owner_id) + " old_B=" +
+                        std::to_string(old_target) + " new_B=" +
+                        std::to_string(
+                            owner_on_initial_departure
+                                ? owner->target_slot
+                                : owner->pending_target_slot) +
+                        " wait=" + std::to_string(old_wait_time));
                     return;
                 }
                 ROS_WARN_THROTTLE(

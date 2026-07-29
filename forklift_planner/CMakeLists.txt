@@ -62,6 +62,12 @@ add_executable(multi_vehicle_patrol_node
   src/multi_vehicle/traffic_resource_map.cpp
   src/multi_vehicle_patrol_node.cpp
 )
+# This target writes concise real state lines directly to stdout and keeps
+# detailed diagnostics in its coordination log. Compile out legacy ROS
+# DEBUG/INFO/WARN/ERROR traffic (including rollout diagnostics); FATAL remains.
+target_compile_definitions(multi_vehicle_patrol_node PRIVATE
+  ROSCONSOLE_MIN_SEVERITY=ROSCONSOLE_SEVERITY_FATAL
+)
 add_dependencies(multi_vehicle_patrol_node ${catkin_EXPORTED_TARGETS})
 target_link_libraries(multi_vehicle_patrol_node
   ${catkin_LIBRARIES}

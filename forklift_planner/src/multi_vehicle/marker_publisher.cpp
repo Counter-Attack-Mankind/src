@@ -136,6 +136,30 @@ void MarkerPublisher::addBodyMarker(visualization_msgs::MarkerArray& arr,
     addPart(v.id, body_x, 0.0, body_len, W);
     addPart(1000 + v.id * 2, fork_x, fork_y, fork_len, fork_w);
     addPart(1001 + v.id * 2, fork_x, -fork_y, fork_len, fork_w);
+
+    // A loaded forklift carries a visible pallet/cargo block over its forks.
+    // Publish DELETE when empty so the previous marker disappears immediately
+    // after unloading.
+    visualization_msgs::Marker cargo;
+    cargo.header.frame_id = pp_.frame_id;
+    cargo.header.stamp = ros::Time::now();
+    cargo.ns = "multi_patrol_cargo";
+    cargo.id = 2000 + v.id;
+    cargo.type = visualization_msgs::Marker::CUBE;
+    cargo.action = v.loaded ? visualization_msgs::Marker::ADD
+                            : visualization_msgs::Marker::DELETE;
+    if (v.loaded) {
+        cargo.pose.position.x = p.x + c * fork_x;
+        cargo.pose.position.y = p.y + s * fork_x;
+        cargo.pose.position.z = 0.085;
+        cargo.pose.orientation.z = std::sin(p.theta * 0.5);
+        cargo.pose.orientation.w = std::cos(p.theta * 0.5);
+        cargo.scale.x = fork_len * 0.82;
+        cargo.scale.y = W * 0.72;
+        cargo.scale.z = 0.085;
+        cargo.color = rgba(0.72f, 0.43f, 0.14f, 0.98f);
+    }
+    arr.markers.push_back(cargo);
 }
 
 void MarkerPublisher::addArrowMarker(visualization_msgs::MarkerArray& arr,
@@ -233,17 +257,15 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
     visualization_msgs::MarkerArray& arr) const {
     if (!cfg_.use_a1_cycle) return;
 
-    // The expanded A1 service region is U-shaped: corridor 1 and the upper
-    // halves of both vertical connectors between corridor 2 and corridor 1.
-    // Purple is deliberately distinct from cyan following and orange mutual
-    // exclusion regions.
+    // The hard exclusion marker uses the exact same rectangles as the rule
+    // engine. It is deliberately red-orange and distinct from conflict zones.
     const double queue_y = 0.5 * (mp_.y6() + mp_.y7());
     const double right_x0 = mp_.row1_left_aisle + mp_.row1_shelf_width;
     const double right_x1 = mp_.field_width - mp_.row1_mini_shelf;
     const std_msgs::ColorRGBA fill =
-        rgba(0.72f, 0.34f, 1.00f, 0.16f);
+        rgba(1.00f, 0.20f, 0.10f, 0.15f);
     const std_msgs::ColorRGBA edge =
-        rgba(0.86f, 0.48f, 1.00f, 0.92f);
+        rgba(1.00f, 0.30f, 0.10f, 0.95f);
 
     auto addBox = [&](int id, double x0, double x1,
                       double y0, double y1) {
@@ -265,9 +287,10 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
         m.color = fill;
         arr.markers.push_back(m);
     };
-    addBox(0, 0.0, mp_.field_width, mp_.y7(), mp_.field_height);
-    addBox(1, 0.0, mp_.row1_left_aisle, queue_y, mp_.y7());
-    addBox(2, right_x0, right_x1, queue_y, mp_.y7());
+    int zone_id = 0;
+    for (const A1HardZoneRect& r : a1HardZoneRects(mp_)) {
+        addBox(zone_id++, r.x0, r.x1, r.y0, r.y1);
+    }
 
     auto addQueueLine = [&](int id, double x0, double x1) {
         visualization_msgs::Marker m;
@@ -301,7 +324,7 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
     label.pose.orientation.w = 1.0;
     label.scale.z = 0.085;
     label.color = edge;
-    label.text = "A1 SERVICE";
+    label.text = "A1 HARD EXCLUSION";
     arr.markers.push_back(label);
 }
 

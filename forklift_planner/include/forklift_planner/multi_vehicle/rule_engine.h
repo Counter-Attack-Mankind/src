@@ -56,6 +56,16 @@ struct A1GateMarker {
     bool late = false;
 };
 
+struct A1HardZoneRect {
+    double x0 = 0.0;
+    double x1 = 0.0;
+    double y0 = 0.0;
+    double y1 = 0.0;
+};
+
+// Single geometry source for both rule enforcement and RViz.
+std::vector<A1HardZoneRect> a1HardZoneRects(const MapParam& mp);
+
 class RuleEngine {
 public:
     RuleEngine(const MapParam& mp, const MultiVehicleConfig& cfg);
@@ -78,6 +88,8 @@ public:
         int a1_reserved_owner = -1;
         int a1_egress_owner = -1;
         int a1_service_owner = -1;
+        int a1_admission_candidate = -1;
+        int a1_admission_blocker = -1;
         std::vector<ConflictMarker> conflicts;
         std::vector<A1GateMarker> a1_gate_markers;
     };
@@ -86,6 +98,8 @@ public:
                            following_phase_, tokens_,
                            reservation_path_gen_, now_, a1_reserved_owner_,
                            a1_egress_owner_, a1_service_owner_,
+                           a1_admission_candidate_,
+                           a1_admission_blocker_,
                            conflicts_, a1_gate_markers_};
     }
     void restore(const SimSnapshot& s) {
@@ -99,6 +113,8 @@ public:
         a1_reserved_owner_ = s.a1_reserved_owner;
         a1_egress_owner_ = s.a1_egress_owner;
         a1_service_owner_ = s.a1_service_owner;
+        a1_admission_candidate_ = s.a1_admission_candidate;
+        a1_admission_blocker_ = s.a1_admission_blocker;
         conflicts_ = s.conflicts;
         a1_gate_markers_ = s.a1_gate_markers;
         a1_gate_plans_.clear();
@@ -120,6 +136,18 @@ public:
     int a1ServiceOwner() const { return a1_service_owner_; }
     int a1ReservedOwner() const { return a1_reserved_owner_; }
     int a1EgressOwner() const { return a1_egress_owner_; }
+    int a1AdmissionCandidate() const {
+        return a1_admission_candidate_;
+    }
+    int a1AdmissionBlocker() const { return a1_admission_blocker_; }
+
+    // Read-only dispatch interlock. A reserved owner cannot stop an already
+    // moving vehicle, but it may prevent a new B->A1 task from being launched
+    // when that proposed track intersects its approach or cached exit chain.
+    bool a1PickupDispatchAllowed(
+        const VehicleAgent& proposed_pickup,
+        const std::vector<VehicleAgent>& vehicles,
+        int* protected_owner_id = nullptr);
 
 private:
     struct ConflictZone {
@@ -215,6 +243,10 @@ private:
     void resolveFollowing(std::vector<VehicleAgent>& vehicles);
     void resolveA1ApproachQueue(std::vector<VehicleAgent>& vehicles,
                                 double dt);
+    void enforceA1HardExclusion(std::vector<VehicleAgent>& vehicles,
+                                double dt);
+    double a1SafeStoppingDistance(const VehicleAgent& v,
+                                  double dt) const;
     // 普适前向净空护栏:任何车若沿自身固定路径在自己刹车距离内会撞上另一辆车的当前
     // 车身,提前 STOP(留余量、干净对停)。堵死 following/crossing 分类接缝处「两套都
     // 没刹→NOMINAL 直撞停着的车→十字楔死」的漏洞。破环车豁免。比硬护栏早刹留余量。
@@ -300,6 +332,11 @@ private:
     int a1_egress_owner_ = -1;
     // 仅门控 A1 最后一段进场、装载和初始离场，不串行化整条 B→A1 路径。
     int a1_service_owner_ = -1;
+    // Last real/snapshot-restored atomic-admission rejection. Patrol uses this
+    // exact dependency at geometric A1 arrival so wait_time and deadlock
+    // fallback remain meaningful.
+    int a1_admission_candidate_ = -1;
+    int a1_admission_blocker_ = -1;
 };
 
 }  // namespace multi_vehicle

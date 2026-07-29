@@ -14,6 +14,21 @@
 namespace forklift_planner {
 namespace multi_vehicle {
 
+std::vector<A1HardZoneRect> a1HardZoneRects(const MapParam& mp) {
+    const double queue_y = 0.5 * (mp.y6() + mp.y7());
+    const double right_x0 =
+        mp.row1_left_aisle + mp.row1_shelf_width;
+    const double right_x1 =
+        mp.field_width - mp.row1_mini_shelf;
+    return {
+        A1HardZoneRect{0.0, mp.field_width, mp.y7(),
+                       mp.field_height},
+        A1HardZoneRect{0.0, mp.row1_left_aisle, queue_y,
+                       mp.y7()},
+        A1HardZoneRect{right_x0, right_x1, queue_y, mp.y7()},
+    };
+}
+
 RuleEngine::RuleEngine(const MapParam& mp, const MultiVehicleConfig& cfg)
     : mp_(mp), cfg_(cfg) {}
 
@@ -48,6 +63,61 @@ double RuleEngine::speedForAction(VehicleAction action) const {
                        : cfg_.nominal_speed;
     }
     return 0.0;
+}
+
+double RuleEngine::a1SafeStoppingDistance(
+    const VehicleAgent& v, double dt) const {
+    const double speed = std::max(0.0, v.current_speed);
+    const double braking =
+        speed * speed /
+        (2.0 * std::max(1e-6, cfg_.max_decel));
+    const double reaction =
+        speed * std::max(std::max(0.0, dt),
+                         cfg_.a1_control_delay);
+    return braking + reaction + cfg_.a1_stop_margin;
+}
+
+bool RuleEngine::a1PickupDispatchAllowed(
+    const VehicleAgent& proposed_pickup,
+    const std::vector<VehicleAgent>& vehicles,
+    int* protected_owner_id) {
+    if (protected_owner_id != nullptr) *protected_owner_id = -1;
+    if (!cfg_.use_a1_cycle || proposed_pickup.track.empty()) return true;
+
+    const int owner_id =
+        a1_service_owner_ >= 0 ? a1_service_owner_
+                               : a1_reserved_owner_;
+    if (owner_id < 0 || owner_id == proposed_pickup.id) return true;
+
+    const VehicleAgent* owner = nullptr;
+    for (const VehicleAgent& v : vehicles) {
+        if (v.id == owner_id) {
+            owner = &v;
+            break;
+        }
+    }
+    if (owner == nullptr) return true;
+    const bool live_transaction =
+        (owner->active() &&
+         owner->mission_phase == MissionPhase::TO_A1 &&
+         owner->hasPendingDropoff()) ||
+        (owner->mode == VehicleMode::DWELL &&
+         (owner->mission_phase == MissionPhase::PICKUP_DWELL ||
+          owner->mission_phase ==
+              MissionPhase::WAIT_DROPOFF_TASK)) ||
+        (owner->active() && owner->loaded &&
+         owner->mission_phase == MissionPhase::TO_B);
+    if (!live_transaction) return true;
+
+    const A1GatePlan gate =
+        buildA1GatePlan(*owner, proposed_pickup);
+    const bool invades_transaction =
+        !gate.approach_zones.empty() ||
+        !gate.departure_zones.empty();
+    if (invades_transaction && protected_owner_id != nullptr) {
+        *protected_owner_id = owner_id;
+    }
+    return !invades_transaction;
 }
 
 int RuleEngine::priorityWinner(const VehicleAgent& a,
@@ -1744,6 +1814,8 @@ void RuleEngine::resolveA1ApproachQueue(
     a1_gate_markers_.clear();
     const int previous_reserved_owner = a1_reserved_owner_;
     a1_reserved_owner_ = -1;
+    a1_admission_candidate_ = -1;
+    a1_admission_blocker_ = -1;
     const int service_owner_at_cycle_start = a1_service_owner_;
     if (!cfg_.use_a1_cycle) {
         a1_egress_owner_ = -1;
@@ -1765,16 +1837,6 @@ void RuleEngine::resolveA1ApproachQueue(
                (v.mission_phase == MissionPhase::PICKUP_DWELL ||
                  v.mission_phase ==
                      MissionPhase::WAIT_DROPOFF_TASK);
-    };
-    auto safeStoppingDistance = [&](const VehicleAgent& v) {
-        const double speed = std::max(0.0, v.current_speed);
-        const double braking =
-            speed * speed /
-            (2.0 * std::max(1e-6, cfg_.max_decel));
-        const double reaction =
-            speed * std::max(std::max(0.0, dt),
-                             cfg_.a1_control_delay);
-        return braking + reaction + cfg_.a1_stop_margin;
     };
     auto chainCleared = [&](const VehicleAgent& waiter,
                             const std::vector<ConflictZone>& zones) {
@@ -1884,7 +1946,8 @@ void RuleEngine::resolveA1ApproachQueue(
                             gate.departure_stop_s +
                                 kA1GateLateTolerance &&
                         distance <=
-                            safeStoppingDistance(possible_waiter)) {
+                            a1SafeStoppingDistance(possible_waiter,
+                                                   dt)) {
                         directional_reservations.insert(
                             possible_owner.id);
                     }
@@ -1957,7 +2020,8 @@ void RuleEngine::resolveA1ApproachQueue(
                             return true;
                         }
                         *gap = stop_s - waiter.path_s;
-                        *required = safeStoppingDistance(waiter);
+                        *required =
+                            a1SafeStoppingDistance(waiter, dt);
                         return *gap + kA1GateLateTolerance >= *required;
                     };
                 auto candidateAdmissible =
@@ -1996,7 +2060,8 @@ void RuleEngine::resolveA1ApproachQueue(
                                     *gap = gate.approach_stop_s -
                                            other.path_s;
                                     *required =
-                                        safeStoppingDistance(other);
+                                        a1SafeStoppingDistance(other,
+                                                               dt);
                                     return false;
                                 }
                                 if (!chainProtectable(
@@ -2071,7 +2136,13 @@ void RuleEngine::resolveA1ApproachQueue(
                             *candidate, &blocker, &cause, &gap,
                             &required)) {
                         owner = candidate;
+                        a1_admission_candidate_ = -1;
+                        a1_admission_blocker_ = -1;
                         break;
+                    }
+                    if (a1_admission_candidate_ < 0) {
+                        a1_admission_candidate_ = candidate->id;
+                        a1_admission_blocker_ = blocker;
                     }
                     ROS_WARN_THROTTLE(
                         2.0,
@@ -2190,7 +2261,7 @@ void RuleEngine::resolveA1ApproachQueue(
             if (!departure_gate_late) {
                 const double distance =
                     gate.departure_stop_s - v.path_s;
-                if (distance <= safeStoppingDistance(v)) {
+                if (distance <= a1SafeStoppingDistance(v, dt)) {
                     applyActionRequest(
                         v, VehicleAction::STOP,
                         "wait_a1_reserved_exit_V" +
@@ -2327,7 +2398,8 @@ void RuleEngine::resolveA1ApproachQueue(
             // arbitration so one vehicle can clear the occupied chain.
             continue;
         }
-        if (distance_to_stop_line <= safeStoppingDistance(v)) {
+        if (distance_to_stop_line <=
+            a1SafeStoppingDistance(v, dt)) {
             ROS_INFO_THROTTLE(
                 2.0,
                 "[multi_patrol][A1 gate] owner=V%d target_B=%d "
@@ -2357,6 +2429,84 @@ void RuleEngine::resolveA1ApproachQueue(
                 std::string(reason_prefix) +
                     std::to_string(a1_service_owner_),
                 a1_service_owner_);
+        }
+    }
+}
+
+void RuleEngine::enforceA1HardExclusion(
+    std::vector<VehicleAgent>& vehicles, double dt) {
+    if (!cfg_.use_a1_cycle || a1_service_owner_ < 0) return;
+
+    VehicleAgent* owner = nullptr;
+    for (VehicleAgent& v : vehicles) {
+        if (v.id == a1_service_owner_) {
+            owner = &v;
+            break;
+        }
+    }
+    const bool owner_is_picking =
+        owner != nullptr && owner->mode == VehicleMode::DWELL &&
+        (owner->mission_phase == MissionPhase::PICKUP_DWELL ||
+         owner->mission_phase == MissionPhase::WAIT_DROPOFF_TASK);
+    if (!owner_is_picking) return;
+
+    std::vector<OBB> zone_boxes;
+    for (const A1HardZoneRect& r : a1HardZoneRects(mp_)) {
+        if (r.x1 <= r.x0 || r.y1 <= r.y0) continue;
+        OBB box;
+        box.x = 0.5 * (r.x0 + r.x1);
+        box.y = 0.5 * (r.y0 + r.y1);
+        box.theta = 0.0;
+        box.half_l = 0.5 * (r.x1 - r.x0);
+        box.half_w = 0.5 * (r.y1 - r.y0);
+        zone_boxes.push_back(box);
+    }
+    auto bodyTouchesHardZone = [&](const VehicleAgent& v, double s) {
+        const OBB body =
+            makeBody(v.track.poseAtS(s), mp_, 0.0);
+        for (const OBB& zone : zone_boxes) {
+            if (overlaps(body, zone)) return true;
+        }
+        return false;
+    };
+
+    constexpr double kScanStep = 0.02;
+    for (VehicleAgent& v : vehicles) {
+        if (v.id == owner->id || !v.active()) continue;
+
+        if (bodyTouchesHardZone(v, v.path_s)) {
+            applyActionRequest(
+                v, VehicleAction::STOP,
+                "illegal_a1_hard_zone_V" +
+                    std::to_string(owner->id),
+                owner->id);
+            continue;
+        }
+
+        const double safe_distance = a1SafeStoppingDistance(v, dt);
+        const double scan_end =
+            std::min(v.track.length(),
+                     v.path_s + safe_distance +
+                         cfg_.a1_stop_margin + kScanStep);
+        double entry_s = std::numeric_limits<double>::infinity();
+        for (double s = v.path_s + kScanStep;
+             s <= scan_end + 1e-9; s += kScanStep) {
+            const double ss = std::min(s, scan_end);
+            if (!bodyTouchesHardZone(v, ss)) continue;
+            entry_s = ss;
+            break;
+        }
+        if (!std::isfinite(entry_s)) continue;
+
+        const double stop_s =
+            std::max(v.path_s,
+                     entry_s - cfg_.a1_stop_margin);
+        if (stop_s - v.path_s <= safe_distance) {
+            applyActionRequest(
+                v, VehicleAction::STOP,
+                "wait_a1_hard_zone_V" +
+                    std::to_string(owner->id),
+                owner->id);
         }
     }
 }
@@ -2859,6 +3009,7 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt) {
     }
 
     resolveA1ApproachQueue(vehicles, dt);
+    enforceA1HardExclusion(vehicles, dt);
     resolveFollowing(vehicles);
     // 深层根治(用户洞察:路径固定→只信精确几何):停用粗粒度资源盒仲裁(路口/车道
     // 令牌),它把"共用一个路口盒"当冲突造成幻象冲突→打架→死锁。改由精确的 pairwise
