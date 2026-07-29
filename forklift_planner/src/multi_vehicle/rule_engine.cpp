@@ -2592,6 +2592,7 @@ void RuleEngine::resolveTargetSlotOccupancy(
             if (o.current_slot != v.target_slot) continue;  // not at v's slot
             const bool occupying =
                 (o.mode == VehicleMode::DWELL) ||
+                (o.mode == VehicleMode::WAIT_DISPATCH) ||
                 (o.active() && o.path_s < kSlotClear);
             if (!occupying) continue;
             applyActionRequest(v, VehicleAction::STOP,
@@ -2790,7 +2791,9 @@ void RuleEngine::arbitrateResources(std::vector<VehicleAgent>& vehicles,
         for (size_t o = 0; o < vehicles.size(); ++o) {
             if (o == vi) continue;
             const VehicleAgent& ov = vehicles[o];
-            if (ov.mode != VehicleMode::ACTIVE && ov.mode != VehicleMode::DWELL)
+            if (ov.mode != VehicleMode::ACTIVE &&
+                ov.mode != VehicleMode::DWELL &&
+                ov.mode != VehicleMode::WAIT_DISPATCH)
                 continue;
             if (ov.track.empty()) continue;
             if (overlaps(body, makeBody(poseOf(ov), mp_, 0.0))) return false;
@@ -2997,6 +3000,12 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt) {
     refreshResourceSpans(vehicles);  // Phase 2:刷新每车路径的资源占用缓存
 
     for (VehicleAgent& v : vehicles) {
+        if (v.mode == VehicleMode::WAIT_DISPATCH) {
+            v.cycle_break_immunity = 0.0;
+            v.action = VehicleAction::STOP;
+            v.requested_action = VehicleAction::STOP;
+            continue;
+        }
         v.blocker_id = -1;
         if (v.mode != VehicleMode::ACTIVE) {
             v.cycle_break_immunity = 0.0;

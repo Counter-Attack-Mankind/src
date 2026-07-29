@@ -203,7 +203,9 @@ void MarkerPublisher::addLabelMarker(visualization_msgs::MarkerArray& arr,
     m.scale.z = 0.070;
     m.color = v.color;
     m.text = "V" + std::to_string(v.id) + " " + actionName(v.action);
-    if (v.mode == VehicleMode::DWELL) {
+    if (v.mode == VehicleMode::WAIT_DISPATCH) {
+        m.text += " WAIT_B";
+    } else if (v.mode == VehicleMode::DWELL) {
         m.text += " DWELL";
     } else if (v.loaded) {
         m.text += " L";

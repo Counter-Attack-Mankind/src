@@ -21,6 +21,10 @@ enum class VehicleAction {
 
 enum class VehicleMode {
     NEED_TASK,
+    // B->A1 and the future A1->B leg are staged, but dispatch admission has
+    // not been granted. The physical pose is track.poseAtS(path_s), normally
+    // path_s=0 at the current B slot; unlike DWELL, it is never the track end.
+    WAIT_DISPATCH,
     ACTIVE,
     DWELL,
 };

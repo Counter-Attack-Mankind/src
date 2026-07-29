@@ -187,6 +187,7 @@ private:
     const char* modeName(VehicleMode mode) const {
         switch (mode) {
             case VehicleMode::NEED_TASK: return "NEED_TASK";
+            case VehicleMode::WAIT_DISPATCH: return "WAIT_DISPATCH";
             case VehicleMode::ACTIVE: return "ACTIVE";
             case VehicleMode::DWELL: return "DWELL";
         }
@@ -708,8 +709,8 @@ private:
     bool tryStartA1PickupFromCurrentB(VehicleAgent& v) {
         VehicleAgent proposal = v;
         const bool already_staged =
+            v.mode == VehicleMode::WAIT_DISPATCH &&
             v.mission_phase == MissionPhase::TO_A1 &&
-            v.reason.rfind("wait_a1_dispatch_V", 0) == 0 &&
             !v.track.empty() && v.hasPendingDropoff();
 
         if (!already_staged &&
@@ -724,7 +725,7 @@ private:
             // The task is staged but not started. The B->A1 path remains at
             // s=0 and the vehicle stays physically parked in its B slot.
             v = std::move(proposal);
-            v.mode = VehicleMode::DWELL;
+            v.mode = VehicleMode::WAIT_DISPATCH;
             v.mission_phase = MissionPhase::TO_A1;
             v.leg_target = LegTargetKind::A1;
             v.path_s = 0.0;
@@ -774,6 +775,19 @@ private:
             if (cfg_.use_a1_cycle) {
                 if (v.mode == VehicleMode::NEED_TASK) {
                     if (sim_mode_) continue;
+                    const int old_gen = v.path_gen;
+                    tryStartA1PickupFromCurrentB(v);
+                    if (v.path_gen != old_gen) force_horizon_refresh_ = true;
+                    continue;
+                }
+
+                if (v.mode == VehicleMode::WAIT_DISPATCH) {
+                    v.action = VehicleAction::STOP;
+                    v.requested_action = VehicleAction::STOP;
+                    v.current_speed = 0.0;
+                    v.dwell_remaining =
+                        std::max(0.0, v.dwell_remaining - dt);
+                    if (sim_mode_ || v.dwell_remaining > 1e-9) continue;
                     const int old_gen = v.path_gen;
                     tryStartA1PickupFromCurrentB(v);
                     if (v.path_gen != old_gen) force_horizon_refresh_ = true;
@@ -839,12 +853,6 @@ private:
                     continue;
                 }
 
-                if (v.mission_phase == MissionPhase::TO_A1) {
-                    const int old_gen = v.path_gen;
-                    tryStartA1PickupFromCurrentB(v);
-                    if (v.path_gen != old_gen) force_horizon_refresh_ = true;
-                    continue;
-                }
                 continue;
             }
 
@@ -999,7 +1007,8 @@ private:
             for (size_t k = 0; k < agents_.size(); ++k) {
                 if (k == idx) continue;
                 if (agents_[k].mode != VehicleMode::ACTIVE &&
-                    agents_[k].mode != VehicleMode::DWELL) {
+                    agents_[k].mode != VehicleMode::DWELL &&
+                    agents_[k].mode != VehicleMode::WAIT_DISPATCH) {
                     continue;
                 }
                 if (overlapsAt(idx, candidate_s, k, plannedS(k))) return false;
@@ -1012,7 +1021,8 @@ private:
             for (size_t k = 0; k < agents_.size(); ++k) {
                 if (k == idx || k == pair_other) continue;
                 if (agents_[k].mode != VehicleMode::ACTIVE &&
-                    agents_[k].mode != VehicleMode::DWELL) {
+                    agents_[k].mode != VehicleMode::DWELL &&
+                    agents_[k].mode != VehicleMode::WAIT_DISPATCH) {
                     continue;
                 }
                 if (overlapsAt(idx, candidate_s, k, plannedS(k))) return false;
@@ -1065,13 +1075,15 @@ private:
 
             for (size_t i = 0; i < agents_.size(); ++i) {
                 if (agents_[i].mode != VehicleMode::ACTIVE &&
-                    agents_[i].mode != VehicleMode::DWELL) {
+                    agents_[i].mode != VehicleMode::DWELL &&
+                    agents_[i].mode != VehicleMode::WAIT_DISPATCH) {
                     continue;
                 }
 
                 for (size_t j = i + 1; j < agents_.size(); ++j) {
                     if (agents_[j].mode != VehicleMode::ACTIVE &&
-                        agents_[j].mode != VehicleMode::DWELL) {
+                        agents_[j].mode != VehicleMode::DWELL &&
+                        agents_[j].mode != VehicleMode::WAIT_DISPATCH) {
                         continue;
                     }
                     if (!overlapsAt(i, plannedS(i), j, plannedS(j))) {
@@ -1307,7 +1319,8 @@ private:
                 for (size_t k = 0; k < agents_.size(); ++k) {
                     if (k == idx) continue;
                     if (agents_[k].mode != VehicleMode::ACTIVE &&
-                        agents_[k].mode != VehicleMode::DWELL) {
+                        agents_[k].mode != VehicleMode::DWELL &&
+                        agents_[k].mode != VehicleMode::WAIT_DISPATCH) {
                         continue;
                     }
                     const auto other = forklift_planner::multi_vehicle::makeBody(
@@ -1357,7 +1370,8 @@ private:
                 for (size_t k = 0; k < agents_.size(); ++k) {
                     if (k == idx) continue;
                     if (agents_[k].mode != VehicleMode::ACTIVE &&
-                        agents_[k].mode != VehicleMode::DWELL) {
+                        agents_[k].mode != VehicleMode::DWELL &&
+                        agents_[k].mode != VehicleMode::WAIT_DISPATCH) {
                         continue;
                     }
                     if (overlapsAt(idx, fwd_s, k, plannedS(k))) {
@@ -1419,7 +1433,8 @@ private:
                 for (size_t k = 0; k < agents_.size(); ++k) {
                     if (k == i) continue;
                     if (agents_[k].mode != VehicleMode::ACTIVE &&
-                        agents_[k].mode != VehicleMode::DWELL) {
+                        agents_[k].mode != VehicleMode::DWELL &&
+                        agents_[k].mode != VehicleMode::WAIT_DISPATCH) {
                         continue;
                     }
                     if (overlapsAt(i, fwd_s, k, plannedS(k))) {
