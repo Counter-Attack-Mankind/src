@@ -588,6 +588,21 @@ TaskPlanCache TaskAllocator::makeA1CycleTaskPlan(int src_id,
     return out;
 }
 
+std::vector<PathTrack> TaskAllocator::validA1ExitTracks() const {
+    ensureA1LegCache();
+    std::vector<PathTrack> tracks;
+    tracks.reserve(a1_to_b_leg_cache_.size());
+    for (size_t id = 0; id < a1_to_b_leg_cache_.size(); ++id) {
+        if (taskTargetDisabled(static_cast<int>(id))) continue;
+        const DepotLegCache& leg = a1_to_b_leg_cache_[id];
+        if (!leg.ready || !leg.valid || leg.path.size() < 2) continue;
+        PathTrack track;
+        track.set(leg.path);
+        if (!track.empty()) tracks.push_back(track);
+    }
+    return tracks;
+}
+
 TaskPlanCache TaskAllocator::makeTaskPlanFromPose(const VehicleAgent& vehicle,
                                                   int target_id) const {
     TaskPlanCache out;

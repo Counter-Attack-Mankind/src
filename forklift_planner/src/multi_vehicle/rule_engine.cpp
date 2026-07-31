@@ -32,6 +32,20 @@ std::vector<A1HardZoneRect> a1HardZoneRects(const MapParam& mp) {
 RuleEngine::RuleEngine(const MapParam& mp, const MultiVehicleConfig& cfg)
     : mp_(mp), cfg_(cfg) {}
 
+void RuleEngine::setA1ExitTracks(
+    const std::vector<PathTrack>& tracks) {
+    a1_exit_tracks_ = tracks;
+    a1_keep_clear_cache_.clear();
+    if (a1_exit_tracks_.empty()) {
+        ROS_ERROR("[multi_patrol][A1 keep-clear] no valid A1->B "
+                  "exit track; global keep-clear protection is unavailable");
+    } else {
+        ROS_INFO("[multi_patrol][A1 keep-clear] loaded %zu possible "
+                 "A1->B exit tracks",
+                 a1_exit_tracks_.size());
+    }
+}
+
 namespace {
 
 struct OverlapSample {
@@ -529,6 +543,117 @@ double RuleEngine::verticalQueueStopS(const VehicleAgent& v) {
     return best_s;
 }
 
+const RuleEngine::A1KeepClearCacheEntry&
+RuleEngine::globalA1KeepClear(const VehicleAgent& v) const {
+    A1KeepClearCacheEntry& cached = a1_keep_clear_cache_[v.id];
+    if (cached.path_gen == v.path_gen) return cached;
+
+    cached = A1KeepClearCacheEntry{};
+    cached.path_gen = v.path_gen;
+    cached.stop_s = std::numeric_limits<double>::infinity();
+    cached.hard_stop_s =
+        std::numeric_limits<double>::infinity();
+    if (v.track.empty()) return cached;
+
+    std::vector<OBB> hard_boxes;
+    for (const A1HardZoneRect& r : a1HardZoneRects(mp_)) {
+        if (r.x1 <= r.x0 || r.y1 <= r.y0) continue;
+        OBB box;
+        box.x = 0.5 * (r.x0 + r.x1);
+        box.y = 0.5 * (r.y0 + r.y1);
+        box.theta = 0.0;
+        box.half_l = 0.5 * (r.x1 - r.x0);
+        box.half_w = 0.5 * (r.y1 - r.y0);
+        hard_boxes.push_back(box);
+    }
+    constexpr double kHardScanStep = 0.01;
+    for (double s = 0.0; s <= v.track.length() + 1e-9;
+         s += kHardScanStep) {
+        const double ss = std::min(s, v.track.length());
+        const OBB body =
+            makeBody(v.track.poseAtS(ss), mp_, 0.0);
+        bool touches = false;
+        for (const OBB& box : hard_boxes) {
+            if (overlaps(body, box)) {
+                touches = true;
+                break;
+            }
+        }
+        if (!touches) continue;
+        cached.hard_stop_s =
+            std::max(0.0, ss - cfg_.a1_stop_margin);
+        break;
+    }
+
+    int exit_id = -1000000;
+    for (const PathTrack& exit_track : a1_exit_tracks_) {
+        if (exit_track.empty()) continue;
+        VehicleAgent exit;
+        exit.id = exit_id++;
+        exit.mode = VehicleMode::ACTIVE;
+        exit.mission_phase = MissionPhase::TO_B;
+        exit.loaded = true;
+        exit.track = exit_track;
+        const std::vector<ConflictZone> chain =
+            a1DepartureChain(computeConflictZonesFull(exit, v));
+        for (const ConflictZone& z : chain) {
+            cached.spans.emplace_back(z.s_other_enter, z.s_other_exit);
+            cached.stop_s = std::min(
+                cached.stop_s,
+                std::max(0.0, z.s_other_enter -
+                                  mp_.body_front_ext()));
+        }
+    }
+
+    std::sort(cached.spans.begin(), cached.spans.end());
+    std::vector<std::pair<double, double>> merged;
+    for (const auto& span : cached.spans) {
+        if (merged.empty() ||
+            span.first > merged.back().second + 0.025) {
+            merged.push_back(span);
+        } else {
+            merged.back().second =
+                std::max(merged.back().second, span.second);
+        }
+    }
+    cached.spans.swap(merged);
+    return cached;
+}
+
+bool RuleEngine::vehicleInsideGlobalA1KeepClear(
+    const VehicleAgent& v) const {
+    const A1KeepClearCacheEntry& keep_clear =
+        globalA1KeepClear(v);
+    for (const auto& span : keep_clear.spans) {
+        if (v.path_s > span.first + 1e-9 &&
+            v.path_s <= span.second + mp_.body_rear_ext()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool RuleEngine::conflictZoneInGlobalA1KeepClear(
+    const ConflictZone& zone, const VehicleAgent& a,
+    const VehicleAgent& b) const {
+    auto overlapsKeepClear = [](double enter, double exit,
+                                const A1KeepClearCacheEntry& keep_clear) {
+        for (const auto& span : keep_clear.spans) {
+            if (enter <= span.second + 1e-9 &&
+                exit >= span.first - 1e-9) {
+                return true;
+            }
+        }
+        return false;
+    };
+    return overlapsKeepClear(
+               zone.s_self_enter, zone.s_self_exit,
+               globalA1KeepClear(a)) &&
+           overlapsKeepClear(
+               zone.s_other_enter, zone.s_other_exit,
+               globalA1KeepClear(b));
+}
+
 RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
     const VehicleAgent& owner, const VehicleAgent& waiter) {
     A1GatePlan plan;
@@ -536,6 +661,8 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
     plan.waiter_id = waiter.id;
     const double inf = std::numeric_limits<double>::infinity();
     plan.vertical_stop_s = inf;
+    plan.global_exit_stop_s = inf;
+    plan.hard_stop_s = inf;
     plan.approach_stop_s = inf;
     plan.departure_stop_s = inf;
 
@@ -549,6 +676,8 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
 
     const double vertical_s = verticalQueueStopS(waiter);
     if (std::isfinite(vertical_s)) plan.vertical_stop_s = vertical_s;
+    plan.global_exit_stop_s = globalA1KeepClear(waiter).stop_s;
+    plan.hard_stop_s = globalA1KeepClear(waiter).hard_stop_s;
 
     if ((owner.mission_phase == MissionPhase::TO_A1 ||
          owner.mission_phase == MissionPhase::PICKUP_DWELL) &&
@@ -586,6 +715,15 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
     if (std::isfinite(plan.vertical_stop_s)) {
         active_candidates.emplace_back(
             plan.vertical_stop_s, A1GateSource::VERTICAL_QUEUE);
+    }
+    if (std::isfinite(plan.global_exit_stop_s)) {
+        active_candidates.emplace_back(
+            plan.global_exit_stop_s,
+            A1GateSource::GLOBAL_EXIT_KEEP_CLEAR);
+    }
+    if (std::isfinite(plan.hard_stop_s)) {
+        active_candidates.emplace_back(
+            plan.hard_stop_s, A1GateSource::HARD_ZONE);
     }
     if ((owner.mission_phase == MissionPhase::TO_A1 ||
          owner.mission_phase == MissionPhase::PICKUP_DWELL) &&
@@ -691,6 +829,9 @@ const char* RuleEngine::a1GateSourceName(A1GateSource source) {
     switch (source) {
         case A1GateSource::FIXED: return "fixed";
         case A1GateSource::VERTICAL_QUEUE: return "vertical";
+        case A1GateSource::GLOBAL_EXIT_KEEP_CLEAR:
+            return "global_exit_keep_clear";
+        case A1GateSource::HARD_ZONE: return "hard_zone";
         case A1GateSource::APPROACH_CHAIN: return "approach_chain";
         case A1GateSource::PENDING_EXIT_CHAIN: return "pending_exit_chain";
         case A1GateSource::ACTIVE_EXIT_CHAIN: return "active_exit_chain";
@@ -1188,6 +1329,40 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 continue;
             }
 
+            // From the first queued request until the active owner has left,
+            // every possible A1->B exit prefix is owned by the A1 controller.
+            // Remove only blocks inside that global union; blocks outside it
+            // remain under ordinary orange arbitration.
+            if (a1_control_state_ != A1ControlState::IDLE) {
+                std::vector<ConflictZone> a1_claimed;
+                for (const ConflictZone& z : zones) {
+                    if (conflictZoneInGlobalA1KeepClear(z, a, b)) {
+                        a1_claimed.push_back(z);
+                    }
+                }
+                if (!a1_claimed.empty()) {
+                    // The old reservation was for the unpartitioned pair and
+                    // may have been created by an A1-internal block. It cannot
+                    // be transferred to the remaining outside blocks.
+                    commit_owner_.erase(pkey);
+                    recordConflictZones(
+                        a, b, a1_claimed,
+                        ConflictMarkerKind::A1_PROTECTED);
+                    zones.erase(
+                        std::remove_if(
+                            zones.begin(), zones.end(),
+                            [&](const ConflictZone& z) {
+                                return conflictZoneInGlobalA1KeepClear(
+                                    z, a, b);
+                            }),
+                        zones.end());
+                    if (zones.empty()) {
+                        commit_owner_.erase(pkey);
+                        continue;
+                    }
+                }
+            }
+
             // A1 服务权只接管相连的进场/离场保护链。精确移除这些冲突块后，
             // 同一车对在服务区外的合流、交叉、跟车冲突仍由普通协调处理。
             {
@@ -1592,7 +1767,9 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
                 // A1 owns only its connected service chain. Same-direction
                 // blocks elsewhere on this pair remain eligible for normal
                 // following instead of being hidden by a whole-pair bypass.
-                if ((a1_approach_chain != nullptr &&
+                if ((a1_control_state_ != A1ControlState::IDLE &&
+                     conflictZoneInGlobalA1KeepClear(z, a, b)) ||
+                    (a1_approach_chain != nullptr &&
                      conflictZoneInA1Chain(z, a1_owner_is_a,
                                            *a1_approach_chain)) ||
                     (a1_departure_chain != nullptr &&
@@ -1733,9 +1910,13 @@ void RuleEngine::resolveA1ApproachQueue(
     a1_admission_candidate_ = -1;
     a1_admission_blocker_ = -1;
     const int service_owner_at_cycle_start = a1_service_owner_;
+    const A1ControlState control_state_at_cycle_start =
+        a1_control_state_;
     if (!cfg_.use_a1_cycle) {
         a1_egress_owner_ = -1;
         a1_service_owner_ = -1;
+        a1_control_state_ = A1ControlState::IDLE;
+        a1_hard_latch_owner_.clear();
         return;
     }
 
@@ -1785,7 +1966,37 @@ void RuleEngine::resolveA1ApproachQueue(
         if (std::isfinite(vertical_s)) {
             stop_s = std::min(stop_s, vertical_s);
         }
+        const double global_exit_s =
+            globalA1KeepClear(v).stop_s;
+        if (std::isfinite(global_exit_s)) {
+            stop_s = std::min(stop_s, global_exit_s);
+        }
+        const double hard_s =
+            globalA1KeepClear(v).hard_stop_s;
+        if (std::isfinite(hard_s)) {
+            stop_s = std::min(stop_s, hard_s);
+        }
         return stop_s;
+    };
+    auto fifoSource = [&](const VehicleAgent& v, double stop_s) {
+        const double hard_s =
+            globalA1KeepClear(v).hard_stop_s;
+        if (std::isfinite(hard_s) &&
+            std::abs(hard_s - stop_s) <= 1e-9) {
+            return A1GateSource::HARD_ZONE;
+        }
+        const double global_exit_s =
+            globalA1KeepClear(v).stop_s;
+        if (std::isfinite(global_exit_s) &&
+            std::abs(global_exit_s - stop_s) <= 1e-9) {
+            return A1GateSource::GLOBAL_EXIT_KEEP_CLEAR;
+        }
+        const double vertical_s = verticalQueueStopS(v);
+        if (std::isfinite(vertical_s) &&
+            std::abs(vertical_s - stop_s) <= 1e-9) {
+            return A1GateSource::VERTICAL_QUEUE;
+        }
+        return A1GateSource::FIXED;
     };
     auto effectiveRequestS = [&](const VehicleAgent& v) {
         const double configured_request_s =
@@ -1849,6 +2060,42 @@ void RuleEngine::resolveA1ApproachQueue(
     a1_request_queue_.insert(a1_request_queue_.end(),
                              newly_requested.begin(),
                              newly_requested.end());
+
+    // Recovery invariant: a vehicle already physically inside the global
+    // keep-clear union cannot wait for a FIFO head behind it. Promote the most
+    // advanced invader so it can complete the A1 transaction and clear
+    // forward. In a healthy run the upstream global gate prevents this branch.
+    VehicleAgent* physical_head = nullptr;
+    for (VehicleAgent& v : vehicles) {
+        if (!isApproaching(v) ||
+            !vehicleInsideGlobalA1KeepClear(v)) {
+            continue;
+        }
+        if (physical_head == nullptr ||
+            v.remainingS() < physical_head->remainingS() - 1e-9 ||
+            (std::abs(v.remainingS() -
+                      physical_head->remainingS()) <= 1e-9 &&
+             v.id < physical_head->id)) {
+            physical_head = &v;
+        }
+    }
+    if (physical_head != nullptr &&
+        (a1_request_queue_.empty() ||
+         a1_request_queue_.front() != physical_head->id)) {
+        a1_request_queue_.erase(
+            std::remove(a1_request_queue_.begin(),
+                        a1_request_queue_.end(),
+                        physical_head->id),
+            a1_request_queue_.end());
+        a1_request_queue_.insert(
+            a1_request_queue_.begin(), physical_head->id);
+        ROS_WARN_THROTTLE(
+            2.0,
+            "[multi_patrol][A1 physical FIFO override] V%d is "
+            "already inside global keep-clear; promoting it to "
+            "clear forward before logical FIFO",
+            physical_head->id);
+    }
 
     // 跨 A1 换轨保持服务权；载货车沿新 A1→B 轨迹驶出释放距离后才交给下一辆车。
     VehicleAgent* owner = findById(a1_service_owner_);
@@ -1997,30 +2244,14 @@ void RuleEngine::resolveA1ApproachQueue(
                             const A1GatePlan gate =
                                 buildA1GatePlan(candidate, other);
 
-                            // The current B->A1 approach chain must not reverse
-                            // an ordinary orange right already committed to
-                            // another A1-bound vehicle.
+                            // At the request boundary the A1 controller becomes
+                            // the sole authority for its local approach. A
+                            // stale whole-pair orange reservation must not veto
+                            // FIFO admission; only physical stoppability may.
                             if (isApproaching(other) &&
                                 !gate.approach_zones.empty() &&
                                 !chainCleared(other,
                                               gate.approach_zones)) {
-                                const std::pair<int, int> pkey{
-                                    std::min(candidate.id, other.id),
-                                    std::max(candidate.id, other.id)};
-                                const auto ordinary =
-                                    commit_owner_.find(pkey);
-                                if (ordinary != commit_owner_.end() &&
-                                    ordinary->second == other.id) {
-                                    *blocker = other.id;
-                                    *cause =
-                                        "approach_orange_committed";
-                                    *gap = gate.approach_stop_s -
-                                           other.path_s;
-                                    *required =
-                                        a1SafeStoppingDistance(other,
-                                                               dt);
-                                    return false;
-                                }
                                 if (!chainProtectable(
                                         other, gate.approach_zones,
                                         gate.approach_stop_s, gap,
@@ -2230,7 +2461,50 @@ void RuleEngine::resolveA1ApproachQueue(
             owner->id, egress_ready ? 1 : 0,
             owner->hasPendingDropoff()
                 ? owner->pending_target_slot
-                : owner->target_slot);
+                 : owner->target_slot);
+    }
+
+    if (owner != nullptr) {
+        a1_control_state_ =
+            owner->mission_phase == MissionPhase::TO_B &&
+                    owner->loaded
+                ? A1ControlState::EGRESS
+                : A1ControlState::ACTIVE;
+    } else if (a1_request_queue_.empty()) {
+        a1_control_state_ = A1ControlState::IDLE;
+    } else {
+        const int head = a1_request_queue_.front();
+        bool invaded = false;
+        for (const VehicleAgent& v : vehicles) {
+            if (v.id == head || !v.active()) continue;
+            if (vehicleInsideGlobalA1KeepClear(v)) {
+                invaded = true;
+                break;
+            }
+        }
+        a1_control_state_ =
+            invaded ? A1ControlState::CLEARING
+                    : A1ControlState::QUEUED;
+    }
+    if (a1_control_state_ != control_state_at_cycle_start) {
+        auto stateName = [](A1ControlState state) {
+            switch (state) {
+                case A1ControlState::IDLE: return "IDLE";
+                case A1ControlState::CLEARING: return "CLEARING";
+                case A1ControlState::QUEUED: return "QUEUED";
+                case A1ControlState::ACTIVE: return "ACTIVE";
+                case A1ControlState::EGRESS: return "EGRESS";
+            }
+            return "UNKNOWN";
+        };
+        ROS_INFO("[multi_patrol][A1 state] %s -> %s "
+                 "head=V%d owner=V%d blocker=V%d",
+                 stateName(control_state_at_cycle_start),
+                 stateName(a1_control_state_),
+                 a1_request_queue_.empty()
+                     ? -1
+                     : a1_request_queue_.front(),
+                 a1_service_owner_, a1_admission_blocker_);
     }
 
     if (owner == nullptr) {
@@ -2249,12 +2523,7 @@ void RuleEngine::resolveA1ApproachQueue(
         for (VehicleAgent& v : vehicles) {
             if (!isApproaching(v)) continue;
             double stop_s = fifoStopS(v);
-            A1GateSource source = A1GateSource::FIXED;
-            const double vertical_s = verticalQueueStopS(v);
-            if (std::isfinite(vertical_s) &&
-                std::abs(vertical_s - stop_s) <= 1e-9) {
-                source = A1GateSource::VERTICAL_QUEUE;
-            }
+            const A1GateSource source = fifoSource(v, stop_s);
             const RoughWp pose = v.track.poseAtS(stop_s);
             const bool late =
                 v.path_s > stop_s + kA1GateLateTolerance;
@@ -2269,14 +2538,16 @@ void RuleEngine::resolveA1ApproachQueue(
                     v.id == queue_head &&
                             a1_admission_blocker_ >= 0
                         ? a1_admission_blocker_
-                        : queue_head;
+                        : (v.id == queue_head ? -1 : queue_head);
                 applyActionRequest(
                     v, VehicleAction::STOP,
                     late
                         ? "illegal_a1_fifo_gate_V" +
                               std::to_string(queue_head)
-                        : "wait_a1_fifo_V" +
-                              std::to_string(queue_head),
+                        : (v.id == queue_head
+                               ? "wait_a1_queued"
+                               : "wait_a1_fifo_V" +
+                                     std::to_string(queue_head)),
                     blocker);
             }
         }
@@ -2301,6 +2572,17 @@ void RuleEngine::resolveA1ApproachQueue(
             gate.vertical_stop_s < fifo_stop_s) {
             fifo_stop_s = gate.vertical_stop_s;
             fifo_source = A1GateSource::VERTICAL_QUEUE;
+        }
+        if (std::isfinite(gate.global_exit_stop_s) &&
+            gate.global_exit_stop_s < fifo_stop_s) {
+            fifo_stop_s = gate.global_exit_stop_s;
+            fifo_source =
+                A1GateSource::GLOBAL_EXIT_KEEP_CLEAR;
+        }
+        if (std::isfinite(gate.hard_stop_s) &&
+            gate.hard_stop_s < fifo_stop_s) {
+            fifo_stop_s = gate.hard_stop_s;
+            fifo_source = A1GateSource::HARD_ZONE;
         }
         const RoughWp fifo_pose = v.track.poseAtS(fifo_stop_s);
         const bool fifo_late =
@@ -2416,7 +2698,8 @@ void RuleEngine::resolveA1ApproachQueue(
                 "[multi_patrol][A1 gate] owner=V%d target_B=%d "
                 "waiter=V%d waiter_s=%.3f stop_line=%.3f "
                 "distance=%.3f source=%s approach_zones=%zu "
-                "departure_zones=%zu stops[f=%.3f v=%.3f a=%.3f d=%.3f]",
+                "departure_zones=%zu stops[f=%.3f v=%.3f "
+                "keep=%.3f hard=%.3f a=%.3f d=%.3f]",
                 a1_service_owner_,
                 owner->hasPendingDropoff() ? owner->pending_target_slot
                                            : owner->target_slot,
@@ -2424,17 +2707,27 @@ void RuleEngine::resolveA1ApproachQueue(
                 a1GateSourceName(gate.source),
                 gate.approach_zones.size(),
                 gate.departure_zones.size(), gate.fixed_stop_s,
-                gate.vertical_stop_s, gate.approach_stop_s,
+                gate.vertical_stop_s, gate.global_exit_stop_s,
+                gate.hard_stop_s,
+                gate.approach_stop_s,
                 gate.departure_stop_s);
-            const char* reason_prefix =
-                gate.source == A1GateSource::VERTICAL_QUEUE
-                    ? "wait_a1_vertical_queue_V"
-                    : (gate.source == A1GateSource::PENDING_EXIT_CHAIN ||
-                       gate.source == A1GateSource::ACTIVE_EXIT_CHAIN)
-                          ? "wait_a1_reserved_exit_V"
-                          : gate.source == A1GateSource::APPROACH_CHAIN
-                                ? "wait_a1_approach_V"
-                          : "wait_a1_exit_V";
+            const char* reason_prefix = "wait_a1_exit_V";
+            if (gate.source == A1GateSource::VERTICAL_QUEUE) {
+                reason_prefix = "wait_a1_vertical_queue_V";
+            } else if (gate.source ==
+                       A1GateSource::GLOBAL_EXIT_KEEP_CLEAR) {
+                reason_prefix =
+                    "wait_a1_global_keep_clear_V";
+            } else if (gate.source == A1GateSource::HARD_ZONE) {
+                reason_prefix = "wait_a1_hard_gate_V";
+            } else if (
+                gate.source == A1GateSource::PENDING_EXIT_CHAIN ||
+                gate.source == A1GateSource::ACTIVE_EXIT_CHAIN) {
+                reason_prefix = "wait_a1_reserved_exit_V";
+            } else if (
+                gate.source == A1GateSource::APPROACH_CHAIN) {
+                reason_prefix = "wait_a1_approach_V";
+            }
             applyActionRequest(
                 v, VehicleAction::STOP,
                 std::string(reason_prefix) +
@@ -2446,7 +2739,10 @@ void RuleEngine::resolveA1ApproachQueue(
 
 void RuleEngine::enforceA1HardExclusion(
     std::vector<VehicleAgent>& vehicles, double dt) {
-    if (!cfg_.use_a1_cycle || a1_service_owner_ < 0) return;
+    if (!cfg_.use_a1_cycle || a1_service_owner_ < 0) {
+        a1_hard_latch_owner_.clear();
+        return;
+    }
 
     VehicleAgent* owner = nullptr;
     for (VehicleAgent& v : vehicles) {
@@ -2465,7 +2761,19 @@ void RuleEngine::enforceA1HardExclusion(
                MissionPhase::WAIT_DROPOFF_TASK)) ||
          (owner->active() && owner->loaded &&
           owner->mission_phase == MissionPhase::TO_B));
-    if (!owner_has_live_transaction) return;
+    if (!owner_has_live_transaction) {
+        a1_hard_latch_owner_.clear();
+        return;
+    }
+
+    for (auto it = a1_hard_latch_owner_.begin();
+         it != a1_hard_latch_owner_.end();) {
+        if (it->second != owner->id) {
+            it = a1_hard_latch_owner_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 
     std::vector<OBB> zone_boxes;
     for (const A1HardZoneRect& r : a1HardZoneRects(mp_)) {
@@ -2491,7 +2799,19 @@ void RuleEngine::enforceA1HardExclusion(
     for (VehicleAgent& v : vehicles) {
         if (v.id == owner->id || !v.active()) continue;
 
+        const auto latch = a1_hard_latch_owner_.find(v.id);
+        if (latch != a1_hard_latch_owner_.end() &&
+            latch->second == owner->id) {
+            applyActionRequest(
+                v, VehicleAction::STOP,
+                "wait_a1_hard_zone_V" +
+                    std::to_string(owner->id),
+                owner->id);
+            continue;
+        }
+
         if (bodyTouchesHardZone(v, v.path_s)) {
+            a1_hard_latch_owner_[v.id] = owner->id;
             applyActionRequest(
                 v, VehicleAction::STOP,
                 "illegal_a1_hard_zone_V" +
@@ -2519,6 +2839,7 @@ void RuleEngine::enforceA1HardExclusion(
             std::max(v.path_s,
                      entry_s - cfg_.a1_stop_margin);
         if (stop_s - v.path_s <= safe_distance) {
+            a1_hard_latch_owner_[v.id] = owner->id;
             applyActionRequest(
                 v, VehicleAction::STOP,
                 "wait_a1_hard_zone_V" +

@@ -82,6 +82,9 @@ public:
 
     bool hasValidOutbound(int slot) const;
     bool hasValidPickupLeg(int slot) const;
+    // Complete fixed A1->B route library used to build the global A1 egress
+    // keep-clear envelope. Invalid legs are omitted.
+    std::vector<PathTrack> validA1ExitTracks() const;
 
     // 简单测试版:该库位是否至少有一个「全程前进(无 REVERSE 段=无尖点)」的可达目标。
     // 用于 initAgents 起点筛选,保证每车都能一把开进某个库位。

@@ -450,6 +450,9 @@ void MarkerPublisher::addA1GateMarkers(
         switch (source) {
             case A1GateSource::FIXED: return "FIXED";
             case A1GateSource::VERTICAL_QUEUE: return "VERT";
+            case A1GateSource::GLOBAL_EXIT_KEEP_CLEAR:
+                return "KEEP-CLEAR";
+            case A1GateSource::HARD_ZONE: return "HARD";
             case A1GateSource::APPROACH_CHAIN: return "APP";
             case A1GateSource::PENDING_EXIT_CHAIN: return "P-EXIT";
             case A1GateSource::ACTIVE_EXIT_CHAIN: return "A-EXIT";
@@ -494,8 +497,13 @@ void MarkerPublisher::addA1GateMarkers(
         label.scale.z = 0.052;
         label.color = color;
         std::ostringstream text;
-        text << "A1 GATE V" << gate.waiter_id << "->V" << gate.owner_id
-             << " " << sourceName(gate.source)
+        if (gate.waiter_id == gate.owner_id) {
+            text << "A1 HEAD V" << gate.waiter_id;
+        } else {
+            text << "A1 GATE V" << gate.waiter_id
+                 << "->V" << gate.owner_id;
+        }
+        text << " " << sourceName(gate.source)
              << " A" << gate.approach_zone_count
              << "/D" << gate.departure_zone_count;
         label.text = text.str();

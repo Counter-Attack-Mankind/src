@@ -101,6 +101,10 @@ public:
         if (cfg_.precompute_task_filter) {
             allocator_->buildCache();
         }
+        if (cfg_.use_a1_cycle) {
+            rule_engine_->setA1ExitTracks(
+                allocator_->validA1ExitTracks());
+        }
         initAgents();
         visited_slots_.assign(map_->slots().size(), false);
         one_shot_done_.assign(agents_.size(), false);
@@ -149,6 +153,8 @@ private:
     using VehicleAction = forklift_planner::multi_vehicle::VehicleAction;
     using VehicleMode = forklift_planner::multi_vehicle::VehicleMode;
     using A1GateSource = forklift_planner::multi_vehicle::A1GateSource;
+    using A1ControlState =
+        forklift_planner::multi_vehicle::A1ControlState;
     using MissionPhase = forklift_planner::multi_vehicle::MissionPhase;
     using LegTargetKind = forklift_planner::multi_vehicle::LegTargetKind;
 
@@ -202,6 +208,17 @@ private:
             case MissionPhase::WAIT_DROPOFF_TASK: return "WAIT_DROPOFF_TASK";
             case MissionPhase::TO_B: return "TO_B";
             case MissionPhase::UNLOAD_DWELL: return "UNLOAD_DWELL";
+        }
+        return "UNKNOWN";
+    }
+
+    const char* a1ControlStateName(A1ControlState state) const {
+        switch (state) {
+            case A1ControlState::IDLE: return "IDLE";
+            case A1ControlState::CLEARING: return "CLEARING";
+            case A1ControlState::QUEUED: return "QUEUED";
+            case A1ControlState::ACTIVE: return "ACTIVE";
+            case A1ControlState::EGRESS: return "EGRESS";
         }
         return "UNKNOWN";
     }
@@ -1652,9 +1669,12 @@ private:
         std::snprintf(
             header, sizeof(header),
             "[coord_diag][cycle] tick=%llu sim_t=%.2f ring=%s "
-            "a1_reserved=V%d a1_egress=V%d a1_owner=V%d",
+            "a1_state=%s a1_reserved=V%d a1_egress=V%d "
+            "a1_owner=V%d",
             static_cast<unsigned long long>(tick_count_), sim_time_,
-            ring.c_str(), rule_engine_->a1ReservedOwner(),
+            ring.c_str(),
+            a1ControlStateName(rule_engine_->a1ControlState()),
+            rule_engine_->a1ReservedOwner(),
             rule_engine_->a1EgressOwner(),
             rule_engine_->a1ServiceOwner());
         coordLog(header);
@@ -1668,6 +1688,10 @@ private:
             switch (source) {
                 case A1GateSource::FIXED: return "fixed";
                 case A1GateSource::VERTICAL_QUEUE: return "vertical";
+                case A1GateSource::GLOBAL_EXIT_KEEP_CLEAR:
+                    return "global_exit_keep_clear";
+                case A1GateSource::HARD_ZONE:
+                    return "hard_zone";
                 case A1GateSource::APPROACH_CHAIN: return "approach_chain";
                 case A1GateSource::PENDING_EXIT_CHAIN:
                     return "pending_exit_chain";
