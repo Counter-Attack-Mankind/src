@@ -14,6 +14,7 @@
 #include <numeric>
 #include <random>
 #include <set>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -214,6 +215,53 @@ private:
             case A1ControlState::EGRESS: return "EXITING";
         }
         return "UNKNOWN";
+    }
+
+    void logA1StateTransition() {
+        std::ostringstream key;
+        key << static_cast<int>(rule_engine_->a1ControlState()) << ":"
+            << rule_engine_->a1ServiceOwner() << ":"
+            << rule_engine_->a1AdmissionCandidate() << ":"
+            << rule_engine_->a1AdmissionBlocker() << ":";
+        for (int id : rule_engine_->a1RequestQueue()) key << id << ",";
+        key << ":";
+        for (const VehicleAgent& v : agents_) {
+            key << v.id << "/" << static_cast<int>(v.mode) << "/"
+                << static_cast<int>(v.mission_phase) << ";";
+        }
+        if (key.str() == last_a1_state_diag_) return;
+        last_a1_state_diag_ = key.str();
+
+        std::ostringstream out;
+        out << "[A1_STATE] state="
+            << a1ControlStateName(rule_engine_->a1ControlState())
+            << " owner=V" << rule_engine_->a1ServiceOwner()
+            << " candidate=V" << rule_engine_->a1AdmissionCandidate()
+            << " blocker=V" << rule_engine_->a1AdmissionBlocker()
+            << " queue=[";
+        const auto& queue = rule_engine_->a1RequestQueue();
+        for (size_t i = 0; i < queue.size(); ++i) {
+            if (i > 0) out << ",";
+            out << "V" << queue[i];
+        }
+        out << "]";
+        const auto& transaction = rule_engine_->a1Transaction();
+        out << " tx_valid=" << (transaction.valid() ? 1 : 0)
+            << " tx_target=B" << transaction.frozen_target_slot
+            << " entry_s=" << transaction.admission_stop_s
+            << " release_s=" << transaction.release_s
+            << " vehicles={";
+        for (size_t i = 0; i < agents_.size(); ++i) {
+            if (i > 0) out << ";";
+            const VehicleAgent& v = agents_[i];
+            out << "V" << v.id << ":" << missionPhaseName(v.mission_phase)
+                << ",s=" << v.path_s << "/" << v.track.length()
+                << ",reason=" << v.reason;
+        }
+        out << "}";
+        const std::string line = out.str();
+        coordLog(line);
+        std::cerr << line << "\n" << std::flush;
     }
 
     void initAgents() {
@@ -1635,6 +1683,7 @@ private:
                     if (!one_shot_published_) one_shot_published_ = publishFullTrajectories();
                     updateDwellAndTasks(dt);        //检测到没有发送轨迹，一次性发布整条轨迹
                     rule_engine_->decide(agents_, dt);
+                    logA1StateTransition();
                 }
                 realAdvance(dt);        //根据真实车身位置重新定位
                 logCoordinationCycleDiagnostics();
@@ -1649,6 +1698,7 @@ private:
         //3. 实车模式----滚动时域规划
             updateDwellAndTasks(dt);    //更新任务---任务   dt 
             rule_engine_->decide(agents_, dt);      //规则调度---决策
+            logA1StateTransition();
             realAdvance(dt);        //  用真实位姿更新车辆状态---执行
             logCoordinationCycleDiagnostics();
             if (tick_count_ % 5 == 0) runDeadlockRecovery();        //5*0.1=0.5s进行一次死锁检测
@@ -1671,6 +1721,7 @@ private:
         //从当前仿真状态的一拍推进，相当于系统真实时间向前走了一个dt
         updateDwellAndTasks(dt);        //更新任务，到点停留并且分配新任务，生成路径
         rule_engine_->decide(agents_, dt);      //多车协调决策，分配速度
+        logA1StateTransition();
         advanceVehicles(dt);            //仿真推进
         logCoordinationCycleDiagnostics();
 
@@ -2169,6 +2220,7 @@ private:
     int target_only_ = -1;  // realbridge debug: -1 = all vehicles, otherwise control only this id
     std::string coord_log_file_;
     std::ofstream coord_log_;
+    std::string last_a1_state_diag_;
 
     // ── 实车模式(real_mode)I/O ──────────────────────────────────────────────
     ros::Subscriber object_sub_;                       // /object 动捕位姿(mm)
@@ -2503,6 +2555,7 @@ public:
             sim_time_ += dt;
             updateDwellAndTasks(dt);
             rule_engine_->decide(agents_, dt);
+            logA1StateTransition();
             const unsigned long long guards_before = hard_guard_events_;
             advanceVehicles(dt);
             logCoordinationCycleDiagnostics();

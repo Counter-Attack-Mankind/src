@@ -52,6 +52,14 @@ enum class A1ReleaseKind {
     LOCAL_ROW1_DOCK,
 };
 
+enum class A1TransactionInvalidReason {
+    NONE,
+    CANDIDATE_STATE,
+    ADMISSION_BOUNDARY,
+    EXIT_PATH,
+    RELEASE_BOUNDARY,
+};
+
 struct A1TransactionPlan {
     int owner_id = -1;
     int frozen_target_slot = -1;
@@ -62,6 +70,8 @@ struct A1TransactionPlan {
     double release_s = 0.0;
     A1AdmissionSide admission_side = A1AdmissionSide::NONE;
     A1ReleaseKind release_kind = A1ReleaseKind::NONE;
+    A1TransactionInvalidReason invalid_reason =
+        A1TransactionInvalidReason::NONE;
 
     bool valid() const {
         return owner_id >= 0 &&
@@ -184,6 +194,12 @@ public:
     }
     int a1AdmissionBlocker() const { return a1_admission_blocker_; }
     A1ControlState a1ControlState() const { return a1_control_state_; }
+    const std::vector<int>& a1RequestQueue() const {
+        return a1_request_queue_;
+    }
+    const A1TransactionPlan& a1Transaction() const {
+        return a1_transaction_;
+    }
 
 private:
     struct ConflictZone {

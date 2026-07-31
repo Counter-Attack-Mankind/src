@@ -1,7 +1,7 @@
 <launch>
   <!-- RViz A1-cycle patrol simulation (1-8 vehicles). -->
 
-  <arg name="vehicle_count" default="4"/>
+  <arg name="vehicle_count" default="2"/>
   <arg name="start_slots" default="[38, 20, 36, 35, 56, 40, 57, 21]"/>
   <arg name="target_slots" default="[9, 10, 8, 41, 52, 55, 42, 64]"/>
   <arg name="one_shot" default="false"/>

@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <sstream>
@@ -55,6 +57,22 @@ const char* a1ReleaseKindName(A1ReleaseKind kind) {
         case A1ReleaseKind::LOCAL_ROW1_DOCK:
             return "LOCAL_ROW1_DOCK";
         case A1ReleaseKind::NONE:
+        default:
+            return "NONE";
+    }
+}
+
+const char* a1InvalidReasonName(A1TransactionInvalidReason reason) {
+    switch (reason) {
+        case A1TransactionInvalidReason::CANDIDATE_STATE:
+            return "CANDIDATE_STATE";
+        case A1TransactionInvalidReason::ADMISSION_BOUNDARY:
+            return "ADMISSION_BOUNDARY";
+        case A1TransactionInvalidReason::EXIT_PATH:
+            return "EXIT_PATH";
+        case A1TransactionInvalidReason::RELEASE_BOUNDARY:
+            return "RELEASE_BOUNDARY";
+        case A1TransactionInvalidReason::NONE:
         default:
             return "NONE";
     }
@@ -436,7 +454,26 @@ double RuleEngine::a1AdmissionStopS(
             break;
         }
     }
-    if (!std::isfinite(first_s)) return first_s;
+    if (!std::isfinite(first_s)) {
+        const RoughWp start = vehicle.track.poseAtS(0.0);
+        const RoughWp finish =
+            vehicle.track.poseAtS(vehicle.track.length());
+        // Top-row B slots start on the A1 side of the horizontal admission
+        // line, so their short B->A1 paths cannot cross either red segment.
+        // Treat path activation at the slot as a virtual admission boundary:
+        // ownership is therefore required before the vehicle starts moving.
+        // This is geometric and deliberately does not depend on slot numbers.
+        if (start.y > queue_y + 1e-9 &&
+            finish.y > queue_y + 1e-9) {
+            first_s = 0.0;
+            first_side =
+                start.x <= 0.5 * mp_.field_width
+                    ? A1AdmissionSide::LEFT
+                    : A1AdmissionSide::RIGHT;
+        } else {
+            return first_s;
+        }
+    }
     if (side != nullptr) *side = first_side;
     return std::max(0.0, first_s - cfg_.a1_stop_margin);
 }
@@ -447,6 +484,8 @@ A1TransactionPlan RuleEngine::buildA1TransactionPlan(
     if (!candidate.active() ||
         candidate.mission_phase != MissionPhase::TO_A1 ||
         !candidate.hasPendingDropoff()) {
+        plan.invalid_reason =
+            A1TransactionInvalidReason::CANDIDATE_STATE;
         return plan;
     }
 
@@ -461,11 +500,16 @@ A1TransactionPlan RuleEngine::buildA1TransactionPlan(
         a1AdmissionStopS(candidate, &plan.admission_side);
     if (!std::isfinite(plan.admission_stop_s) ||
         plan.admission_side == A1AdmissionSide::NONE) {
-        return A1TransactionPlan{};
+        plan.invalid_reason =
+            A1TransactionInvalidReason::ADMISSION_BOUNDARY;
+        return plan;
     }
 
     const PathTrack& exit = candidate.pending_dropoff_track;
-    if (exit.empty()) return A1TransactionPlan{};
+    if (exit.empty()) {
+        plan.invalid_reason = A1TransactionInvalidReason::EXIT_PATH;
+        return plan;
+    }
 
     // The frozen A1->B path is information, not a route-wide reservation.
     // Use it only to find the last local A1 boundary that this exact path
@@ -537,7 +581,9 @@ A1TransactionPlan RuleEngine::buildA1TransactionPlan(
     }
     if (!std::isfinite(last_local_touch) ||
         last_kind == A1ReleaseKind::NONE) {
-        return A1TransactionPlan{};
+        plan.invalid_reason =
+            A1TransactionInvalidReason::RELEASE_BOUNDARY;
+        return plan;
     }
     plan.release_kind = last_kind;
     plan.release_s =
@@ -556,6 +602,8 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
     plan.fixed_stop_s = inf;
     plan.approach_stop_s = inf;
     plan.departure_stop_s = inf;
+    std::vector<ConflictZone> approach_all_zones;
+    std::vector<ConflictZone> departure_all_zones;
 
     auto clipOwnerRange = [](std::vector<ConflictZone> zones,
                              double begin_s, double end_s) {
@@ -607,12 +655,28 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
                                   cfg_.a1_stop_margin));
         }
     };
+    // Arc length only increases, even on reverse-motion path segments. Once
+    // the waiter's complete body has passed a conflict block, that block can
+    // never become relevant again on the current frozen path. Keeping it in
+    // an A1 gate would place the stop line behind the vehicle and stop loaded
+    // outbound traffic for a later owner.
+    auto waiterCleared = [&](const ConflictZone& z) {
+        return waiter.path_s - mp_.body_rear_ext() >
+               z.s_other_exit + 1e-9;
+    };
+    auto discardCleared = [&](std::vector<ConflictZone>* zones) {
+        zones->erase(
+            std::remove_if(zones->begin(), zones->end(), waiterCleared),
+            zones->end());
+    };
 
     if (owner.mission_phase == MissionPhase::TO_A1 &&
         owner.path_gen == transaction.admitted_path_gen) {
+        approach_all_zones = fullConflictZones(owner, waiter);
         plan.approach_zones = clipOwnerRange(
-            fullConflictZones(owner, waiter),
+            approach_all_zones,
             transaction.admission_stop_s, owner.track.length());
+        discardCleared(&plan.approach_zones);
         addStop(plan.approach_zones, &plan.approach_stop_s);
     }
 
@@ -621,17 +685,20 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
             transaction.frozen_pending_path_gen &&
         owner.pending_target_slot ==
             transaction.frozen_target_slot) {
+        departure_all_zones = std::vector<ConflictZone>(
+            pendingDepartureConflictBlocks(owner, waiter));
         plan.departure_zones = clipOwnerRange(
-            std::vector<ConflictZone>(
-                pendingDepartureConflictBlocks(owner, waiter)),
+            departure_all_zones,
             0.0, transaction.release_s);
         plan.departure_uses_pending = true;
     } else if (owner.active() && owner.loaded &&
                owner.mission_phase == MissionPhase::TO_B) {
+        departure_all_zones = fullConflictZones(owner, waiter);
         plan.departure_zones = clipOwnerRange(
-            fullConflictZones(owner, waiter),
+            departure_all_zones,
             0.0, transaction.release_s);
     }
+    discardCleared(&plan.departure_zones);
     addStop(plan.departure_zones, &plan.departure_stop_s);
 
     if (waiter.mission_phase == MissionPhase::TO_A1) {
@@ -640,22 +707,85 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
             a1AdmissionStopS(waiter, &waiter_side);
     }
 
-    // Hold the waiter outside both its own admission boundary and the
-    // current owner's exact local protected prefix. These conflict gates are
-    // clipped at the local release boundary, so they do not restore any
-    // bridge or destination-B reservation.
-    auto consider = [&](double stop_s, A1GateSource source) {
-        if (!std::isfinite(stop_s)) return;
-        if (stop_s < plan.stop_s) {
-            plan.stop_s = stop_s;
-            plan.source = source;
-        }
+    auto selectStop = [&]() {
+        plan.approach_stop_s = inf;
+        plan.departure_stop_s = inf;
+        addStop(plan.approach_zones, &plan.approach_stop_s);
+        addStop(plan.departure_zones, &plan.departure_stop_s);
+        plan.stop_s = inf;
+        auto consider = [&](double stop_s, A1GateSource source) {
+            if (!std::isfinite(stop_s)) return;
+            if (stop_s < plan.stop_s) {
+                plan.stop_s = stop_s;
+                plan.source = source;
+            }
+        };
+        consider(plan.fixed_stop_s, A1GateSource::TURN);
+        consider(plan.approach_stop_s,
+                 A1GateSource::LOCAL_CONFLICT);
+        consider(plan.departure_stop_s,
+                 A1GateSource::LOCAL_CONFLICT);
     };
-    consider(plan.fixed_stop_s, A1GateSource::TURN);
-    consider(plan.approach_stop_s,
-             A1GateSource::LOCAL_CONFLICT);
-    consider(plan.departure_stop_s,
-             A1GateSource::LOCAL_CONFLICT);
+    selectStop();
+
+    // A gate is invalid if the waiter's complete stopped body would occupy
+    // any other owner/waiter conflict block. This is the failure mode where
+    // V0 was told to stop at s=0.846 inside an earlier [0.500,1.050] block on
+    // V1's frozen A1->B route. Add such predecessor blocks to the local chain
+    // and move the gate upstream until its complete envelope is clear.
+    //
+    // A departure block also belongs to this short handoff chain when its
+    // ordinary owner-side braking line lies at/before the A1 release point;
+    // otherwise ordinary arbitration can stop the owner before it is able to
+    // release A1. This protects only the immediate handoff, never the whole
+    // frozen route or destination B.
+    auto alreadyProtected = [&](const ConflictZone& zone,
+                                const std::vector<ConflictZone>& chain) {
+        return conflictZoneInA1Chain(zone, true, chain);
+    };
+    auto appendIfMissing = [&](const ConflictZone& zone,
+                               std::vector<ConflictZone>* chain) {
+        if (waiterCleared(zone)) return false;
+        if (alreadyProtected(zone, *chain)) return false;
+        chain->push_back(zone);
+        return true;
+    };
+    for (const ConflictZone& zone : departure_all_zones) {
+        const double owner_brake_s =
+            std::max(0.0, zone.s_self_enter - mp_.body_front_ext());
+        if (owner_brake_s <= transaction.release_s + 1e-9) {
+            appendIfMissing(zone, &plan.departure_zones);
+        }
+    }
+    selectStop();
+
+    const double waiter_front =
+        mp_.body_front_ext() + cfg_.a1_stop_margin;
+    const double waiter_rear = mp_.body_rear_ext();
+    bool expanded = true;
+    while (expanded && std::isfinite(plan.stop_s)) {
+        expanded = false;
+        auto includeGateBlockingZones =
+            [&](const std::vector<ConflictZone>& all_zones,
+                std::vector<ConflictZone>* chain) {
+                for (const ConflictZone& zone : all_zones) {
+                    const bool stopped_body_overlaps =
+                        plan.stop_s + waiter_front >
+                            zone.s_other_enter + 1e-9 &&
+                        plan.stop_s - waiter_rear <
+                            zone.s_other_exit - 1e-9;
+                    if (stopped_body_overlaps &&
+                        appendIfMissing(zone, chain)) {
+                        expanded = true;
+                    }
+                }
+            };
+        includeGateBlockingZones(
+            approach_all_zones, &plan.approach_zones);
+        includeGateBlockingZones(
+            departure_all_zones, &plan.departure_zones);
+        if (expanded) selectStop();
+    }
     return plan;
 }
 
@@ -1393,6 +1523,40 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 return v.path_s - rear_ext > sx;
             };
 
+            // A WAITING candidate has no A1 ownership yet. When admission is
+            // blocked by an incumbent, the same incumbent must also own this
+            // pair's ordinary orange reservation until it clears. Otherwise
+            // A1 says "candidate waits for incumbent" while orange arbitration
+            // says "incumbent waits for candidate", forming a two-node cycle.
+            const bool blocker_is_a1_requester =
+                std::find(a1_request_queue_.begin(),
+                          a1_request_queue_.end(),
+                          a1_admission_blocker_) !=
+                a1_request_queue_.end();
+            const bool admission_clearance_pair =
+                a1_service_owner_ < 0 &&
+                a1_admission_candidate_ >= 0 &&
+                a1_admission_blocker_ >= 0 &&
+                !blocker_is_a1_requester &&
+                ((a.id == a1_admission_candidate_ &&
+                  b.id == a1_admission_blocker_) ||
+                 (b.id == a1_admission_candidate_ &&
+                  a.id == a1_admission_blocker_));
+            if (admission_clearance_pair) {
+                const bool blocker_is_a =
+                    a.id == a1_admission_blocker_;
+                const bool blocker_committed =
+                    blocker_is_a ? a_committed : b_committed;
+                const bool candidate_committed =
+                    blocker_is_a ? b_committed : a_committed;
+                // Never flip an already-entered candidate underneath it. In
+                // the normal case the incumbent is inside, or both are still
+                // upstream, so selecting the incumbent is safe and stable.
+                if (blocker_committed || !candidate_committed) {
+                    commit_owner_[pkey] = a1_admission_blocker_;
+                }
+            }
+
             // All A1-owned blocks were removed above. Any blocks left here are
             // outside the A1 domain and must retain ordinary orange ownership;
             // never rewrite their reservation merely because one endpoint is
@@ -1751,6 +1915,8 @@ void RuleEngine::resolveA1LocalService(
     a1_gate_markers_.clear();
     a1_admission_candidate_ = -1;
     a1_admission_blocker_ = -1;
+    std::ostringstream a1_rviz_warn;
+    bool has_a1_rviz_warn = false;
     auto clearTransaction = [&]() {
         a1_service_owner_ = -1;
         a1_transaction_ = A1TransactionPlan{};
@@ -1835,6 +2001,13 @@ void RuleEngine::resolveA1LocalService(
                 return v == nullptr || !isApproaching(*v);
             }),
         a1_request_queue_.end());
+    // Register once the complete B->A1 and frozen A1->B transaction exists.
+    // A fixed distance-to-entry threshold is too late for routes whose first
+    // ordinary pair conflict lies farther upstream: one vehicle can become
+    // committed to that orange block before the A1 candidate even exists,
+    // making the required priority impossible to switch safely. Registration
+    // is only queue bookkeeping; protection remains limited to the local A1
+    // chain after ownership is granted.
     std::vector<int> newly_requested;
     for (VehicleAgent& v : vehicles) {
         if (!isApproaching(v)) continue;
@@ -1843,16 +2016,45 @@ void RuleEngine::resolveA1LocalService(
         if (!candidate.valid()) {
             ROS_ERROR_THROTTLE(
                 2.0,
-                "[multi_patrol][A1 geometry] V%d has no valid "
-                "admission/release boundary for B%d",
-                v.id, v.pending_target_slot);
+                "[multi_patrol][A1 boundary] V%d route=B%d->A1->B%d "
+                "invalid=%s approach_len=%.3f admission_s=%.3f "
+                "admission_side=%d exit_len=%.3f release_s=%.3f "
+                "release_kind=%s path_gen=%d pending_gen=%d",
+                v.id, v.current_slot, v.pending_target_slot,
+                a1InvalidReasonName(candidate.invalid_reason),
+                v.track.length(), candidate.admission_stop_s,
+                static_cast<int>(candidate.admission_side),
+                v.pending_dropoff_track.length(), candidate.release_s,
+                a1ReleaseKindName(candidate.release_kind),
+                v.path_gen, v.pending_path_gen);
+            using Clock = std::chrono::steady_clock;
+            static Clock::time_point last_boundary_print =
+                Clock::time_point::min();
+            const Clock::time_point wall_now = Clock::now();
+            if (last_boundary_print == Clock::time_point::min() ||
+                wall_now - last_boundary_print >=
+                    std::chrono::seconds(1)) {
+                std::cerr
+                    << "[WARN][A1 boundary terminal] V" << v.id
+                    << " route=B" << v.current_slot << "->A1->B"
+                    << v.pending_target_slot
+                    << " invalid="
+                    << a1InvalidReasonName(candidate.invalid_reason)
+                    << " approach_len=" << v.track.length()
+                    << " admission_s=" << candidate.admission_stop_s
+                    << " admission_side="
+                    << static_cast<int>(candidate.admission_side)
+                    << " exit_len=" << v.pending_dropoff_track.length()
+                    << " release_s=" << candidate.release_s
+                    << " release_kind="
+                    << a1ReleaseKindName(candidate.release_kind)
+                    << " path_gen=" << v.path_gen
+                    << " pending_gen=" << v.pending_path_gen
+                    << "\n" << std::flush;
+                last_boundary_print = wall_now;
+            }
             continue;
         }
-        const double request_s = std::max(
-            0.0, candidate.admission_stop_s -
-                     std::max(cfg_.a1_request_distance,
-                              a1SafeStoppingDistance(v, dt)));
-        if (v.path_s + 0.02 < request_s) continue;
         if (std::find(a1_request_queue_.begin(),
                       a1_request_queue_.end(),
                       v.id) == a1_request_queue_.end()) {
@@ -1954,6 +2156,15 @@ void RuleEngine::resolveA1LocalService(
             a1_admission_candidate_ = candidate->id;
             bool admissible = proposed.valid();
             int blocker = -1;
+            std::ostringstream admission_diag;
+            admission_diag
+                << "[multi_patrol][A1 admission check] candidate=V"
+                << candidate->id
+                << " candidate_s=" << candidate->path_s
+                << " entry_s=" << proposed.admission_stop_s
+                << " valid=" << (proposed.valid() ? 1 : 0)
+                << " invalid="
+                << a1InvalidReasonName(proposed.invalid_reason) << "\n";
             for (VehicleAgent& other : vehicles) {
                 if (!admissible) break;
                 if (other.id == candidate->id || !other.active()) {
@@ -1966,12 +2177,23 @@ void RuleEngine::resolveA1LocalService(
                 const bool departure_clear =
                     zonesCleared(other, gate.departure_zones);
                 if (approach_clear && departure_clear) continue;
-
                 const bool inside =
                     waiterInsideA1Zones(
                         other, gate.approach_zones) ||
                     waiterInsideA1Zones(
                         other, gate.departure_zones);
+                admission_diag
+                    << "  other=V" << other.id
+                    << " s=" << other.path_s
+                    << " stop_s=" << gate.stop_s
+                    << " approach=" << gate.approach_zones.size()
+                    << " departure=" << gate.departure_zones.size()
+                    << " cleared=" << (approach_clear ? 1 : 0)
+                    << "/" << (departure_clear ? 1 : 0)
+                    << " inside=" << (inside ? 1 : 0)
+                    << " stop_need=" << a1SafeStoppingDistance(other, dt)
+                    << " stop_gap=" << (gate.stop_s - other.path_s)
+                    << "\n";
                 if (inside) {
                     admissible = false;
                     blocker = other.id;
@@ -1984,8 +2206,12 @@ void RuleEngine::resolveA1LocalService(
                 if (std::isfinite(gate.stop_s)) {
                     const double distance =
                         gate.stop_s - other.path_s;
+                    const double stopping_travel = std::max(
+                        0.0,
+                        a1SafeStoppingDistance(other, dt) -
+                            cfg_.a1_stop_margin);
                     if (distance + 0.02 <
-                            a1SafeStoppingDistance(other, dt)) {
+                            stopping_travel) {
                         admissible = false;
                         blocker = other.id;
                     }
@@ -2013,6 +2239,17 @@ void RuleEngine::resolveA1LocalService(
                         a1_transaction_.release_kind));
             } else {
                 a1_admission_blocker_ = blocker;
+                using Clock = std::chrono::steady_clock;
+                static Clock::time_point last_admission_print =
+                    Clock::time_point::min();
+                const Clock::time_point wall_now = Clock::now();
+                if (last_admission_print == Clock::time_point::min() ||
+                    wall_now - last_admission_print >=
+                        std::chrono::seconds(1)) {
+                    std::cerr << "[WARN][A1 admission terminal]\n"
+                              << admission_diag.str() << std::flush;
+                    last_admission_print = wall_now;
+                }
             }
         }
     }
@@ -2069,6 +2306,61 @@ void RuleEngine::resolveA1LocalService(
         appendProtectedMarkers(*owner, v, gate);
         if (!std::isfinite(gate.stop_s)) continue;
 
+        if (!has_a1_rviz_warn) {
+            has_a1_rviz_warn = true;
+            a1_rviz_warn
+                << "[multi_patrol][A1 RViz] purple=A1 protected, "
+                   "orange=ordinary crossing/opposing, "
+                   "cyan=same-direction\n"
+                << "  OWNER V" << owner->id
+                << " entry_s=" << a1_transaction_.admission_stop_s
+                << " release_s=" << a1_transaction_.release_s
+                << " release_kind="
+                << a1ReleaseKindName(a1_transaction_.release_kind)
+                << "\n";
+        }
+        const RoughWp gate_pose = v.track.poseAtS(gate.stop_s);
+        a1_rviz_warn
+            << "  GATE label=\"A1 GATE V" << v.id << "->V"
+            << owner->id << " "
+            << (gate.source == A1GateSource::TURN ? "TURN" : "LOCAL")
+            << " A" << gate.approach_zones.size()
+            << "/D" << gate.departure_zones.size() << "\""
+            << " meaning=waiter_V" << v.id << "_waits_for_owner_V"
+            << owner->id
+            << " stop_s=" << gate.stop_s
+            << " xy=(" << gate_pose.x << "," << gate_pose.y << ")"
+            << " candidates{turn=" << gate.fixed_stop_s
+            << ",approach=" << gate.approach_stop_s
+            << ",departure=" << gate.departure_stop_s << "}"
+            << " waiter_now_s=" << v.path_s
+            << " late=" << (v.path_s > gate.stop_s + 0.02 ? 1 : 0)
+            << "\n";
+        auto appendZones = [&](const char* prefix,
+                               const std::vector<ConflictZone>& zones) {
+            for (size_t zone_index = 0; zone_index < zones.size();
+                 ++zone_index) {
+                const ConflictZone& z = zones[zone_index];
+                a1_rviz_warn
+                    << "    " << prefix << zone_index
+                    << " owner_s=[" << z.s_self_enter << ","
+                    << z.s_self_exit << "]"
+                    << " waiter_s=[" << z.s_other_enter << ","
+                    << z.s_other_exit << "]"
+                    << " xy=(" << z.x << "," << z.y << ")"
+                    << " motion=" << (z.self_reverse ? "R" : "F")
+                    << "/" << (z.other_reverse ? "R" : "F")
+                    << " same_dir=" << (z.same_dir ? 1 : 0)
+                    << " waiter_cleared="
+                    << (v.path_s - mp_.body_rear_ext() >
+                                z.s_other_exit + 1e-9
+                            ? 1 : 0)
+                    << "\n";
+            }
+        };
+        appendZones("A", gate.approach_zones);
+        appendZones("D", gate.departure_zones);
+
         addGateMarker(owner->id, v, gate.stop_s,
                       gate.source, &gate);
         const bool inside =
@@ -2091,6 +2383,18 @@ void RuleEngine::resolveA1LocalService(
                     : "wait_a1_local_V" +
                           std::to_string(owner->id),
                 owner->id);
+        }
+    }
+    if (has_a1_rviz_warn) {
+        using Clock = std::chrono::steady_clock;
+        static Clock::time_point last_terminal_print =
+            Clock::time_point::min();
+        const Clock::time_point wall_now = Clock::now();
+        if (last_terminal_print == Clock::time_point::min() ||
+            wall_now - last_terminal_print >= std::chrono::seconds(2)) {
+            std::cerr << "[WARN][A1 terminal]\n"
+                      << a1_rviz_warn.str() << std::flush;
+            last_terminal_print = wall_now;
         }
     }
 }
@@ -2608,6 +2912,46 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt) {
     resolvePairwiseConflicts(vehicles, dt);// 精确几何冲突:交叉协调的唯一权威(§8.6)
     resolveTargetSlotOccupancy(vehicles);  // slot-mouth queueing (spec 6/7)
     enforceForwardClearance(vehicles);     // 普适前向净空兜底:堵分类接缝→防十字楔死
+    if (!conflicts_.empty()) {
+        std::ostringstream rviz_regions;
+        rviz_regions
+            << "[multi_patrol][RViz regions] displayed="
+            << conflicts_.size() << "\n";
+        for (size_t marker_index = 0;
+             marker_index < conflicts_.size(); ++marker_index) {
+            const ConflictMarker& marker = conflicts_[marker_index];
+            const char* color = "orange";
+            const char* cause =
+                "ordinary crossing/opposing mutual exclusion";
+            if (marker.kind == ConflictMarkerKind::A1_PROTECTED) {
+                color = "purple";
+                cause = "current A1 owner protected approach/departure block";
+            } else if (marker.kind ==
+                       ConflictMarkerKind::SAME_DIRECTION) {
+                color = "cyan";
+                cause = "ordinary same-direction following block";
+            }
+            rviz_regions
+                << "  region#" << marker_index
+                << " color=" << color
+                << " pair=V" << marker.vehicle_a
+                << "/V" << marker.vehicle_b
+                << " center=(" << marker.x << "," << marker.y << ")"
+                << " size=(" << marker.scale_x << ","
+                << marker.scale_y << ")"
+                << " cause=" << cause << "\n";
+        }
+        using Clock = std::chrono::steady_clock;
+        static Clock::time_point last_terminal_print =
+            Clock::time_point::min();
+        const Clock::time_point wall_now = Clock::now();
+        if (last_terminal_print == Clock::time_point::min() ||
+            wall_now - last_terminal_print >= std::chrono::seconds(2)) {
+            std::cerr << "[WARN][RViz terminal]\n"
+                      << rviz_regions.str() << std::flush;
+            last_terminal_print = wall_now;
+        }
+    }
     applyRequestedActions(vehicles, dt);
     if (cfg_.enable_cycle_break) breakDeadlockCycles(vehicles);  // spec 16
 
