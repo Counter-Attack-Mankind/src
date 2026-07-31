@@ -1,6 +1,7 @@
 #include "forklift_planner/multi_vehicle/rule_engine.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -43,10 +44,16 @@ struct OverlapSample {
 
 const char* a1ReleaseKindName(A1ReleaseKind kind) {
     switch (kind) {
-        case A1ReleaseKind::CORRIDOR_2_TO_3_BRIDGE_EXIT:
-            return "BRIDGE_2_TO_3_EXIT";
-        case A1ReleaseKind::TARGET_B:
-            return "TARGET_B";
+        case A1ReleaseKind::LOCAL_DOWN_LEFT:
+            return "LOCAL_DOWN_LEFT";
+        case A1ReleaseKind::LOCAL_DOWN_RIGHT:
+            return "LOCAL_DOWN_RIGHT";
+        case A1ReleaseKind::LOCAL_LEFT:
+            return "LOCAL_LEFT";
+        case A1ReleaseKind::LOCAL_RIGHT:
+            return "LOCAL_RIGHT";
+        case A1ReleaseKind::LOCAL_ROW1_DOCK:
+            return "LOCAL_ROW1_DOCK";
         case A1ReleaseKind::NONE:
         default:
             return "NONE";
@@ -460,67 +467,81 @@ A1TransactionPlan RuleEngine::buildA1TransactionPlan(
     const PathTrack& exit = candidate.pending_dropoff_track;
     if (exit.empty()) return A1TransactionPlan{};
 
-    // Determine the protection endpoint from the actual frozen path. The
-    // unique bridge between corridors 2 and 3 is the central row-2 gap:
-    // x=[row2_left_width, row2_left_width+row2_gap], y=[y4,y5].
-    // A path that goes down through it releases when the complete body first
-    // clears its lower edge into corridor 3. A path that never uses this
-    // bridge (the row0-3 case) has no earlier common handoff point and remains
-    // protected all the way to its target B.
-    OBB bridge_exit_line;
-    bridge_exit_line.x =
-        mp_.row2_left_width + 0.5 * mp_.row2_gap;
-    bridge_exit_line.y = mp_.y4();
-    bridge_exit_line.theta = 0.0;
-    bridge_exit_line.half_l = 0.5 * mp_.row2_gap;
-    bridge_exit_line.half_w = 0.002;
+    // The frozen A1->B path is information, not a route-wide reservation.
+    // Use it only to find the last local A1 boundary that this exact path
+    // crosses. Once the complete body clears that boundary, A1 ownership
+    // ends and every later conflict belongs to the ordinary orange rules.
+    const double queue_y = 0.5 * (mp_.y6() + mp_.y7());
+    const double right_x0 =
+        mp_.row1_left_aisle + mp_.row1_shelf_width;
+    const double right_x1 =
+        mp_.field_width - mp_.row1_mini_shelf;
+    auto horizontalLine = [](double x0, double x1, double y) {
+        OBB line;
+        line.x = 0.5 * (x0 + x1);
+        line.y = y;
+        line.theta = 0.0;
+        line.half_l = 0.5 * (x1 - x0);
+        line.half_w = 0.002;
+        return line;
+    };
+    auto verticalLine = [](double x, double y0, double y1) {
+        OBB line;
+        line.x = x;
+        line.y = 0.5 * (y0 + y1);
+        line.theta = 0.5 * 3.14159265358979323846;
+        line.half_l = 0.5 * (y1 - y0);
+        line.half_w = 0.002;
+        return line;
+    };
+    const std::array<std::pair<A1ReleaseKind, OBB>, 5> local_exits{{
+        {A1ReleaseKind::LOCAL_DOWN_LEFT,
+         horizontalLine(0.0, mp_.row1_left_aisle, queue_y)},
+        {A1ReleaseKind::LOCAL_DOWN_RIGHT,
+         horizontalLine(right_x0, right_x1, queue_y)},
+        {A1ReleaseKind::LOCAL_LEFT,
+         verticalLine(mp_.tb_shelf_width, mp_.y7(), mp_.y8())},
+        {A1ReleaseKind::LOCAL_RIGHT,
+         verticalLine(mp_.field_width - mp_.tb_shelf_width,
+                      mp_.y7(), mp_.y8())},
+        {A1ReleaseKind::LOCAL_ROW1_DOCK,
+         horizontalLine(mp_.row1_left_aisle,
+                        mp_.row1_left_aisle +
+                            mp_.row1_shelf_width,
+                        mp_.y7())},
+    }};
 
     constexpr double kScanStep = 0.005;
-    bool crossed_bridge_center = false;
-    double bridge_release_s =
-        std::numeric_limits<double>::infinity();
     const int scan_count = std::max(
         1, static_cast<int>(
                std::ceil(exit.length() / kScanStep)));
-    RoughWp previous = exit.poseAtS(0.0);
-    for (int i = 0; i <= scan_count; ++i) {
-        const double ss = std::min(
-            static_cast<double>(i) * kScanStep,
-            exit.length());
-        const RoughWp pose = exit.poseAtS(ss);
-        if (!crossed_bridge_center && i > 0 &&
-            previous.y >= mp_.y4() && pose.y < mp_.y4()) {
-            const double dy = previous.y - pose.y;
-            const double ratio =
-                dy > 1e-9
-                    ? (previous.y - mp_.y4()) / dy
-                    : 0.0;
-            const double crossing_x =
-                previous.x + ratio * (pose.x - previous.x);
-            if (crossing_x >= mp_.row2_left_width - 1e-9 &&
-                crossing_x <=
-                    mp_.row2_left_width + mp_.row2_gap + 1e-9) {
-                crossed_bridge_center = true;
+    double last_local_touch =
+        -std::numeric_limits<double>::infinity();
+    A1ReleaseKind last_kind = A1ReleaseKind::NONE;
+    for (const auto& boundary : local_exits) {
+        double last_touch =
+            -std::numeric_limits<double>::infinity();
+        for (int i = 0; i <= scan_count; ++i) {
+            const double ss = std::min(
+                static_cast<double>(i) * kScanStep,
+                exit.length());
+            if (overlaps(makeBody(exit.poseAtS(ss), mp_, 0.0),
+                         boundary.second)) {
+                last_touch = ss;
             }
         }
-        const bool touching =
-            overlaps(makeBody(pose, mp_, 0.0), bridge_exit_line);
-        if (crossed_bridge_center && !touching &&
-            pose.y < mp_.y4()) {
-            bridge_release_s = ss;
-            break;
+        if (last_touch > last_local_touch) {
+            last_local_touch = last_touch;
+            last_kind = boundary.first;
         }
-        previous = pose;
     }
-
-    if (std::isfinite(bridge_release_s)) {
-        plan.release_kind =
-            A1ReleaseKind::CORRIDOR_2_TO_3_BRIDGE_EXIT;
-        plan.release_s = bridge_release_s;
-    } else {
-        plan.release_kind = A1ReleaseKind::TARGET_B;
-        plan.release_s = exit.length();
+    if (!std::isfinite(last_local_touch) ||
+        last_kind == A1ReleaseKind::NONE) {
+        return A1TransactionPlan{};
     }
+    plan.release_kind = last_kind;
+    plan.release_s =
+        std::min(exit.length(), last_local_touch + kScanStep);
     return plan;
 }
 
@@ -533,8 +554,6 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
     const double inf = std::numeric_limits<double>::infinity();
     plan.stop_s = inf;
     plan.fixed_stop_s = inf;
-    plan.approach_stop_s = inf;
-    plan.departure_stop_s = inf;
 
     auto clipOwnerRange = [](std::vector<ConflictZone> zones,
                              double begin_s, double end_s) {
@@ -576,23 +595,11 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
         }
         return zones;
     };
-    auto addStop = [&](const std::vector<ConflictZone>& zones,
-                       double* stop_s) {
-        for (const ConflictZone& z : zones) {
-            *stop_s = std::min(
-                *stop_s,
-                std::max(0.0, z.s_other_enter -
-                                  mp_.body_front_ext() -
-                                  cfg_.a1_stop_margin));
-        }
-    };
-
     if (owner.mission_phase == MissionPhase::TO_A1 &&
         owner.path_gen == transaction.admitted_path_gen) {
         plan.approach_zones = clipOwnerRange(
             fullConflictZones(owner, waiter),
             transaction.admission_stop_s, owner.track.length());
-        addStop(plan.approach_zones, &plan.approach_stop_s);
     }
 
     if (owner.hasPendingDropoff() &&
@@ -611,24 +618,22 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
             fullConflictZones(owner, waiter),
             0.0, transaction.release_s);
     }
-    addStop(plan.departure_zones, &plan.departure_stop_s);
-
     if (waiter.mission_phase == MissionPhase::TO_A1) {
         A1AdmissionSide waiter_side = A1AdmissionSide::NONE;
         plan.fixed_stop_s =
             a1AdmissionStopS(waiter, &waiter_side);
     }
 
-    auto consider = [&](double stop_s, A1GateSource source) {
-        if (!std::isfinite(stop_s)) return;
-        if (stop_s < plan.stop_s) {
-            plan.stop_s = stop_s;
-            plan.source = source;
-        }
-    };
-    consider(plan.fixed_stop_s, A1GateSource::TURN);
-    consider(plan.approach_stop_s, A1GateSource::CORRIDOR);
-    consider(plan.departure_stop_s, A1GateSource::CORRIDOR);
+    // A1 is a local service mutex, not a predictor that reserves every
+    // future geometric intersection. Only another A1 requester is held, at
+    // its own physical admission line. The local conflict zones remain in
+    // the plan solely to verify that the area is clear before admission and
+    // to keep ordinary orange arbitration from overriding the active owner
+    // inside the local service prefix.
+    if (std::isfinite(plan.fixed_stop_s)) {
+        plan.stop_s = plan.fixed_stop_s;
+        plan.source = A1GateSource::TURN;
+    }
     return plan;
 }
 
@@ -1861,8 +1866,6 @@ void RuleEngine::resolveA1LocalService(
             owner->path_gen ==
                 a1_transaction_.frozen_exit_path_gen;
         const bool reached_frozen_target =
-            a1_transaction_.release_kind ==
-                A1ReleaseKind::TARGET_B &&
             owner->mode == VehicleMode::DWELL &&
             owner->mission_phase ==
                 MissionPhase::UNLOAD_DWELL &&
@@ -1915,8 +1918,9 @@ void RuleEngine::resolveA1LocalService(
         owner = nullptr;
     }
 
-    // Admit only the FIFO head, and only while every current vehicle has
-    // either cleared the exact local transaction or can still stop before it.
+    // Admit only the FIFO head. The local area must be physically clear, and
+    // every later A1 requester must still be able to stop at its own
+    // admission line. Ordinary loaded traffic creates no future reservation.
     if (owner == nullptr && !a1_request_queue_.empty()) {
         VehicleAgent* candidate =
             findById(a1_request_queue_.front());
@@ -1944,12 +1948,25 @@ void RuleEngine::resolveA1LocalService(
                         other, gate.approach_zones) ||
                     waiterInsideA1Zones(
                         other, gate.departure_zones);
-                const double distance = gate.stop_s - other.path_s;
-                if (inside || !std::isfinite(gate.stop_s) ||
-                    distance + 0.02 <
-                        a1SafeStoppingDistance(other, dt)) {
+                if (inside) {
                     admissible = false;
                     blocker = other.id;
+                    continue;
+                }
+
+                // Another A1 requester must still be able to stop at its own
+                // admission line. Loaded ordinary traffic is not stopped or
+                // treated as a future route reservation; if it has already
+                // cleared the local area, it is unrelated to this admission.
+                if (other.mission_phase == MissionPhase::TO_A1) {
+                    const double distance =
+                        gate.fixed_stop_s - other.path_s;
+                    if (!std::isfinite(gate.fixed_stop_s) ||
+                        distance + 0.02 <
+                            a1SafeStoppingDistance(other, dt)) {
+                        admissible = false;
+                        blocker = other.id;
+                    }
                 }
             }
             if (admissible) {
@@ -2042,11 +2059,8 @@ void RuleEngine::resolveA1LocalService(
             }
             applyActionRequest(
                 v, VehicleAction::STOP,
-                gate.source == A1GateSource::TURN
-                    ? "wait_a1_turn_V" +
-                          std::to_string(owner->id)
-                    : "wait_a1_corridor_V" +
-                          std::to_string(owner->id),
+                "wait_a1_turn_V" +
+                    std::to_string(owner->id),
                 owner->id);
         }
     }

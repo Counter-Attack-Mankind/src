@@ -292,12 +292,12 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
         addBox(zone_id++, r.x0, r.x1, r.y0, r.y1);
     }
 
-    auto addAdmissionLine =
+    auto addAdmissionDownReleaseLine =
         [&](int id, double x0, double x1) {
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
         m.header.stamp = ros::Time::now();
-        m.ns = "a1_admission_line";
+        m.ns = "a1_admission_down_release_line";
         m.id = id;
         m.type = visualization_msgs::Marker::LINE_STRIP;
         m.action = visualization_msgs::Marker::ADD;
@@ -308,29 +308,45 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
         m.points.push_back(pt3(x1, queue_y, 0.026));
         arr.markers.push_back(m);
     };
-    addAdmissionLine(
+    addAdmissionDownReleaseLine(
         0, 0.0, mp_.row1_left_aisle);
-    addAdmissionLine(1, right_x0, right_x1);
+    addAdmissionDownReleaseLine(1, right_x0, right_x1);
 
-    auto addBridgeExitLine = [&]() {
+    auto addSideReleaseLine = [&](int id, double x) {
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
         m.header.stamp = ros::Time::now();
-        m.ns = "a1_bridge_2_to_3_exit_line";
-        m.id = 0;
+        m.ns = "a1_local_side_release_line";
+        m.id = id;
         m.type = visualization_msgs::Marker::LINE_STRIP;
         m.action = visualization_msgs::Marker::ADD;
         m.pose.orientation.w = 1.0;
         m.scale.x = 0.026;
         m.color = edge;
-        m.points.push_back(
-            pt3(mp_.row2_left_width, mp_.y4(), 0.026));
-        m.points.push_back(
-            pt3(mp_.row2_left_width + mp_.row2_gap,
-                mp_.y4(), 0.026));
+        m.points.push_back(pt3(x, mp_.y7(), 0.026));
+        m.points.push_back(pt3(x, mp_.y8(), 0.026));
         arr.markers.push_back(m);
     };
-    addBridgeExitLine();
+    addSideReleaseLine(0, mp_.tb_shelf_width);
+    addSideReleaseLine(
+        1, mp_.field_width - mp_.tb_shelf_width);
+
+    visualization_msgs::Marker row1_release;
+    row1_release.header.frame_id = pp_.frame_id;
+    row1_release.header.stamp = ros::Time::now();
+    row1_release.ns = "a1_local_row1_release_line";
+    row1_release.id = 0;
+    row1_release.type = visualization_msgs::Marker::LINE_STRIP;
+    row1_release.action = visualization_msgs::Marker::ADD;
+    row1_release.pose.orientation.w = 1.0;
+    row1_release.scale.x = 0.026;
+    row1_release.color = edge;
+    row1_release.points.push_back(
+        pt3(mp_.row1_left_aisle, mp_.y7(), 0.026));
+    row1_release.points.push_back(
+        pt3(mp_.row1_left_aisle + mp_.row1_shelf_width,
+            mp_.y7(), 0.026));
+    arr.markers.push_back(row1_release);
 
     visualization_msgs::Marker label;
     label.header.frame_id = pp_.frame_id;

@@ -45,8 +45,11 @@ enum class A1AdmissionSide {
 
 enum class A1ReleaseKind {
     NONE,
-    CORRIDOR_2_TO_3_BRIDGE_EXIT,
-    TARGET_B,
+    LOCAL_DOWN_LEFT,
+    LOCAL_DOWN_RIGHT,
+    LOCAL_LEFT,
+    LOCAL_RIGHT,
+    LOCAL_ROW1_DOCK,
 };
 
 struct A1TransactionPlan {
@@ -232,8 +235,6 @@ private:
         int waiter_id = -1;
         double stop_s = 0.0;
         double fixed_stop_s = 0.0;
-        double approach_stop_s = 0.0;
-        double departure_stop_s = 0.0;
         A1GateSource source = A1GateSource::TURN;
         std::vector<ConflictZone> approach_zones;
         std::vector<ConflictZone> departure_zones;
