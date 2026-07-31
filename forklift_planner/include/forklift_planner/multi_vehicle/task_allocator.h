@@ -52,14 +52,6 @@ public:
                          const std::vector<VehicleAgent>& all);
     bool assignDropoffLeg(VehicleAgent& vehicle,
                           const std::vector<VehicleAgent>& all);
-    // At A1 activation, keep the pre-reserved drop-off only when its complete
-    // fixed path is physically clear of every other current footprint. A
-    // persistent A1-related wait cycle may set force_reselect before arrival.
-    // In either case traverse free B slots and atomically replace only the
-    // pending target/path; no other vehicle or B->A1 track is modified.
-    bool prepareClearDropoffLegAtA1(
-        VehicleAgent& vehicle, const std::vector<VehicleAgent>& all,
-        bool force_reselect = false);
 
     // 前瞻仿真用:快照/恢复分配器持久计数器,使「克隆-空跑」里的再派活不污染真实分配状态。
     struct AllocSnapshot {
@@ -82,9 +74,6 @@ public:
 
     bool hasValidOutbound(int slot) const;
     bool hasValidPickupLeg(int slot) const;
-    // Complete fixed A1->B route library used to build the global A1 egress
-    // keep-clear envelope. Invalid legs are omitted.
-    std::vector<PathTrack> validA1ExitTracks() const;
 
     // 简单测试版:该库位是否至少有一个「全程前进(无 REVERSE 段=无尖点)」的可达目标。
     // 用于 initAgents 起点筛选,保证每车都能一把开进某个库位。
@@ -137,10 +126,6 @@ private:
     bool reserveDropoffLeg(VehicleAgent& vehicle,
                            const std::vector<VehicleAgent>& all);
     bool activateReservedDropoffLeg(VehicleAgent& vehicle);
-    bool dropoffPathClearNow(const VehicleAgent& vehicle,
-                             const PathTrack& path,
-                             const std::vector<VehicleAgent>& all,
-                             int* blocker_id = nullptr) const;
     void rememberTask(VehicleAgent& vehicle, int target);
     bool containsRecent(const std::vector<int>& values, int value) const;
     std::uint64_t deterministicRank(const VehicleAgent& vehicle,

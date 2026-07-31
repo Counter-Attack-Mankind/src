@@ -16,11 +16,6 @@ struct MultiVehicleConfig {
     // hash of (seed, vehicle id, completed-task count, target id).
     std::string task_assignment_mode = "deterministic";
     int task_random_seed = 20260728;
-    // Startup only: release initially staged B->A1 tasks one by one. Once a
-    // vehicle's first release time has passed, all later tasks are unaffected.
-    // Set <= 0 to disable.
-    double initial_dispatch_interval = 2.0;
-
     double nominal_speed = 0.20;
     double max_speed = 0.26;
     double max_accel = 0.20;
@@ -31,14 +26,8 @@ struct MultiVehicleConfig {
     double dwell_time = 20.0;       // sleep time
     double pickup_dwell_time = 5.0; // A1 pickup operation
     double unload_dwell_time = 5.0; // B-slot unload operation
-    // Only the final A1 transaction is serialized. Vehicles may travel from B
-    // concurrently. A cached future A1->B leg may create an early scheduling
-    // hint, but active A1 motion control starts only inside this distance.
+    // Distance before the actual admission line at which a vehicle joins FIFO.
     double a1_request_distance = 1.50;
-    double a1_queue_hold_distance = 1.10;  // fallback when no earlier gate
-    // Minimum owner-side anchor; release waits for rear clearance of the full
-    // connected departure chain, not just this scalar distance.
-    double a1_exit_release_distance = 0.75;
     // Total decision/control latency used by every A1 admission and gate
     // braking check. The current control dt is used when it is larger.
     double a1_control_delay = 0.20;

@@ -203,9 +203,7 @@ void MarkerPublisher::addLabelMarker(visualization_msgs::MarkerArray& arr,
     m.scale.z = 0.070;
     m.color = v.color;
     m.text = "V" + std::to_string(v.id) + " " + actionName(v.action);
-    if (v.mode == VehicleMode::WAIT_DISPATCH) {
-        m.text += " WAIT_B";
-    } else if (v.mode == VehicleMode::DWELL) {
+    if (v.mode == VehicleMode::DWELL) {
         m.text += " DWELL";
     } else if (v.loaded) {
         m.text += " L";
@@ -259,8 +257,8 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
     visualization_msgs::MarkerArray& arr) const {
     if (!cfg_.use_a1_cycle) return;
 
-    // The hard exclusion marker uses the exact same rectangles as the rule
-    // engine. It is deliberately red-orange and distinct from conflict zones.
+    // Static local loading throat. The active owner's exact approach/exit
+    // prefix is shown separately by protected conflict markers.
     const double queue_y = 0.5 * (mp_.y6() + mp_.y7());
     const double right_x0 = mp_.row1_left_aisle + mp_.row1_shelf_width;
     const double right_x1 = mp_.field_width - mp_.row1_mini_shelf;
@@ -290,15 +288,16 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
         arr.markers.push_back(m);
     };
     int zone_id = 0;
-    for (const A1HardZoneRect& r : a1HardZoneRects(mp_)) {
+    for (const A1ServiceZoneRect& r : a1ServiceZoneRects(mp_)) {
         addBox(zone_id++, r.x0, r.x1, r.y0, r.y1);
     }
 
-    auto addQueueLine = [&](int id, double x0, double x1) {
+    auto addAdmissionDownReleaseLine =
+        [&](int id, double x0, double x1) {
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
         m.header.stamp = ros::Time::now();
-        m.ns = "a1_service_queue_line";
+        m.ns = "a1_admission_down_release_line";
         m.id = id;
         m.type = visualization_msgs::Marker::LINE_STRIP;
         m.action = visualization_msgs::Marker::ADD;
@@ -309,8 +308,27 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
         m.points.push_back(pt3(x1, queue_y, 0.026));
         arr.markers.push_back(m);
     };
-    addQueueLine(0, 0.0, mp_.row1_left_aisle);
-    addQueueLine(1, right_x0, right_x1);
+    addAdmissionDownReleaseLine(
+        0, 0.0, mp_.row1_left_aisle);
+    addAdmissionDownReleaseLine(1, right_x0, right_x1);
+
+    auto addReleaseLine = [&](int id, double x) {
+        visualization_msgs::Marker m;
+        m.header.frame_id = pp_.frame_id;
+        m.header.stamp = ros::Time::now();
+        m.ns = "a1_service_release_line";
+        m.id = id;
+        m.type = visualization_msgs::Marker::LINE_STRIP;
+        m.action = visualization_msgs::Marker::ADD;
+        m.pose.orientation.w = 1.0;
+        m.scale.x = 0.026;
+        m.color = edge;
+        m.points.push_back(pt3(x, mp_.y7(), 0.026));
+        m.points.push_back(pt3(x, mp_.y8(), 0.026));
+        arr.markers.push_back(m);
+    };
+    addReleaseLine(0, mp_.tb_shelf_width);
+    addReleaseLine(1, mp_.field_width - mp_.tb_shelf_width);
 
     visualization_msgs::Marker label;
     label.header.frame_id = pp_.frame_id;
@@ -326,7 +344,7 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
     label.pose.orientation.w = 1.0;
     label.scale.z = 0.085;
     label.color = edge;
-    label.text = "A1 HARD EXCLUSION";
+    label.text = "A1 LOCAL SERVICE";
     arr.markers.push_back(label);
 }
 
@@ -448,14 +466,8 @@ void MarkerPublisher::addA1GateMarkers(
     int marker_id = 0;
     auto sourceName = [](A1GateSource source) {
         switch (source) {
-            case A1GateSource::FIXED: return "FIXED";
-            case A1GateSource::VERTICAL_QUEUE: return "VERT";
-            case A1GateSource::GLOBAL_EXIT_KEEP_CLEAR:
-                return "KEEP-CLEAR";
-            case A1GateSource::HARD_ZONE: return "HARD";
-            case A1GateSource::APPROACH_CHAIN: return "APP";
-            case A1GateSource::PENDING_EXIT_CHAIN: return "P-EXIT";
-            case A1GateSource::ACTIVE_EXIT_CHAIN: return "A-EXIT";
+            case A1GateSource::TURN: return "TURN";
+            case A1GateSource::CORRIDOR: return "CORRIDOR";
         }
         return "?";
     };

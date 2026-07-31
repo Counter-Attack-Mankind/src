@@ -588,21 +588,6 @@ TaskPlanCache TaskAllocator::makeA1CycleTaskPlan(int src_id,
     return out;
 }
 
-std::vector<PathTrack> TaskAllocator::validA1ExitTracks() const {
-    ensureA1LegCache();
-    std::vector<PathTrack> tracks;
-    tracks.reserve(a1_to_b_leg_cache_.size());
-    for (size_t id = 0; id < a1_to_b_leg_cache_.size(); ++id) {
-        if (taskTargetDisabled(static_cast<int>(id))) continue;
-        const DepotLegCache& leg = a1_to_b_leg_cache_[id];
-        if (!leg.ready || !leg.valid || leg.path.size() < 2) continue;
-        PathTrack track;
-        track.set(leg.path);
-        if (!track.empty()) tracks.push_back(track);
-    }
-    return tracks;
-}
-
 TaskPlanCache TaskAllocator::makeTaskPlanFromPose(const VehicleAgent& vehicle,
                                                   int target_id) const {
     TaskPlanCache out;
@@ -1332,147 +1317,6 @@ bool TaskAllocator::reserveDropoffLeg(
     return false;
 }
 
-bool TaskAllocator::dropoffPathClearNow(
-    const VehicleAgent& vehicle, const PathTrack& path,
-    const std::vector<VehicleAgent>& all, int* blocker_id) const {
-    if (blocker_id != nullptr) *blocker_id = -1;
-    if (path.empty()) return false;
-
-    // Split the configured clearance margin between both bodies. Minkowski
-    // separation is therefore exactly one conflict_margin, not twice it.
-    const double half_margin = 0.5 * std::max(0.0, cfg_.conflict_margin);
-    std::vector<std::pair<int, OBB>> occupied;
-    occupied.reserve(all.size());
-    for (const VehicleAgent& other : all) {
-        if (other.id == vehicle.id) continue;
-        occupied.emplace_back(
-            other.id,
-            makeBody(vehicleCurrentPose(other), mp_, half_margin));
-    }
-
-    // This runs only at A1 task activation/retry, so checking the complete
-    // fixed A1->B route is inexpensive and avoids merely moving the blockage
-    // from the first corridor to the next bend. Moving vehicles are represented
-    // by their physical position now; their future interaction remains the
-    // responsibility of the normal rolling-horizon coordinator.
-    constexpr double kSampleDs = 0.025;
-    for (double s = 0.0; s <= path.length() + 1e-9;
-         s += kSampleDs) {
-        const OBB candidate = makeBody(
-            path.poseAtS(std::min(s, path.length())), mp_, half_margin);
-        for (const auto& item : occupied) {
-            if (!overlaps(candidate, item.second)) continue;
-            if (blocker_id != nullptr) *blocker_id = item.first;
-            return false;
-        }
-    }
-    return true;
-}
-
-bool TaskAllocator::prepareClearDropoffLegAtA1(
-    VehicleAgent& vehicle, const std::vector<VehicleAgent>& all,
-    bool force_reselect) {
-    if (!cfg_.use_a1_cycle) return false;
-    ensureA1LegCache();
-
-    const bool prefer_no_arc = cfg_.skip_arc_fallback_paths;
-    const int old_target = vehicle.pending_target_slot;
-    int old_blocker = -1;
-    const bool old_path_clear =
-        vehicle.hasPendingDropoff() &&
-        !taskTargetDisabled(old_target) &&
-        dropoffPathClearNow(vehicle, vehicle.pending_dropoff_track, all,
-                            &old_blocker);
-    if (!force_reselect && old_path_clear) {
-        return true;
-    }
-
-    const int n = static_cast<int>(map_.slots().size());
-    auto orderedCandidates = [&](bool require_no_arc) {
-        std::vector<int> candidates;
-        candidates.reserve(static_cast<size_t>(n));
-        for (int target = 0; target < n; ++target) {
-            if (taskTargetDisabled(target) ||
-                target == vehicle.current_slot ||
-                target == old_target ||
-                slotReservedByOther(vehicle, all, target)) {
-                continue;
-            }
-            const DepotLegCache& leg =
-                a1_to_b_leg_cache_.at(static_cast<size_t>(target));
-            if (!leg.ready || !leg.valid || leg.path.empty()) continue;
-            if (require_no_arc && leg.info.used_arc_fallback) continue;
-            candidates.push_back(target);
-        }
-        if (cfg_.task_assignment_mode == "random") {
-            std::random_device rd;
-            std::mt19937 rng(rd());
-            std::shuffle(candidates.begin(), candidates.end(), rng);
-        } else {
-            std::sort(
-                candidates.begin(), candidates.end(),
-                [&](int lhs, int rhs) {
-                    const std::uint64_t lhs_rank =
-                        deterministicRank(vehicle, lhs);
-                    const std::uint64_t rhs_rank =
-                        deterministicRank(vehicle, rhs);
-                    return lhs_rank != rhs_rank ? lhs_rank < rhs_rank
-                                                : lhs < rhs;
-                });
-        }
-        return candidates;
-    };
-
-    int checked = 0;
-    int last_blocker = old_blocker;
-    auto tryCandidates = [&](bool require_no_arc) {
-        const std::vector<int> candidates =
-            orderedCandidates(require_no_arc);
-        for (int target : candidates) {
-            const DepotLegCache& leg =
-                a1_to_b_leg_cache_.at(static_cast<size_t>(target));
-            PathTrack candidate_path;
-            candidate_path.set(leg.path);
-            int blocker = -1;
-            ++checked;
-            if (!dropoffPathClearNow(
-                    vehicle, candidate_path, all, &blocker)) {
-                last_blocker = blocker;
-                continue;
-            }
-
-            vehicle.pending_target_slot = target;
-            vehicle.pending_dropoff_track = std::move(candidate_path);
-            ++vehicle.pending_path_gen;
-            ROS_WARN(
-                "[multi_patrol][A1 task reroute] V%d replaced pending "
-                "A1->B%d (blocker=V%d forced=%d) with clear A1->B%d "
-                "after checking %d alternatives "
-                "(len=%.3f pending_gen=%d)",
-                vehicle.id, old_target, old_blocker,
-                force_reselect ? 1 : 0, target, checked,
-                vehicle.pending_dropoff_track.length(),
-                vehicle.pending_path_gen);
-            return true;
-        }
-        return false;
-    };
-
-    if (tryCandidates(prefer_no_arc)) return true;
-    if (prefer_no_arc && !cfg_.reject_curvature_discontinuity &&
-        tryCandidates(false)) {
-        return true;
-    }
-
-    ROS_WARN_THROTTLE(
-        1.0,
-        "[multi_patrol][A1 task blocked] V%d stays at A1: pending "
-        "A1->B%d blocked_by=V%d and no physically clear free slot/path "
-        "exists after %d checks (last_blocker=V%d)",
-        vehicle.id, old_target, old_blocker, checked, last_blocker);
-    return false;
-}
-
 bool TaskAllocator::activateReservedDropoffLeg(VehicleAgent& vehicle) {
     if (!vehicle.hasPendingDropoff() ||
         taskTargetDisabled(vehicle.pending_target_slot)) {
@@ -1543,15 +1387,20 @@ bool TaskAllocator::tryPlanFromA1(VehicleAgent& vehicle, int target,
 bool TaskAllocator::assignDropoffLeg(
     VehicleAgent& vehicle, const std::vector<VehicleAgent>& all) {
     if (!cfg_.use_a1_cycle) return false;
-    // Normal path: the destination and A1->B path were reserved before the
-    // vehicle left its source B slot. A fallback reservation is retained only
-    // for old/restored states created before this invariant existed.
-    if ((vehicle.hasPendingDropoff() ||
-         reserveDropoffLeg(vehicle, all)) &&
+    (void)all;
+    // The destination and A1->B path must already have been reserved before
+    // B->A1 dispatch. Never invent or replace a path while the A1 transaction
+    // is loading or exiting.
+    if (vehicle.hasPendingDropoff() &&
         activateReservedDropoffLeg(vehicle)) {
         return true;
     }
 
+    ROS_ERROR_THROTTLE(
+        2.0,
+        "[multi_patrol][A1 invariant] V%d reached pickup completion "
+        "without its pre-reserved A1->B path",
+        vehicle.id);
     vehicle.mode = VehicleMode::DWELL;
     vehicle.action = VehicleAction::STOP;
     vehicle.requested_action = VehicleAction::STOP;

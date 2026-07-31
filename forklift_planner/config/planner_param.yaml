@@ -34,8 +34,6 @@ forklift_planner:
     #   deterministic 固定种子按“车辆+任务序号”独立排序，适合版本对比复现。
     task_assignment_mode: "deterministic"
     task_random_seed: 20260728
-    # 仅程序启动后的第一轮生效：V0立即发车，其余车辆每隔2s依次解除库位等待。
-    initial_dispatch_interval: 2.0
     # 仅用于随机起始库位；与上面的任务目标随机序列相互独立。
     random_seed: 2026
 
@@ -64,8 +62,6 @@ forklift_planner:
     pickup_dwell_time: 5.0        # s，A1取货作业时间
     unload_dwell_time: 5.0        # s，B库位卸货作业时间
     a1_request_distance: 1.50     # m，A1正式接管边界；边界外的提前预约只作调度提示，不发停车命令
-    a1_queue_hold_distance: 1.10  # m，无竖直候车段/受保护冲突链时的后备排队距离
-    a1_exit_release_distance: 0.75 # m，A1离场保护链的最小锚定长度；实际服务权保持到车尾清出整条连通冲突链
     a1_control_delay: 0.20        # s，A1准入/停车统一采用的决策与控制总延迟
     a1_stop_margin: 0.05          # m，A1准入/停车统一采用的定位与离散误差余量
     rolling_horizon: 10.0         # s，每次生成未来多长时间的轨迹

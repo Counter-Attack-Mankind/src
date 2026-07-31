@@ -101,10 +101,6 @@ public:
         if (cfg_.precompute_task_filter) {
             allocator_->buildCache();
         }
-        if (cfg_.use_a1_cycle) {
-            rule_engine_->setA1ExitTracks(
-                allocator_->validA1ExitTracks());
-        }
         initAgents();
         visited_slots_.assign(map_->slots().size(), false);
         one_shot_done_.assign(agents_.size(), false);
@@ -170,8 +166,6 @@ private:
                    << " one_shot=" << (one_shot_ ? 1 : 0)
                    << " use_a1_cycle=" << (cfg_.use_a1_cycle ? 1 : 0)
                    << " a1_request=" << cfg_.a1_request_distance
-                   << " a1_hold=" << cfg_.a1_queue_hold_distance
-                   << " a1_exit_release=" << cfg_.a1_exit_release_distance
                    << " prediction_horizon=" << cfg_.prediction_horizon
                    << " prediction_step=" << cfg_.prediction_step
                    << "\n";
@@ -193,7 +187,6 @@ private:
     const char* modeName(VehicleMode mode) const {
         switch (mode) {
             case VehicleMode::NEED_TASK: return "NEED_TASK";
-            case VehicleMode::WAIT_DISPATCH: return "WAIT_DISPATCH";
             case VehicleMode::ACTIVE: return "ACTIVE";
             case VehicleMode::DWELL: return "DWELL";
         }
@@ -214,11 +207,11 @@ private:
 
     const char* a1ControlStateName(A1ControlState state) const {
         switch (state) {
-            case A1ControlState::IDLE: return "IDLE";
-            case A1ControlState::CLEARING: return "CLEARING";
-            case A1ControlState::QUEUED: return "QUEUED";
-            case A1ControlState::ACTIVE: return "ACTIVE";
-            case A1ControlState::EGRESS: return "EGRESS";
+            case A1ControlState::IDLE: return "FREE";
+            case A1ControlState::WAITING: return "WAITING";
+            case A1ControlState::ACTIVE: return "ADMITTED";
+            case A1ControlState::LOADING: return "LOADING";
+            case A1ControlState::EGRESS: return "EXITING";
         }
         return "UNKNOWN";
     }
@@ -352,54 +345,17 @@ private:
 
         int enabled_count = 0;
         int assigned_count = 0;
-        int first_release_id = -1;
-        initial_dispatch_pending_.assign(agents_.size(), false);
-        initial_dispatch_release_time_.assign(agents_.size(), 0.0);
         for (VehicleAgent& v : agents_) {
             if (targetEnabled(v.id)) {
                 ++enabled_count;
                 if (allocator_->assignNextTask(v, agents_)) {
-                    const int release_rank = assigned_count;
-                    if (release_rank == 0) first_release_id = v.id;
                     ++assigned_count;
-                    const bool stagger_this_vehicle =
-                        cfg_.use_a1_cycle &&
-                        target_only_ < 0 &&
-                        cfg_.initial_dispatch_interval > 1e-9 &&
-                        release_rank > 0;
-                    if (stagger_this_vehicle) {
-                        const size_t idx = static_cast<size_t>(v.id);
-                        initial_dispatch_pending_[idx] = true;
-                        initial_dispatch_release_time_[idx] =
-                            release_rank *
-                            cfg_.initial_dispatch_interval;
-                        v.mode = VehicleMode::WAIT_DISPATCH;
-                        v.path_s = 0.0;
-                        v.current_speed = 0.0;
-                        v.action = VehicleAction::STOP;
-                        v.requested_action = VehicleAction::STOP;
-                        v.dwell_remaining = 0.0;
-                        v.reason = "wait_initial_dispatch";
-                        v.blocker_id = -1;
-                    }
                 }
             }
         }
         if (cfg_.use_a1_cycle) {
             ROS_INFO("[multi_patrol][A1] initial pickup legs assigned: %d/%d",
                      assigned_count, enabled_count);
-            if (assigned_count > 1 &&
-                cfg_.initial_dispatch_interval > 1e-9 &&
-                target_only_ < 0) {
-                ROS_INFO("[multi_patrol][startup_dispatch] staged=%d "
-                         "interval=%.2fs first=V%d@0.00s "
-                         "last_release=%.2fs",
-                         assigned_count,
-                         cfg_.initial_dispatch_interval,
-                         first_release_id,
-                         (assigned_count - 1) *
-                             cfg_.initial_dispatch_interval);
-            }
             if (assigned_count != enabled_count) {
                 ROS_ERROR("[multi_patrol][A1] %d enabled vehicle(s) have no "
                           "initial B->A1 task; inspect the preceding path errors",
@@ -762,43 +718,8 @@ private:
     //==============《任务指派与路径生成函数》===================================
     bool tryStartA1PickupFromCurrentB(VehicleAgent& v) {
         VehicleAgent proposal = v;
-        const bool already_staged =
-            v.mode == VehicleMode::WAIT_DISPATCH &&
-            v.mission_phase == MissionPhase::TO_A1 &&
-            !v.track.empty() && v.hasPendingDropoff();
-
-        if (!already_staged &&
-            !allocator_->assignPickupLeg(proposal, agents_)) {
+        if (!allocator_->assignPickupLeg(proposal, agents_)) {
             v = std::move(proposal);
-            return false;
-        }
-
-        int protected_owner = -1;
-        if (!rule_engine_->a1PickupDispatchAllowed(
-                proposal, agents_, &protected_owner)) {
-            // The task is staged but not started. The B->A1 path remains at
-            // s=0 and the vehicle stays physically parked in its B slot.
-            v = std::move(proposal);
-            v.mode = VehicleMode::WAIT_DISPATCH;
-            v.mission_phase = MissionPhase::TO_A1;
-            v.leg_target = LegTargetKind::A1;
-            v.path_s = 0.0;
-            v.dwell_remaining = 0.5;
-            v.current_speed = 0.0;
-            v.action = VehicleAction::STOP;
-            v.requested_action = VehicleAction::STOP;
-            v.reason =
-                "wait_a1_dispatch_V" +
-                std::to_string(protected_owner);
-            v.blocker_id = protected_owner;
-            if (!sim_mode_ && !already_staged) {
-                coordLog(
-                    "[multi_patrol][a1_dispatch] hold V" +
-                    std::to_string(v.id) + " at B" +
-                    std::to_string(v.current_slot) +
-                    " for protected transaction V" +
-                    std::to_string(protected_owner));
-            }
             return false;
         }
 
@@ -806,8 +727,7 @@ private:
         v.mode = VehicleMode::ACTIVE;
         v.action = VehicleAction::NOMINAL;
         v.requested_action = VehicleAction::NOMINAL;
-        v.reason = already_staged ? "a1_dispatch_released"
-                                  : "new_pickup_leg";
+        v.reason = "new_pickup_leg";
         v.blocker_id = -1;
         return true;
     }
@@ -829,33 +749,6 @@ private:
             if (cfg_.use_a1_cycle) {
                 if (v.mode == VehicleMode::NEED_TASK) {
                     if (sim_mode_) continue;
-                    const int old_gen = v.path_gen;
-                    tryStartA1PickupFromCurrentB(v);
-                    if (v.path_gen != old_gen) force_horizon_refresh_ = true;
-                    continue;
-                }
-
-                if (v.mode == VehicleMode::WAIT_DISPATCH) {
-                    v.action = VehicleAction::STOP;
-                    v.requested_action = VehicleAction::STOP;
-                    v.current_speed = 0.0;
-                    const size_t idx = static_cast<size_t>(v.id);
-                    if (idx < initial_dispatch_pending_.size() &&
-                        initial_dispatch_pending_[idx]) {
-                        if (sim_mode_ ||
-                            sim_time_ + 1e-9 <
-                                initial_dispatch_release_time_[idx]) {
-                            continue;
-                        }
-                        initial_dispatch_pending_[idx] = false;
-                        coordLog(
-                            "[multi_patrol][startup_dispatch] release V" +
-                            std::to_string(v.id) + " at sim_t=" +
-                            std::to_string(sim_time_));
-                    }
-                    v.dwell_remaining =
-                        std::max(0.0, v.dwell_remaining - dt);
-                    if (sim_mode_ || v.dwell_remaining > 1e-9) continue;
                     const int old_gen = v.path_gen;
                     tryStartA1PickupFromCurrentB(v);
                     if (v.path_gen != old_gen) force_horizon_refresh_ = true;
@@ -1001,7 +894,7 @@ private:
             v.blocker_id =
                 rule_engine_->a1AdmissionCandidate() == v.id
                     ? rule_engine_->a1AdmissionBlocker()
-                    : rule_engine_->a1EgressOwner();
+                    : rule_engine_->a1ServiceOwner();
             return;
         }
         v.wait_time = 0.0;
@@ -1075,8 +968,7 @@ private:
             for (size_t k = 0; k < agents_.size(); ++k) {
                 if (k == idx) continue;
                 if (agents_[k].mode != VehicleMode::ACTIVE &&
-                    agents_[k].mode != VehicleMode::DWELL &&
-                    agents_[k].mode != VehicleMode::WAIT_DISPATCH) {
+                    agents_[k].mode != VehicleMode::DWELL) {
                     continue;
                 }
                 if (overlapsAt(idx, candidate_s, k, plannedS(k))) return false;
@@ -1089,8 +981,7 @@ private:
             for (size_t k = 0; k < agents_.size(); ++k) {
                 if (k == idx || k == pair_other) continue;
                 if (agents_[k].mode != VehicleMode::ACTIVE &&
-                    agents_[k].mode != VehicleMode::DWELL &&
-                    agents_[k].mode != VehicleMode::WAIT_DISPATCH) {
+                    agents_[k].mode != VehicleMode::DWELL) {
                     continue;
                 }
                 if (overlapsAt(idx, candidate_s, k, plannedS(k))) return false;
@@ -1143,15 +1034,13 @@ private:
 
             for (size_t i = 0; i < agents_.size(); ++i) {
                 if (agents_[i].mode != VehicleMode::ACTIVE &&
-                    agents_[i].mode != VehicleMode::DWELL &&
-                    agents_[i].mode != VehicleMode::WAIT_DISPATCH) {
+                    agents_[i].mode != VehicleMode::DWELL) {
                     continue;
                 }
 
                 for (size_t j = i + 1; j < agents_.size(); ++j) {
                     if (agents_[j].mode != VehicleMode::ACTIVE &&
-                        agents_[j].mode != VehicleMode::DWELL &&
-                        agents_[j].mode != VehicleMode::WAIT_DISPATCH) {
+                        agents_[j].mode != VehicleMode::DWELL) {
                         continue;
                     }
                     if (!overlapsAt(i, plannedS(i), j, plannedS(j))) {
@@ -1393,8 +1282,7 @@ private:
                 for (size_t k = 0; k < agents_.size(); ++k) {
                     if (k == idx) continue;
                     if (agents_[k].mode != VehicleMode::ACTIVE &&
-                        agents_[k].mode != VehicleMode::DWELL &&
-                        agents_[k].mode != VehicleMode::WAIT_DISPATCH) {
+                        agents_[k].mode != VehicleMode::DWELL) {
                         continue;
                     }
                     const auto other = forklift_planner::multi_vehicle::makeBody(
@@ -1444,8 +1332,7 @@ private:
                 for (size_t k = 0; k < agents_.size(); ++k) {
                     if (k == idx) continue;
                     if (agents_[k].mode != VehicleMode::ACTIVE &&
-                        agents_[k].mode != VehicleMode::DWELL &&
-                        agents_[k].mode != VehicleMode::WAIT_DISPATCH) {
+                        agents_[k].mode != VehicleMode::DWELL) {
                         continue;
                     }
                     if (overlapsAt(idx, fwd_s, k, plannedS(k))) {
@@ -1507,8 +1394,7 @@ private:
                 for (size_t k = 0; k < agents_.size(); ++k) {
                     if (k == i) continue;
                     if (agents_[k].mode != VehicleMode::ACTIVE &&
-                        agents_[k].mode != VehicleMode::DWELL &&
-                        agents_[k].mode != VehicleMode::WAIT_DISPATCH) {
+                        agents_[k].mode != VehicleMode::DWELL) {
                         continue;
                     }
                     if (overlapsAt(i, fwd_s, k, plannedS(k))) {
@@ -1669,13 +1555,10 @@ private:
         std::snprintf(
             header, sizeof(header),
             "[coord_diag][cycle] tick=%llu sim_t=%.2f ring=%s "
-            "a1_state=%s a1_reserved=V%d a1_egress=V%d "
-            "a1_owner=V%d",
+            "a1_state=%s a1_owner=V%d",
             static_cast<unsigned long long>(tick_count_), sim_time_,
             ring.c_str(),
             a1ControlStateName(rule_engine_->a1ControlState()),
-            rule_engine_->a1ReservedOwner(),
-            rule_engine_->a1EgressOwner(),
             rule_engine_->a1ServiceOwner());
         coordLog(header);
         ROS_WARN("%s", header);
@@ -1686,17 +1569,8 @@ private:
         }
         auto gateSourceName = [](A1GateSource source) {
             switch (source) {
-                case A1GateSource::FIXED: return "fixed";
-                case A1GateSource::VERTICAL_QUEUE: return "vertical";
-                case A1GateSource::GLOBAL_EXIT_KEEP_CLEAR:
-                    return "global_exit_keep_clear";
-                case A1GateSource::HARD_ZONE:
-                    return "hard_zone";
-                case A1GateSource::APPROACH_CHAIN: return "approach_chain";
-                case A1GateSource::PENDING_EXIT_CHAIN:
-                    return "pending_exit_chain";
-                case A1GateSource::ACTIVE_EXIT_CHAIN:
-                    return "active_exit_chain";
+                case A1GateSource::TURN: return "turn";
+                case A1GateSource::CORRIDOR: return "corridor";
             }
             return "unknown";
         };
@@ -2290,8 +2164,6 @@ private:
     std::unique_ptr<forklift_planner::multi_vehicle::MarkerPublisher> marker_pub_;
     std::unique_ptr<forklift_planner::multi_vehicle::TrafficResourceMap> resource_map_;
     std::vector<VehicleAgent> agents_;
-    std::vector<bool> initial_dispatch_pending_;
-    std::vector<double> initial_dispatch_release_time_;
     std::vector<bool> visited_slots_;
     int target_only_ = -1;  // realbridge debug: -1 = all vehicles, otherwise control only this id
     std::string coord_log_file_;
@@ -2356,7 +2228,6 @@ private:
     std::set<int> active_deadlock_members_;           // 当前持续死锁环；解除后清空
     std::set<std::set<int>> dumped_clusters_;         // 已详打过的死锁簇(按成员集去重,编目用)
     std::map<int, double> last_replan_t_;             // 车id→上次重规划 sim_t(冷却用)
-    std::map<int, double> last_a1_task_reroute_t_;     // A1兜底换库位冷却
 
 public:
     // 一辆车的紧凑状态行(诊断用,信息尽量全)。
@@ -2472,150 +2343,6 @@ public:
             }
         }
 
-        // A1-specific last resort. Keep every B->A1 path untouched and never
-        // reverse a waiting vehicle. If a persistent wait cycle contains the
-        // future A1-egress owner, replace only that vehicle's cached A1->B
-        // destination with a currently clear free-slot route. Changing
-        // pending_path_gen invalidates RuleEngine's future-egress cache on the
-        // next cycle, so the stale A1 wait edge disappears automatically.
-        if (cfg_.use_a1_cycle) {
-            const int owner_id =
-                rule_engine_->a1ServiceOwner() >= 0
-                    ? rule_engine_->a1ServiceOwner()
-                    : rule_engine_->a1EgressOwner();
-            VehicleAgent* owner = agentById(owner_id);
-            const bool owner_has_pending_leg =
-                owner != nullptr && owner->hasPendingDropoff() &&
-                (owner->mission_phase == MissionPhase::TO_A1 ||
-                 owner->mission_phase == MissionPhase::PICKUP_DWELL ||
-                 owner->mission_phase ==
-                     MissionPhase::WAIT_DROPOFF_TASK);
-            const bool owner_on_initial_departure =
-                owner != nullptr && owner->active() && owner->loaded &&
-                owner->mission_phase == MissionPhase::TO_B &&
-                owner->path_s <=
-                    cfg_.a1_exit_release_distance +
-                        cfg_.a1_stop_margin;
-            const bool owner_can_reselect =
-                owner != nullptr &&
-                members.count(owner_id) != 0 &&
-                (owner_has_pending_leg ||
-                 owner_on_initial_departure);
-            const auto last = last_a1_task_reroute_t_.find(owner_id);
-            const bool cooldown_ready =
-                last == last_a1_task_reroute_t_.end() ||
-                sim_time_ - last->second >= kCooldown;
-            if (owner_can_reselect && cooldown_ready) {
-                last_a1_task_reroute_t_[owner_id] = sim_time_;
-                const int old_target =
-                    owner_has_pending_leg
-                        ? owner->pending_target_slot
-                        : owner->target_slot;
-                const double old_wait_time = owner->wait_time;
-                const RoughWp old_departure_pose =
-                    owner->track.poseAtS(owner->path_s);
-                VehicleAgent proposal = *owner;
-                if (owner_on_initial_departure) {
-                    // The normal A1->B leg has already been activated. Build a
-                    // detached pending proposal so a failed fallback cannot
-                    // mutate the live transaction or teleport its vehicle.
-                    proposal.pending_target_slot = proposal.target_slot;
-                    proposal.pending_dropoff_track = proposal.track;
-                    ++proposal.pending_path_gen;
-                }
-                const int old_pending_gen = proposal.pending_path_gen;
-                const bool path_available =
-                    allocator_->prepareClearDropoffLegAtA1(
-                        proposal, agents_, true);
-                if (path_available &&
-                    proposal.pending_path_gen != old_pending_gen) {
-                    if (owner_on_initial_departure) {
-                        double projected_s = 0.0;
-                        double projected_error =
-                            std::numeric_limits<double>::infinity();
-                        const double project_end = std::min(
-                            proposal.pending_dropoff_track.length(),
-                            cfg_.a1_exit_release_distance +
-                                mp_.vehicle_length);
-                        constexpr double kProjectStep = 0.01;
-                        for (double s = 0.0;
-                             s <= project_end + 1e-9;
-                             s += kProjectStep) {
-                            const RoughWp p =
-                                proposal.pending_dropoff_track.poseAtS(
-                                    std::min(s, project_end));
-                            const double error = std::hypot(
-                                p.x - old_departure_pose.x,
-                                p.y - old_departure_pose.y);
-                            if (error < projected_error) {
-                                projected_error = error;
-                                projected_s = std::min(s, project_end);
-                            }
-                        }
-                        const double max_projection_error =
-                            std::max(0.08,
-                                     2.0 * cfg_.a1_stop_margin);
-                        if (projected_error >
-                            max_projection_error) {
-                            ROS_ERROR(
-                                "[multi_patrol][A1 deadlock task fallback] "
-                                "V%d rejected replacement B%d: current "
-                                "departure pose is %.3fm from the new A1->B "
-                                "path (limit %.3fm); live path unchanged",
-                                owner_id,
-                                proposal.pending_target_slot,
-                                projected_error,
-                                max_projection_error);
-                            return;
-                        }
-                        if (!allocator_->assignDropoffLeg(
-                                proposal, agents_)) {
-                            ROS_ERROR(
-                                "[multi_patrol][A1 deadlock task fallback] "
-                                "V%d selected B%d but failed to activate "
-                                "the replacement departure leg",
-                                owner_id,
-                                proposal.pending_target_slot);
-                            return;
-                        }
-                        // Preserve the physical departure pose when changing
-                        // the active route; never reset a partially departed
-                        // vehicle back to A1 path_s=0.
-                        proposal.path_s = projected_s;
-                        proposal.current_speed = 0.0;
-                    }
-                    *owner = std::move(proposal);
-                    ++deadlock_recoveries_;
-                    force_horizon_refresh_ = true;
-                    ROS_ERROR(
-                        "[multi_patrol][A1 deadlock task fallback] "
-                        "ring owner=V%d changed A1->B%d to "
-                        "A1->B%d after %.1fs wait; B->A1 tracks unchanged",
-                        owner_id, old_target,
-                        owner_on_initial_departure
-                            ? owner->target_slot
-                            : owner->pending_target_slot,
-                        old_wait_time);
-                    coordLog(
-                        "[multi_patrol][a1_deadlock_fallback] owner=V" +
-                        std::to_string(owner_id) + " old_B=" +
-                        std::to_string(old_target) + " new_B=" +
-                        std::to_string(
-                            owner_on_initial_departure
-                                ? owner->target_slot
-                                : owner->pending_target_slot) +
-                        " wait=" + std::to_string(old_wait_time));
-                    return;
-                }
-                ROS_WARN_THROTTLE(
-                    2.0,
-                    "[multi_patrol][A1 deadlock task fallback] "
-                    "V%d found no alternative A1->B path that "
-                    "is physically clear; keep all vehicles stopped",
-                    owner_id);
-            }
-        }
-        // 选等待最久、且不在冷却期的成员当受害车。
         int victim = -1;
         double worst_wait = -1.0;
         for (int id : members) {

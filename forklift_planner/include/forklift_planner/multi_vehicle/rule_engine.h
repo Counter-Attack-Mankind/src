@@ -33,20 +33,52 @@ struct ConflictMarker {
 };
 
 enum class A1GateSource {
-    FIXED,
-    VERTICAL_QUEUE,
-    GLOBAL_EXIT_KEEP_CLEAR,
-    HARD_ZONE,
-    APPROACH_CHAIN,
-    PENDING_EXIT_CHAIN,
-    ACTIVE_EXIT_CHAIN,
+    TURN,
+    CORRIDOR,
+};
+
+enum class A1AdmissionSide {
+    NONE,
+    LEFT,
+    RIGHT,
+};
+
+enum class A1ReleaseKind {
+    NONE,
+    DOWN_LEFT,
+    DOWN_RIGHT,
+    LEFT_VERTICAL,
+    RIGHT_VERTICAL,
+    ROW1_DOCK,
+};
+
+struct A1TransactionPlan {
+    int owner_id = -1;
+    int frozen_target_slot = -1;
+    int frozen_pending_path_gen = -1;
+    int admitted_path_gen = -1;
+    int frozen_exit_path_gen = -1;
+    double admission_stop_s = 0.0;
+    double release_s = 0.0;
+    A1AdmissionSide admission_side = A1AdmissionSide::NONE;
+    A1ReleaseKind release_kind = A1ReleaseKind::NONE;
+
+    bool valid() const {
+        return owner_id >= 0 &&
+               frozen_target_slot >= 0 &&
+               frozen_pending_path_gen >= 0 &&
+               admitted_path_gen >= 0 &&
+               frozen_exit_path_gen >= 0 &&
+               admission_side != A1AdmissionSide::NONE &&
+               release_kind != A1ReleaseKind::NONE;
+    }
 };
 
 enum class A1ControlState {
     IDLE,
-    CLEARING,
-    QUEUED,
+    WAITING,
     ACTIVE,
+    LOADING,
     EGRESS,
 };
 
@@ -60,21 +92,21 @@ struct A1GateMarker {
     double x = 0.0;
     double y = 0.0;
     double theta = 0.0;
-    A1GateSource source = A1GateSource::FIXED;
+    A1GateSource source = A1GateSource::TURN;
     int approach_zone_count = 0;
     int departure_zone_count = 0;
     bool late = false;
 };
 
-struct A1HardZoneRect {
+struct A1ServiceZoneRect {
     double x0 = 0.0;
     double x1 = 0.0;
     double y0 = 0.0;
     double y1 = 0.0;
 };
 
-// Single geometry source for both rule enforcement and RViz.
-std::vector<A1HardZoneRect> a1HardZoneRects(const MapParam& mp);
+// Static RViz outline; motion protection is derived from the frozen tracks.
+std::vector<A1ServiceZoneRect> a1ServiceZoneRects(const MapParam& mp);
 
 class RuleEngine {
 public:
@@ -82,8 +114,6 @@ public:
 
     // 接入资源地图(Phase 2:资源仲裁需要它把路径映射到资源占用)。
     void setResourceMap(const TrafficResourceMap* m) { resmap_ = m; }
-    void setA1ExitTracks(const std::vector<PathTrack>& tracks);
-
     void decide(std::vector<VehicleAgent>& vehicles, double dt);
     double speedForAction(VehicleAction action) const;
 
@@ -96,27 +126,25 @@ public:
         ResourceTokenTable tokens;
         std::map<int, int> reservation_path_gen;
         double now = 0.0;
-        int a1_reserved_owner = -1;
-        int a1_egress_owner = -1;
         int a1_service_owner = -1;
         int a1_admission_candidate = -1;
         int a1_admission_blocker = -1;
         A1ControlState a1_control_state = A1ControlState::IDLE;
-        std::map<int, int> a1_hard_latch_owner;
         std::vector<int> a1_request_queue;
         std::vector<ConflictMarker> conflicts;
         std::vector<A1GateMarker> a1_gate_markers;
+        A1TransactionPlan a1_transaction;
     };
     SimSnapshot snapshot() const {
         return SimSnapshot{commit_owner_, following_pairs_, following_leader_,
                            following_phase_, tokens_,
-                           reservation_path_gen_, now_, a1_reserved_owner_,
-                           a1_egress_owner_, a1_service_owner_,
+                           reservation_path_gen_, now_, a1_service_owner_,
                            a1_admission_candidate_,
                            a1_admission_blocker_,
-                           a1_control_state_, a1_hard_latch_owner_,
+                           a1_control_state_,
                            a1_request_queue_,
-                           conflicts_, a1_gate_markers_};
+                           conflicts_, a1_gate_markers_,
+                           a1_transaction_};
     }
     void restore(const SimSnapshot& s) {
         commit_owner_ = s.commit_owner;
@@ -126,16 +154,14 @@ public:
         tokens_ = s.tokens;
         reservation_path_gen_ = s.reservation_path_gen;
         now_ = s.now;
-        a1_reserved_owner_ = s.a1_reserved_owner;
-        a1_egress_owner_ = s.a1_egress_owner;
         a1_service_owner_ = s.a1_service_owner;
         a1_admission_candidate_ = s.a1_admission_candidate;
         a1_admission_blocker_ = s.a1_admission_blocker;
         a1_control_state_ = s.a1_control_state;
-        a1_hard_latch_owner_ = s.a1_hard_latch_owner;
         a1_request_queue_ = s.a1_request_queue;
         conflicts_ = s.conflicts;
         a1_gate_markers_ = s.a1_gate_markers;
+        a1_transaction_ = s.a1_transaction;
         a1_gate_plans_.clear();
     }
     const std::vector<ConflictMarker>& conflicts() const { return conflicts_; }
@@ -153,21 +179,11 @@ public:
     std::vector<std::string> debugConflictLines(
         const VehicleAgent& a, const VehicleAgent& b) const;
     int a1ServiceOwner() const { return a1_service_owner_; }
-    int a1ReservedOwner() const { return a1_reserved_owner_; }
-    int a1EgressOwner() const { return a1_egress_owner_; }
     int a1AdmissionCandidate() const {
         return a1_admission_candidate_;
     }
     int a1AdmissionBlocker() const { return a1_admission_blocker_; }
     A1ControlState a1ControlState() const { return a1_control_state_; }
-
-    // B->A1 dispatch is independent from the local A1 service transaction.
-    // Vehicles may travel concurrently and are serialized only after crossing
-    // the A1 request boundary.
-    bool a1PickupDispatchAllowed(
-        const VehicleAgent& proposed_pickup,
-        const std::vector<VehicleAgent>& vehicles,
-        int* protected_owner_id = nullptr);
 
 private:
     struct ConflictZone {
@@ -214,42 +230,26 @@ private:
     // A1 gates must remain fixed while the owner traverses the protected chain.
     std::vector<ConflictZone> fullConflictZones(
         const VehicleAgent& self, const VehicleAgent& other) const;
-    std::vector<ConflictZone> a1DepartureChain(
-        const std::vector<ConflictZone>& zones) const;
-    std::vector<ConflictZone> a1ApproachChain(
-        const VehicleAgent& owner,
-        const std::vector<ConflictZone>& zones) const;
-    double verticalQueueStopS(const VehicleAgent& v);
-    struct A1KeepClearCacheEntry {
-        int path_gen = -1;
-        double stop_s = 0.0;
-        double hard_stop_s = 0.0;
-        std::vector<std::pair<double, double>> spans;
-    };
-    const A1KeepClearCacheEntry& globalA1KeepClear(
-        const VehicleAgent& v) const;
-    bool vehicleInsideGlobalA1KeepClear(const VehicleAgent& v) const;
-    bool conflictZoneInGlobalA1KeepClear(
-        const ConflictZone& zone, const VehicleAgent& a,
-        const VehicleAgent& b) const;
-
     struct A1GatePlan {
         int owner_id = -1;
         int waiter_id = -1;
         double stop_s = 0.0;
         double fixed_stop_s = 0.0;
-        double vertical_stop_s = 0.0;
-        double global_exit_stop_s = 0.0;
-        double hard_stop_s = 0.0;
         double approach_stop_s = 0.0;
         double departure_stop_s = 0.0;
-        A1GateSource source = A1GateSource::FIXED;
+        A1GateSource source = A1GateSource::TURN;
         std::vector<ConflictZone> approach_zones;
         std::vector<ConflictZone> departure_zones;
         bool departure_uses_pending = false;
     };
-    A1GatePlan buildA1GatePlan(const VehicleAgent& owner,
-                               const VehicleAgent& waiter);
+    A1GatePlan buildA1GatePlan(
+        const VehicleAgent& owner, const VehicleAgent& waiter,
+        const A1TransactionPlan& transaction);
+    A1TransactionPlan buildA1TransactionPlan(
+        const VehicleAgent& candidate) const;
+    double a1AdmissionStopS(
+        const VehicleAgent& vehicle,
+        A1AdmissionSide* side = nullptr) const;
     bool waiterInsideA1Zones(const VehicleAgent& waiter,
                              const std::vector<ConflictZone>& zones) const;
     bool conflictZoneInA1Chain(
@@ -275,10 +275,8 @@ private:
                             const std::string& reason, int blocker_id = -1);
     void resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles, double dt);
     void resolveFollowing(std::vector<VehicleAgent>& vehicles);
-    void resolveA1ApproachQueue(std::vector<VehicleAgent>& vehicles,
-                                double dt);
-    void enforceA1HardExclusion(std::vector<VehicleAgent>& vehicles,
-                                double dt);
+    void resolveA1LocalService(std::vector<VehicleAgent>& vehicles,
+                               double dt);
     double a1SafeStoppingDistance(const VehicleAgent& v,
                                   double dt) const;
     // 普适前向净空护栏:任何车若沿自身固定路径在自己刹车距离内会撞上另一辆车的当前
@@ -345,28 +343,11 @@ private:
     };
     mutable std::map<std::pair<int, int>, PendingConflictCacheEntry>
         pending_conflict_cache_;
-    struct A1VerticalGateCacheEntry {
-        int path_gen = -1;
-        double stop_s = 0.0;
-    };
-    // Derived-only geometry cache; path_gen is its invalidation boundary.
-    // It does not affect persistent decisions and needs no SimSnapshot field.
-    std::map<int, A1VerticalGateCacheEntry> a1_vertical_gate_cache_;
-    std::vector<PathTrack> a1_exit_tracks_;
-    mutable std::map<int, A1KeepClearCacheEntry>
-        a1_keep_clear_cache_;
-
     // Phase 2 资源模型:资源地图(只读)+ 资源令牌表(跨周期持久,§11.10)。
     const TrafficResourceMap* resmap_ = nullptr;
     ResourceTokenTable tokens_;
     double now_ = 0.0;  // 内部仿真时钟(每 decide 累加 dt),供令牌防抖/超时用
-    // Early scheduling hint only. It never issues motion commands or overrides
-    // ordinary (orange) arbitration.
-    int a1_reserved_owner_ = -1;
-    // Formal owner of the cached future A1->B critical egress chain. It is set
-    // only together with a1_service_owner_ after atomic admission of both the
-    // current B->A1 approach and cached A1->B departure chains.
-    int a1_egress_owner_ = -1;
+    // Sole owner of the local A1 service transaction.
     // 仅门控 A1 最后一段进场、装载和初始离场，不串行化整条 B→A1 路径。
     int a1_service_owner_ = -1;
     // Last real/snapshot-restored atomic-admission rejection. Patrol uses this
@@ -375,10 +356,12 @@ private:
     int a1_admission_candidate_ = -1;
     int a1_admission_blocker_ = -1;
     A1ControlState a1_control_state_ = A1ControlState::IDLE;
-    std::map<int, int> a1_hard_latch_owner_;
     // Persistent FIFO of vehicles that crossed the local A1 request boundary.
     // Entries keep their order across decision cycles and owner hand-offs.
     std::vector<int> a1_request_queue_;
+    // The sole authoritative A1 transaction. The target, pending path
+    // generation and local release point are frozen atomically at admission.
+    A1TransactionPlan a1_transaction_;
 };
 
 }  // namespace multi_vehicle
