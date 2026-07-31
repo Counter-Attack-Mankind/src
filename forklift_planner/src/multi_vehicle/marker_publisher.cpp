@@ -292,12 +292,12 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
         addBox(zone_id++, r.x0, r.x1, r.y0, r.y1);
     }
 
-    auto addAdmissionDownReleaseLine =
+    auto addAdmissionLine =
         [&](int id, double x0, double x1) {
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
         m.header.stamp = ros::Time::now();
-        m.ns = "a1_admission_down_release_line";
+        m.ns = "a1_admission_line";
         m.id = id;
         m.type = visualization_msgs::Marker::LINE_STRIP;
         m.action = visualization_msgs::Marker::ADD;
@@ -308,27 +308,29 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
         m.points.push_back(pt3(x1, queue_y, 0.026));
         arr.markers.push_back(m);
     };
-    addAdmissionDownReleaseLine(
+    addAdmissionLine(
         0, 0.0, mp_.row1_left_aisle);
-    addAdmissionDownReleaseLine(1, right_x0, right_x1);
+    addAdmissionLine(1, right_x0, right_x1);
 
-    auto addReleaseLine = [&](int id, double x) {
+    auto addBridgeExitLine = [&]() {
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
         m.header.stamp = ros::Time::now();
-        m.ns = "a1_service_release_line";
-        m.id = id;
+        m.ns = "a1_bridge_2_to_3_exit_line";
+        m.id = 0;
         m.type = visualization_msgs::Marker::LINE_STRIP;
         m.action = visualization_msgs::Marker::ADD;
         m.pose.orientation.w = 1.0;
         m.scale.x = 0.026;
         m.color = edge;
-        m.points.push_back(pt3(x, mp_.y7(), 0.026));
-        m.points.push_back(pt3(x, mp_.y8(), 0.026));
+        m.points.push_back(
+            pt3(mp_.row2_left_width, mp_.y4(), 0.026));
+        m.points.push_back(
+            pt3(mp_.row2_left_width + mp_.row2_gap,
+                mp_.y4(), 0.026));
         arr.markers.push_back(m);
     };
-    addReleaseLine(0, mp_.tb_shelf_width);
-    addReleaseLine(1, mp_.field_width - mp_.tb_shelf_width);
+    addBridgeExitLine();
 
     visualization_msgs::Marker label;
     label.header.frame_id = pp_.frame_id;

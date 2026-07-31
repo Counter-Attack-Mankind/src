@@ -45,11 +45,8 @@ enum class A1AdmissionSide {
 
 enum class A1ReleaseKind {
     NONE,
-    DOWN_LEFT,
-    DOWN_RIGHT,
-    LEFT_VERTICAL,
-    RIGHT_VERTICAL,
-    ROW1_DOCK,
+    CORRIDOR_2_TO_3_BRIDGE_EXIT,
+    TARGET_B,
 };
 
 struct A1TransactionPlan {

@@ -1,162 +1,56 @@
-[INFO] [1785480061.639582080]: [path_catalog] A2 virtual slot: id=102 row=7 dock=(1.2500,0.1250) pre=(1.2500,0.4000) yaw=-90.0deg
-[WARN] [1785480061.639631879]: [path_catalog] selected depot=A1 direction=from_depot target_row=-1 targets (66): [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65]
-[WARN] [1785480061.639994673]: [path_catalog][debug-layers] A1_to_B0 layers=2 arc=0
-[WARN] [1785480061.640107171]: [path_catalog][debug-layers] layer[0] type=skeleton label=route_skeleton pts=3
-[WARN] [1785480061.640152471]: [path_catalog][debug-layers] S0=(1.608,3.791)
-[WARN] [1785480061.640250269]: [path_catalog][debug-layers] S1=(0.124,3.791)
-[WARN] [1785480061.640313668]: [path_catalog][debug-layers] S2=(0.124,4.301)
-[WARN] [1785480061.640400266]: [path_catalog][debug-layers] layer[1] type=clothoid label=clothoid pts=84
-[WARN] [1785480061.640493765]: [path_catalog] single path A1_to_B0 row=0 col=0 wpts=162 len=2.555 arc=0 animate=1
-[WARN] [1785480061.640746161]: [path_catalog] published single path markers on /forklift_map/markers
-[INFO] [1785480062.029499204]: [forklift_map] Published 387 markers on /forklift_map/markers
-
-g
-[INFO] [1785480109.599769323]: [path_catalog] A2 virtual slot: id=102 row=7 dock=(1.2500,0.1250) pre=(1.2500,0.4000) yaw=-90.0deg
-[WARN] [1785480109.599821223]: [path_catalog] selected depot=A1 direction=from_depot target_row=-1 targets (66): [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65]
-[WARN] [1785480109.600160817]: [path_catalog][debug-layers] A1_to_B4 layers=2 arc=0
-[WARN] [1785480109.600262016]: [path_catalog][debug-layers] layer[0] type=skeleton label=route_skeleton pts=3
-[WARN] [1785480109.600307115]: [path_catalog][debug-layers] S0=(1.610,3.791)
-[WARN] [1785480109.600400414]: [path_catalog][debug-layers] S1=(1.001,3.791)
-[WARN] [1785480109.600452813]: [path_catalog][debug-layers] S2=(1.001,4.301)
-[WARN] [1785480109.600523711]: [path_catalog][debug-layers] layer[1] type=clothoid label=clothoid pts=84
-[WARN] [1785480109.600636809]: [path_catalog] single path A1_to_B4 row=0 col=4 wpts=162 len=1.681 arc=0 animate=1
-[WARN] [1785480109.600904205]: [path_catalog] published single path markers on /forklift_map/markers
-[INFO] [1785480109.994493544]: [forklift_map] Published 387 markers on /forklift_map/markers
-
-[INFO] [1785480138.294186570]: [path_catalog] midpoint check: B60(1.0012,0.1250), B61(1.4988,0.1250) -> A2(1.2500,0.1250)
-[INFO] [1785480138.295002057]: [path_catalog] A1 virtual slot: id=101 row=0 dock=(1.2500,4.3750) pre=(1.2500,4.1000) yaw=90.0deg
-[INFO] [1785480138.295105856]: [path_catalog] A2 virtual slot: id=102 row=7 dock=(1.2500,0.1250) pre=(1.2500,0.4000) yaw=-90.0deg
-[WARN] [1785480138.295165654]: [path_catalog] selected depot=A1 direction=from_depot target_row=-1 targets (66): [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65]
-[WARN] [1785480138.295526649]: [path_catalog][debug-layers] A1_to_B5 layers=2 arc=0
-[WARN] [1785480138.295627547]: [path_catalog][debug-layers] layer[0] type=skeleton label=route_skeleton pts=3
-[WARN] [1785480138.295673046]: [path_catalog][debug-layers] S0=(0.890,3.791)
-[WARN] [1785480138.295744445]: [path_catalog][debug-layers] S1=(1.499,3.791)
-[WARN] [1785480138.295826444]: [path_catalog][debug-layers] S2=(1.499,4.301)
-[WARN] [1785480138.295912042]: [path_catalog][debug-layers] layer[1] type=clothoid label=clothoid pts=84
-[WARN] [1785480138.296017841]: [path_catalog] single path A1_to_B5 row=0 col=5 wpts=162 len=1.681 arc=0 animate=1
-[WARN] [1785480138.296293136]: [path_catalog] published single path markers on /forklift_map/markers
-[INFO] [1785480138.681334354]: [forklift_map] Published 387 markers on /forklift_map/markers
-
-g
-[INFO] [1785480159.374704463]: [path_catalog] A2 virtual slot: id=102 row=7 dock=(1.2500,0.1250) pre=(1.2500,0.4000) yaw=-90.0deg
-[WARN] [1785480159.374764262]: [path_catalog] selected depot=A1 direction=from_depot target_row=-1 targets (66): [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65]
-[WARN] [1785480159.375117756]: [path_catalog][debug-layers] A1_to_B9 layers=2 arc=0
-[WARN] [1785480159.375236354]: [path_catalog][debug-layers] layer[0] type=skeleton label=route_skeleton pts=3
-[WARN] [1785480159.375283354]: [path_catalog][debug-layers] S0=(0.892,3.791)
-[WARN] [1785480159.375332353]: [path_catalog][debug-layers] S1=(2.376,3.791)
-[WARN] [1785480159.375378452]: [path_catalog][debug-layers] S2=(2.376,4.301)
-[WARN] [1785480159.375448251]: [path_catalog][debug-layers] layer[1] type=clothoid label=clothoid pts=84
-[WARN] [1785480159.375565249]: [path_catalog] single path A1_to_B9 row=0 col=9 wpts=162 len=2.555 arc=0 animate=1
-[WARN] [1785480159.375817145]: [path_catalog] published single path markers on /forklift_map/markers
-[INFO] [1785480159.758684426]: [forklift_map] Published 387 markers on /forklift_map/markers
-
-[INFO] [1785480180.183016710]: [path_catalog] A1 virtual slot: id=101 row=0 dock=(1.2500,4.3750) pre=(1.2500,4.1000) yaw=90.0deg
-[INFO] [1785480180.183119208]: [path_catalog] A2 virtual slot: id=102 row=7 dock=(1.2500,0.1250) pre=(1.2500,0.4000) yaw=-90.0deg
-[WARN] [1785480180.183168607]: [path_catalog] selected depot=A1 direction=from_depot target_row=-1 targets (66): [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65]
-[WARN] [1785480180.183432003]: [planner][row1-debug] route=A1_TO_B src=101 tgt=10 src_corr=1 tgt_corr=1 target=(0.706,3.761 th=-90.0deg) mode=auto terminal_reverse=0 near_gap=0.491 far_gap=0.211 horiz=0.544 min_x=0.676
-[WARN] [1785480180.183535102]: [planner][row1-debug] row1-upper direct lane tgt=10 lower=3.791 upper=4.071 connector_mid_y=3.370
-[WARN] [1785480180.183615101]: [planner][row1-debug] initial_reverse tgt=10 same_corr=1 start_to_right=0 start_lane_y=3.370 forward_heading=180.0deg reverse_end_dir=(0.0deg) desired_end_x=1.865 actual_end=(1.865,3.370) curve_start=(1.250,3.709) curve_pts=56 direct_ok=1
-[WARN] [1785480180.183705599]: [planner][row1-debug] skeleton tgt=10 points=4 terminal_reverse=0 goal_lane_y=4.071 terminal_stop_y=3.761 final_ref_x=1.250
-[WARN] [1785480180.183750198]: [planner][row1-debug] skeleton[0]=(1.865,3.370)
-[WARN] [1785480180.183832597]: [planner][row1-debug] skeleton[1]=(1.865,4.071)
-[WARN] [1785480180.183914496]: [planner][row1-debug] skeleton[2]=(0.706,4.071)
-[WARN] [1785480180.183996794]: [planner][row1-debug] skeleton[3]=(0.706,3.579)
-[WARN] [1785480180.184251090]: [planner][row1-debug] row1-upper reverse road a_rev=(1.250,4.301) second=(1.250,3.791)->(1.865,3.791) s0=(1.865,3.370) r=0.189 len=(0.511,0.615,0.420) pts=142 front_theta=90.0deg
-[WARN] [1785480180.184372189]: [path_catalog][debug-layers] A1_to_B10 layers=3 arc=0
-[WARN] [1785480180.184430487]: [path_catalog][debug-layers] layer[0] type=skeleton label=route_skeleton pts=4
-[WARN] [1785480180.184533186]: [path_catalog][debug-layers] S0=(1.865,3.370)
-[WARN] [1785480180.184591485]: [path_catalog][debug-layers] S1=(1.865,4.071)
-[WARN] [1785480180.184667284]: [path_catalog][debug-layers] S2=(0.706,4.071)
-[WARN] [1785480180.184711983]: [path_catalog][debug-layers] S3=(0.706,3.579)
-[WARN] [1785480180.184773482]: [path_catalog][debug-layers] layer[1] type=clothoid label=clothoid pts=87
-[WARN] [1785480180.184857681]: [path_catalog][debug-layers] layer[2] type=clothoid label=clothoid pts=81
-[WARN] [1785480180.184989179]: [path_catalog] single path A1_to_B10 row=1 col=0 wpts=312 len=3.406 arc=0 animate=1
-[WARN] [1785480180.185316973]: [path_catalog] published single path markers on /forklift_map/markers
-[INFO] [1785480180.563211060]: [forklift_map] Published 387 markers on /forklift_map/markers
-
-
-process[path_catalog_debug_node-3]: started with pid [87347]
-process[rviz-4]: started with pid [87353]
-[INFO] [1785480204.548390539]: [path_catalog] midpoint check: B4(1.0012,4.3750), B5(1.4988,4.3750) -> A1(1.2500,4.3750)
-[INFO] [1785480204.549551220]: [path_catalog] midpoint check: B60(1.0012,0.1250), B61(1.4988,0.1250) -> A2(1.2500,0.1250)
-[INFO] [1785480204.550733602]: [path_catalog] A1 virtual slot: id=101 row=0 dock=(1.2500,4.3750) pre=(1.2500,4.1000) yaw=90.0deg
-[INFO] [1785480204.550888499]: [path_catalog] A2 virtual slot: id=102 row=7 dock=(1.2500,0.1250) pre=(1.2500,0.4000) yaw=-90.0deg
-[WARN] [1785480204.550958398]: [path_catalog] selected depot=A1 direction=from_depot target_row=-1 targets (66): [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65]
-[WARN] [1785480204.551226094]: [planner][row1-debug] route=A1_TO_B src=101 tgt=14 src_corr=1 tgt_corr=1 target=(1.150,3.761 th=-90.0deg) mode=auto terminal_reverse=0 near_gap=0.491 far_gap=0.211 horiz=0.358 min_x=0.676
-[WARN] [1785480204.551341092]: [planner][row1-debug] row1-upper direct lane tgt=14 lower=3.791 upper=4.071 connector_mid_y=3.370
-[WARN] [1785480204.551418391]: [planner][row1-debug] initial_reverse tgt=14 same_corr=1 start_to_right=0 start_lane_y=3.370 forward_heading=180.0deg reverse_end_dir=(0.0deg) desired_end_x=1.865 actual_end=(1.865,3.370) curve_start=(1.250,3.709) curve_pts=56 direct_ok=1
-[WARN] [1785480204.551524389]: [planner][row1-debug] skeleton tgt=14 points=4 terminal_reverse=0 goal_lane_y=4.071 terminal_stop_y=3.761 final_ref_x=1.508
-[WARN] [1785480204.551589688]: [planner][row1-debug] skeleton[0]=(1.865,3.370)
-[WARN] [1785480204.551684786]: [planner][row1-debug] skeleton[1]=(1.865,4.071)
-[WARN] [1785480204.551751186]: [planner][row1-debug] skeleton[2]=(1.150,4.071)
-[WARN] [1785480204.551828285]: [planner][row1-debug] skeleton[3]=(1.150,3.579)
-[WARN] [1785480204.552095480]: [planner][row1-debug] clothoid infeasible tgt=14 j=1 p=(1.865, 4.071) prev=(1.865, 3.370) next=(1.150, 4.071) prev_len=0.700 next_len=0.715 limit=0.309
-[WARN] [1785480204.552206178]: [planner] slot 14: using local arc fallback only at infeasible turns; accepted lane shifts and clothoids are preserved
-[WARN] [1785480204.552366276]: [planner][row1-debug] local arc fallback tgt=14 j=1 radius=0.300 max_radius=0.300 pts=49
-[WARN] [1785480204.552547273]: [planner][row1-debug] row1-upper reverse road a_rev=(1.250,4.301) second=(1.250,3.791)->(1.865,3.791) s0=(1.865,3.370) r=0.189 len=(0.511,0.615,0.420) pts=142 front_theta=90.0deg
-[WARN] [1785480204.552671871]: [path_catalog][debug-layers] A1_to_B14 layers=3 arc=1
-[WARN] [1785480204.552766969]: [path_catalog][debug-layers] layer[0] type=skeleton label=route_skeleton pts=4
-[WARN] [1785480204.552854268]: [path_catalog][debug-layers] S0=(1.865,3.370)
-[WARN] [1785480204.552940567]: [path_catalog][debug-layers] S1=(1.865,4.071)
-[WARN] [1785480204.553026866]: [path_catalog][debug-layers] S2=(1.150,4.071)
-[WARN] [1785480204.553106064]: [path_catalog][debug-layers] S3=(1.150,3.579)
-[WARN] [1785480204.553187763]: [path_catalog][debug-layers] layer[1] type=arc_fallback label=local_arc_fallback pts=49
-[WARN] [1785480204.553231762]: [path_catalog][debug-layers] layer[2] type=clothoid label=clothoid pts=68
-[WARN] [1785480204.553340961]: [path_catalog] single path A1_to_B14 row=1 col=2 wpts=261 len=3.012 arc=1 animate=1
-[WARN] [1785480204.553693455]: [path_catalog] published single path markers on /forklift_map/markers
-[INFO] [1785480204.934932418]: [forklift_map] Published 387 markers on /forklift_map/markers
-
-process[rosout-1]: started with pid [87433]
-started core service [/rosout]
-process[forklift_map-2]: started with pid [87440]
-process[path_catalog_debug_node-3]: started with pid [87441]
-process[rviz-4]: started with pid [87447]
-[INFO] [1785480221.954206688]: [path_catalog] midpoint check: B4(1.0012,4.3750), B5(1.4988,4.3750) -> A1(1.2500,4.3750)
-[INFO] [1785480221.955550366]: [path_catalog] midpoint check: B60(1.0012,0.1250), B61(1.4988,0.1250) -> A2(1.2500,0.1250)
-[INFO] [1785480221.956352454]: [path_catalog] A1 virtual slot: id=101 row=0 dock=(1.2500,4.3750) pre=(1.2500,4.1000) yaw=90.0deg
-[INFO] [1785480221.956458852]: [path_catalog] A2 virtual slot: id=102 row=7 dock=(1.2500,0.1250) pre=(1.2500,0.4000) yaw=-90.0deg
-[WARN] [1785480221.956508651]: [path_catalog] selected depot=A1 direction=from_depot target_row=-1 targets (66): [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65]
-[WARN] [1785480221.956729648]: [planner][row1-debug] route=A1_TO_B src=101 tgt=16 src_corr=1 tgt_corr=1 target=(1.372,3.761 th=-90.0deg) mode=auto terminal_reverse=0 near_gap=0.211 far_gap=0.491 horiz=0.358 min_x=0.676
-[WARN] [1785480221.956845046]: [planner][row1-debug] row1-upper direct lane tgt=16 lower=3.791 upper=4.071 connector_mid_y=3.370
-[WARN] [1785480221.956947444]: [planner][row1-debug] initial_reverse tgt=16 same_corr=1 start_to_right=1 start_lane_y=3.370 forward_heading=0.0deg reverse_end_dir=(180.0deg) desired_end_x=0.435 actual_end=(0.435,3.370) curve_start=(1.250,3.709) curve_pts=56 direct_ok=1
-[WARN] [1785480221.957053843]: [planner][row1-debug] skeleton tgt=16 points=4 terminal_reverse=0 goal_lane_y=4.071 terminal_stop_y=3.761 final_ref_x=1.014
-[WARN] [1785480221.957124341]: [planner][row1-debug] skeleton[0]=(0.435,3.370)
-[WARN] [1785480221.957205040]: [planner][row1-debug] skeleton[1]=(0.435,4.071)
-[WARN] [1785480221.957290639]: [planner][row1-debug] skeleton[2]=(1.372,4.071)
-[WARN] [1785480221.957334838]: [planner][row1-debug] skeleton[3]=(1.372,3.579)
-[WARN] [1785480221.957712232]: [planner][row1-debug] row1-upper reverse road a_rev=(1.250,4.301) second=(1.250,3.791)->(0.435,3.791) s0=(0.435,3.370) r=0.189 len=(0.511,0.815,0.420) pts=162 front_theta=90.0deg
-[WARN] [1785480221.957824631]: [path_catalog][debug-layers] A1_to_B16 layers=3 arc=0
-[WARN] [1785480221.957870630]: [path_catalog][debug-layers] layer[0] type=skeleton label=route_skeleton pts=4
-[WARN] [1785480221.957924129]: [path_catalog][debug-layers] S0=(0.435,3.370)
-[WARN] [1785480221.958007728]: [path_catalog][debug-layers] S1=(0.435,4.071)
-[WARN] [1785480221.958076027]: [path_catalog][debug-layers] S2=(1.372,4.071)
-[WARN] [1785480221.958149425]: [path_catalog][debug-layers] S3=(1.372,3.579)
-[WARN] [1785480221.958218324]: [path_catalog][debug-layers] layer[1] type=clothoid label=clothoid pts=86
-[WARN] [1785480221.958319023]: [path_catalog][debug-layers] layer[2] type=clothoid label=clothoid pts=70
-[WARN] [1785480221.958591719]: [path_catalog] single path A1_to_B16 row=1 col=3 wpts=320 len=3.395 arc=0 animate=1
-[WARN] [1785480221.959089810]: [path_catalog] published single path markers on /forklift_map/markers
-[INFO] [1785480222.340171398]: [forklift_map] Published 387 markers on /forklift_map/markers
-
-INFO] [1785480238.912196201]: [path_catalog] A2 virtual slot: id=102 row=7 dock=(1.2500,0.1250) pre=(1.2500,0.4000) yaw=-90.0deg
-[WARN] [1785480238.912245800]: [path_catalog] selected depot=A1 direction=from_depot target_row=-1 targets (66): [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65]
-[WARN] [1785480238.912473796]: [planner][row1-debug] route=A1_TO_B src=101 tgt=18 src_corr=1 tgt_corr=1 target=(1.594,3.761 th=-90.0deg) mode=auto terminal_reverse=0 near_gap=0.211 far_gap=0.491 horiz=0.358 min_x=0.676
-[WARN] [1785480238.912602294]: [planner][row1-debug] row1-upper direct lane tgt=18 lower=3.791 upper=4.071 connector_mid_y=3.370
-[WARN] [1785480238.912679193]: [planner][row1-debug] initial_reverse tgt=18 same_corr=1 start_to_right=1 start_lane_y=3.370 forward_heading=0.0deg reverse_end_dir=(180.0deg) desired_end_x=0.435 actual_end=(0.435,3.370) curve_start=(1.250,3.709) curve_pts=56 direct_ok=1
-[WARN] [1785480238.912788791]: [planner][row1-debug] skeleton tgt=18 points=4 terminal_reverse=0 goal_lane_y=4.071 terminal_stop_y=3.761 final_ref_x=1.235
-[WARN] [1785480238.912874590]: [planner][row1-debug] skeleton[0]=(0.435,3.370)
-[WARN] [1785480238.912927789]: [planner][row1-debug] skeleton[1]=(0.435,4.071)
-[WARN] [1785480238.912971589]: [planner][row1-debug] skeleton[2]=(1.594,4.071)
-[WARN] [1785480238.913023187]: [planner][row1-debug] skeleton[3]=(1.594,3.579)
-[WARN] [1785480238.913238184]: [planner][row1-debug] row1-upper reverse road a_rev=(1.250,4.301) second=(1.250,3.791)->(0.435,3.791) s0=(0.435,3.370) r=0.189 len=(0.511,0.815,0.420) pts=162 front_theta=90.0deg
-[WARN] [1785480238.913349182]: [path_catalog][debug-layers] A1_to_B18 layers=3 arc=0
-[WARN] [1785480238.913394182]: [path_catalog][debug-layers] layer[0] type=skeleton label=route_skeleton pts=4
-[WARN] [1785480238.913494280]: [path_catalog][debug-layers] S0=(0.435,3.370)
-[WARN] [1785480238.913563379]: [path_catalog][debug-layers] S1=(0.435,4.071)
-[WARN] [1785480238.913638778]: [path_catalog][debug-layers] S2=(1.594,4.071)
-[WARN] [1785480238.913713377]: [path_catalog][debug-layers] S3=(1.594,3.579)
-[WARN] [1785480238.913788676]: [path_catalog][debug-layers] layer[1] type=clothoid label=clothoid pts=87
-[WARN] [1785480238.913852875]: [path_catalog][debug-layers] layer[2] type=clothoid label=clothoid pts=81
-[WARN] [1785480238.913935273]: [path_catalog] single path A1_to_B18 row=1 col=4 wpts=332 len=3.606 arc=0 animate=1
-[WARN] [1785480238.914449665]: [path_catalog] published single path markers on /forklift_map/markers
-[INFO] [1785480239.298038232]: [forklift_map] Published 387 markers on /forklift_map/markers
-
+[multi_patrol] coordination log started
+vehicle_count=2 one_shot=0 use_a1_cycle=1 a1_request=1.5 prediction_horizon=10 prediction_step=0.05
+[multi_patrol][state] sim_t=0.10s V0 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=0 slot=38->-1 pending_B=9 s=0.002/3.368 rem=3.366 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] sim_t=0.10s V1 mode=ACTIVE phase=TO_A1 action=NOMINAL reason=clear blocker=-1 task=0 slot=20->-1 pending_B=61 s=0.002/3.391 rem=3.389 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] sim_t=5.10s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.725/3.368 rem=2.644 speed=0.160 wait=0.10 dwell=0.00
+[multi_patrol][state] sim_t=5.30s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=0 slot=38->-1 pending_B=9 s=0.748/3.368 rem=2.621 speed=0.100 wait=0.30 dwell=0.00
+[multi_patrol][state] sim_t=5.60s V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=0 slot=38->-1 pending_B=9 s=0.764/3.368 rem=2.605 speed=0.050 wait=0.60 dwell=0.00
+[multi_patrol][state] sim_t=5.70s V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=0 slot=38->-1 pending_B=9 s=0.769/3.368 rem=2.600 speed=0.050 wait=0.70 dwell=0.00
+[multi_patrol][state] sim_t=6.10s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.786/3.368 rem=2.583 speed=0.020 wait=1.10 dwell=0.00
+[multi_patrol][state] sim_t=6.20s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=0 slot=38->-1 pending_B=9 s=0.786/3.368 rem=2.583 speed=0.000 wait=1.20 dwell=0.00
+[multi_patrol][state] sim_t=6.60s V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=0 slot=38->-1 pending_B=9 s=0.788/3.368 rem=2.581 speed=0.020 wait=1.60 dwell=0.00
+[multi_patrol][state] sim_t=6.70s V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=action_hold blocker=-1 task=0 slot=38->-1 pending_B=9 s=0.792/3.368 rem=2.577 speed=0.040 wait=1.70 dwell=0.00
+[multi_patrol][state] sim_t=6.80s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.793/3.368 rem=2.576 speed=0.010 wait=1.80 dwell=0.00
+[multi_patrol][state] sim_t=6.90s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=0 slot=38->-1 pending_B=9 s=0.793/3.368 rem=2.576 speed=0.000 wait=1.90 dwell=0.00
+[multi_patrol][state] sim_t=7.30s V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=0 slot=38->-1 pending_B=9 s=0.795/3.368 rem=2.574 speed=0.020 wait=2.30 dwell=0.00
+[multi_patrol][state] sim_t=7.40s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.795/3.368 rem=2.574 speed=0.000 wait=2.40 dwell=0.00
+[multi_patrol][state] sim_t=7.50s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=action_hold blocker=-1 task=0 slot=38->-1 pending_B=9 s=0.795/3.368 rem=2.574 speed=0.000 wait=2.50 dwell=0.00
+[multi_patrol][state] sim_t=7.90s V0 mode=ACTIVE phase=TO_A1 action=CREEP reason=clear blocker=-1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.020 wait=2.90 dwell=0.00
+[multi_patrol][state] sim_t=8.00s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=3.00 dwell=0.00
+[multi_patrol][state] sim_t=10.00s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=5.00 dwell=0.00
+[multi_patrol][state] sim_t=12.10s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=7.10 dwell=0.00
+[multi_patrol][state] sim_t=14.20s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=9.20 dwell=0.00
+[multi_patrol][state] sim_t=16.30s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=11.30 dwell=0.00
+[multi_patrol][state] sim_t=18.30s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=13.30 dwell=0.00
+[multi_patrol][state] sim_t=20.40s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=15.40 dwell=0.00
+[multi_patrol][state] sim_t=21.20s V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=pickup_dwell blocker=-1 task=0 slot=20->-1 pending_B=61 s=3.391/3.391 rem=0.000 speed=0.000 wait=0.00 dwell=5.00
+[multi_patrol][state] sim_t=21.30s V1 mode=DWELL phase=PICKUP_DWELL action=STOP reason=not_active blocker=-1 task=0 slot=20->-1 pending_B=61 s=3.391/3.391 rem=0.000 speed=0.000 wait=0.00 dwell=4.90
+[multi_patrol][state] sim_t=22.50s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=17.50 dwell=0.00
+[multi_patrol][state] sim_t=24.50s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=19.50 dwell=0.00
+[multi_patrol][state] sim_t=26.20s V1 mode=ACTIVE phase=TO_B action=NOMINAL reason=clear blocker=-1 task=0 slot=20->61 pending_B=-1 s=0.002/8.398 rem=8.396 speed=0.020 wait=0.00 dwell=0.00
+[multi_patrol][state] sim_t=26.50s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=21.50 dwell=0.00
+[multi_patrol][state] sim_t=28.60s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=23.60 dwell=0.00
+[multi_patrol][state] sim_t=30.70s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=25.70 dwell=0.00
+[multi_patrol][state] sim_t=32.70s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=27.70 dwell=0.00
+[multi_patrol][state] sim_t=34.80s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=29.80 dwell=0.00
+[multi_patrol][state] sim_t=36.80s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=31.80 dwell=0.00
+[multi_patrol][state] sim_t=38.90s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=33.90 dwell=0.00
+[multi_patrol][state] sim_t=39.30s V1 mode=ACTIVE phase=TO_B action=STOP reason=brake_V0 blocker=0 task=0 slot=20->61 pending_B=-1 s=2.142/8.398 rem=6.256 speed=0.134 wait=0.10 dwell=0.00
+[multi_patrol][state] sim_t=39.70s V1 mode=ACTIVE phase=TO_B action=STOP reason=action_hold blocker=-1 task=0 slot=20->61 pending_B=-1 s=2.165/8.398 rem=6.232 speed=0.014 wait=0.50 dwell=0.00
+[multi_patrol][state] sim_t=39.80s V1 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=0 slot=20->61 pending_B=-1 s=2.169/8.398 rem=6.229 speed=0.034 wait=0.60 dwell=0.00
+[multi_patrol][state] sim_t=39.90s V1 mode=ACTIVE phase=TO_B action=CREEP reason=action_hold blocker=-1 task=0 slot=20->61 pending_B=-1 s=2.174/8.398 rem=6.224 speed=0.050 wait=0.70 dwell=0.00
+[multi_patrol][state] sim_t=40.00s V1 mode=ACTIVE phase=TO_B action=STOP reason=brake_V0 blocker=0 task=0 slot=20->61 pending_B=-1 s=2.176/8.398 rem=6.222 speed=0.020 wait=0.80 dwell=0.00
+[multi_patrol][state] sim_t=40.20s V1 mode=ACTIVE phase=TO_B action=STOP reason=action_hold blocker=-1 task=0 slot=20->61 pending_B=-1 s=2.176/8.398 rem=6.222 speed=0.000 wait=1.00 dwell=0.00
+[multi_patrol][state] sim_t=40.50s V1 mode=ACTIVE phase=TO_B action=CREEP reason=clear blocker=-1 task=0 slot=20->61 pending_B=-1 s=2.178/8.398 rem=6.220 speed=0.020 wait=1.30 dwell=0.00
+[coord_diag][cycle] tick=406 sim_t=40.60 ring=V0->V1->V0 a1_state=EXITING a1_owner=V1
+[coord_diag][vehicle]  V0 mode=1 phase=TO_A1 loaded=0 act=0 reason=wait_a1_corridor_V1 blk=1 brkr=0 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 spd=0.000 wait=35.6 gen=1
+[coord_diag][vehicle]  V1 mode=1 phase=TO_B loaded=1 act=0 reason=brake_V0 blk=0 brkr=0 task=0 slot=20->61 pending_B=-1 s=2.178/8.398 rem=6.220 spd=0.000 wait=1.4 gen=2
+[coord_diag][a1_gate] owner=V1 waiter=V0 stop_s=0.846 xy=(1.876,2.950) source=corridor approach_zones=0 departure_zones=2 late=0
+[coord_diag][pair] V0<->V1 a1_owner=V1 reservation=V0 following=0 following_leader=V-1 zones=2 all_same_dir=0 nominal_time_overlap=1 | A phase=TO_A1 s=0.797/3.368 gear=R act=0 blk=V1 gen=1 pending_B=9 pending_gen=1 | B phase=TO_B s=2.178/8.398 gear=F act=0 blk=V0 gen=2 pending_B=-1 pending_gen=1
+[coord_diag][envelope] A[0.500,3.050] committed=1 inside_real=1 | B[0.800,3.125] committed=1 inside_real=1 both_inside_same_zone=0 diagnosis=both_envelope_committed_without_shared_real_occupancy
+[coord_diag][zone 0] same_dir=0 phase=R/F xy=(1.655,2.947) | A[0.500,1.050] stop=0.321 gap=-0.476 inside=1 t=[0.000,1.926] | B[2.375,3.125] stop=2.196 gap=0.018 inside=0 t=[0.427,5.396] overlap=1
+[coord_diag][zone 1] same_dir=0 phase=F/F xy=(1.305,3.879) | A[1.075,3.050] stop=0.896 gap=0.099 inside=0 t=[0.996,11.926] | B[0.800,3.125] stop=0.621 gap=-1.557 inside=1 t=[0.000,5.396] overlap=1
+[multi_patrol][state] sim_t=40.60s V1 mode=ACTIVE phase=TO_B action=STOP reason=brake_V0 blocker=0 task=0 slot=20->61 pending_B=-1 s=2.178/8.398 rem=6.220 speed=0.000 wait=1.40 dwell=0.00
+[multi_patrol][state] sim_t=41.00s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=36.00 dwell=0.00
+[multi_patrol][state] sim_t=42.70s V1 mode=ACTIVE phase=TO_B action=STOP reason=brake_V0 blocker=0 task=0 slot=20->61 pending_B=-1 s=2.178/8.398 rem=6.220 speed=0.000 wait=3.50 dwell=0.00
+[multi_patrol][state] sim_t=43.10s V0 mode=ACTIVE phase=TO_A1 action=STOP reason=wait_a1_corridor_V1 blocker=1 task=0 slot=38->-1 pending_B=9 s=0.797/3.368 rem=2.572 speed=0.000 wait=38.10 dwell=0.00

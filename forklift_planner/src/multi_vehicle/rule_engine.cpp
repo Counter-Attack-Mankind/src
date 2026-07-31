@@ -1,7 +1,6 @@
 #include "forklift_planner/multi_vehicle/rule_engine.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -41,6 +40,18 @@ struct OverlapSample {
     bool other_reverse = false;
     bool same_dir = false;
 };
+
+const char* a1ReleaseKindName(A1ReleaseKind kind) {
+    switch (kind) {
+        case A1ReleaseKind::CORRIDOR_2_TO_3_BRIDGE_EXIT:
+            return "BRIDGE_2_TO_3_EXIT";
+        case A1ReleaseKind::TARGET_B:
+            return "TARGET_B";
+        case A1ReleaseKind::NONE:
+        default:
+            return "NONE";
+    }
+}
 
 }  // namespace
 
@@ -449,104 +460,67 @@ A1TransactionPlan RuleEngine::buildA1TransactionPlan(
     const PathTrack& exit = candidate.pending_dropoff_track;
     if (exit.empty()) return A1TransactionPlan{};
 
-    const double queue_y = 0.5 * (mp_.y6() + mp_.y7());
-    const double right_x0 =
-        mp_.row1_left_aisle + mp_.row1_shelf_width;
-    const double right_x1 =
-        mp_.field_width - mp_.row1_mini_shelf;
-    auto horizontalLine = [](double x0, double x1, double y) {
-        OBB line;
-        line.x = 0.5 * (x0 + x1);
-        line.y = y;
-        line.theta = 0.0;
-        line.half_l = 0.5 * (x1 - x0);
-        line.half_w = 0.002;
-        return line;
-    };
-    auto verticalLine = [](double x, double y0, double y1) {
-        OBB line;
-        line.x = x;
-        line.y = 0.5 * (y0 + y1);
-        line.theta = 0.5 * 3.14159265358979323846;
-        line.half_l = 0.5 * (y1 - y0);
-        line.half_w = 0.002;
-        return line;
-    };
-    const OBB down_left =
-        horizontalLine(0.0, mp_.row1_left_aisle, queue_y);
-    const OBB down_right =
-        horizontalLine(right_x0, right_x1, queue_y);
-    const OBB release_left =
-        verticalLine(mp_.tb_shelf_width, mp_.y7(), mp_.y8());
-    const OBB release_right =
-        verticalLine(mp_.field_width - mp_.tb_shelf_width,
-                     mp_.y7(), mp_.y8());
-    const OBB row1_dock =
-        horizontalLine(mp_.row1_left_aisle,
-                       mp_.row1_left_aisle + mp_.row1_shelf_width,
-                       mp_.y7());
+    // Determine the protection endpoint from the actual frozen path. The
+    // unique bridge between corridors 2 and 3 is the central row-2 gap:
+    // x=[row2_left_width, row2_left_width+row2_gap], y=[y4,y5].
+    // A path that goes down through it releases when the complete body first
+    // clears its lower edge into corridor 3. A path that never uses this
+    // bridge (the row0-3 case) has no earlier common handoff point and remains
+    // protected all the way to its target B.
+    OBB bridge_exit_line;
+    bridge_exit_line.x =
+        mp_.row2_left_width + 0.5 * mp_.row2_gap;
+    bridge_exit_line.y = mp_.y4();
+    bridge_exit_line.theta = 0.0;
+    bridge_exit_line.half_l = 0.5 * mp_.row2_gap;
+    bridge_exit_line.half_w = 0.002;
 
-    auto lastTouch = [&](const OBB& line) {
-        constexpr double kScanStep = 0.005;
-        double last = std::numeric_limits<double>::quiet_NaN();
-        for (double s = 0.0; s <= exit.length() + 1e-9;
-             s += kScanStep) {
-            const double ss = std::min(s, exit.length());
-            if (overlaps(makeBody(exit.poseAtS(ss), mp_, 0.0), line)) {
-                last = ss;
+    constexpr double kScanStep = 0.005;
+    bool crossed_bridge_center = false;
+    double bridge_release_s =
+        std::numeric_limits<double>::infinity();
+    const int scan_count = std::max(
+        1, static_cast<int>(
+               std::ceil(exit.length() / kScanStep)));
+    RoughWp previous = exit.poseAtS(0.0);
+    for (int i = 0; i <= scan_count; ++i) {
+        const double ss = std::min(
+            static_cast<double>(i) * kScanStep,
+            exit.length());
+        const RoughWp pose = exit.poseAtS(ss);
+        if (!crossed_bridge_center && i > 0 &&
+            previous.y >= mp_.y4() && pose.y < mp_.y4()) {
+            const double dy = previous.y - pose.y;
+            const double ratio =
+                dy > 1e-9
+                    ? (previous.y - mp_.y4()) / dy
+                    : 0.0;
+            const double crossing_x =
+                previous.x + ratio * (pose.x - previous.x);
+            if (crossing_x >= mp_.row2_left_width - 1e-9 &&
+                crossing_x <=
+                    mp_.row2_left_width + mp_.row2_gap + 1e-9) {
+                crossed_bridge_center = true;
             }
         }
-        return last;
-    };
-    auto boundsAtEnd = [&]() {
-        double min_x = std::numeric_limits<double>::infinity();
-        double max_x = -std::numeric_limits<double>::infinity();
-        double min_y = std::numeric_limits<double>::infinity();
-        double max_y = -std::numeric_limits<double>::infinity();
-        for (const FootprintPoint& c :
-             footprintCorners(exit.poseAtS(exit.length()), mp_, 0.0)) {
-            min_x = std::min(min_x, c.x);
-            max_x = std::max(max_x, c.x);
-            min_y = std::min(min_y, c.y);
-            max_y = std::max(max_y, c.y);
+        const bool touching =
+            overlaps(makeBody(pose, mp_, 0.0), bridge_exit_line);
+        if (crossed_bridge_center && !touching &&
+            pose.y < mp_.y4()) {
+            bridge_release_s = ss;
+            break;
         }
-        return std::array<double, 4>{{min_x, max_x, min_y, max_y}};
-    };
-    const std::array<double, 4> end = boundsAtEnd();
-    constexpr double kBoundaryTolerance = 0.003;
-
-    double last = std::numeric_limits<double>::quiet_NaN();
-    if (end[3] < queue_y - kBoundaryTolerance) {
-        const double left = lastTouch(down_left);
-        const double right = lastTouch(down_right);
-        if (std::isfinite(left) || std::isfinite(right)) {
-            if (!std::isfinite(right) ||
-                (std::isfinite(left) && left >= right)) {
-                plan.release_kind = A1ReleaseKind::DOWN_LEFT;
-                last = left;
-            } else {
-                plan.release_kind = A1ReleaseKind::DOWN_RIGHT;
-                last = right;
-            }
-        }
-    } else if (exit.poseAtS(exit.length()).x < 0.5 * mp_.field_width &&
-               end[1] < mp_.tb_shelf_width - kBoundaryTolerance) {
-        plan.release_kind = A1ReleaseKind::LEFT_VERTICAL;
-        last = lastTouch(release_left);
-    } else if (
-        exit.poseAtS(exit.length()).x >= 0.5 * mp_.field_width &&
-        end[0] >
-            mp_.field_width - mp_.tb_shelf_width +
-                kBoundaryTolerance) {
-        plan.release_kind = A1ReleaseKind::RIGHT_VERTICAL;
-        last = lastTouch(release_right);
-    } else if (end[3] <= mp_.y7() + kBoundaryTolerance) {
-        plan.release_kind = A1ReleaseKind::ROW1_DOCK;
-        last = lastTouch(row1_dock);
+        previous = pose;
     }
 
-    if (!std::isfinite(last)) return A1TransactionPlan{};
-    plan.release_s = std::min(exit.length(), last + 0.005);
+    if (std::isfinite(bridge_release_s)) {
+        plan.release_kind =
+            A1ReleaseKind::CORRIDOR_2_TO_3_BRIDGE_EXIT;
+        plan.release_s = bridge_release_s;
+    } else {
+        plan.release_kind = A1ReleaseKind::TARGET_B;
+        plan.release_s = exit.length();
+    }
     return plan;
 }
 
@@ -1886,7 +1860,43 @@ void RuleEngine::resolveA1LocalService(
                 a1_transaction_.frozen_target_slot &&
             owner->path_gen ==
                 a1_transaction_.frozen_exit_path_gen;
-        if (!(approaching || loading || exiting)) {
+        const bool reached_frozen_target =
+            a1_transaction_.release_kind ==
+                A1ReleaseKind::TARGET_B &&
+            owner->mode == VehicleMode::DWELL &&
+            owner->mission_phase ==
+                MissionPhase::UNLOAD_DWELL &&
+            owner->current_slot ==
+                a1_transaction_.frozen_target_slot &&
+            owner->target_slot ==
+                a1_transaction_.frozen_target_slot &&
+            owner->path_gen ==
+                a1_transaction_.frozen_exit_path_gen;
+        const bool crossed_release =
+            (exiting &&
+             owner->path_s + 1e-9 >=
+                 a1_transaction_.release_s) ||
+            reached_frozen_target;
+        if (crossed_release) {
+            const int released = owner->id;
+            const int target =
+                a1_transaction_.frozen_target_slot;
+            const double release_s =
+                a1_transaction_.release_s;
+            const A1ReleaseKind release_kind =
+                a1_transaction_.release_kind;
+            clearTransaction();
+            owner = nullptr;
+            a1_request_queue_.erase(
+                std::remove(a1_request_queue_.begin(),
+                            a1_request_queue_.end(), released),
+                a1_request_queue_.end());
+            ROS_INFO(
+                "[multi_patrol][A1 release] owner=V%d target=B%d "
+                "release_s=%.3f kind=%s; vehicle is now ordinary traffic",
+                released, target, release_s,
+                a1ReleaseKindName(release_kind));
+        } else if (!(approaching || loading || exiting)) {
             ROS_ERROR_THROTTLE(
                 2.0,
                 "[multi_patrol][A1 invariant] owner V%d changed "
@@ -1898,24 +1908,6 @@ void RuleEngine::resolveA1LocalService(
                     *owner, VehicleAction::STOP,
                     "a1_frozen_route_changed", -1);
             }
-        } else if (exiting &&
-                   owner->path_s + 1e-9 >=
-                       a1_transaction_.release_s) {
-            const int released = owner->id;
-            const int target =
-                a1_transaction_.frozen_target_slot;
-            const double release_s =
-                a1_transaction_.release_s;
-            clearTransaction();
-            owner = nullptr;
-            a1_request_queue_.erase(
-                std::remove(a1_request_queue_.begin(),
-                            a1_request_queue_.end(), released),
-                a1_request_queue_.end());
-            ROS_INFO(
-                "[multi_patrol][A1 release] owner=V%d target=B%d "
-                "release_s=%.3f; vehicle is now ordinary traffic",
-                released, target, release_s);
         }
     } else if (a1_service_owner_ >= 0 ||
                a1_transaction_.valid()) {
@@ -1966,7 +1958,7 @@ void RuleEngine::resolveA1LocalService(
                 owner = candidate;
                 ROS_INFO(
                     "[multi_patrol][A1 admit] owner=V%d target=B%d "
-                    "entry_s=%.3f side=%s release_s=%.3f kind=%d",
+                    "entry_s=%.3f side=%s release_s=%.3f kind=%s",
                     owner->id,
                     a1_transaction_.frozen_target_slot,
                     a1_transaction_.admission_stop_s,
@@ -1974,7 +1966,7 @@ void RuleEngine::resolveA1LocalService(
                             A1AdmissionSide::LEFT
                         ? "LEFT" : "RIGHT",
                     a1_transaction_.release_s,
-                    static_cast<int>(
+                    a1ReleaseKindName(
                         a1_transaction_.release_kind));
             } else {
                 a1_admission_blocker_ = blocker;
