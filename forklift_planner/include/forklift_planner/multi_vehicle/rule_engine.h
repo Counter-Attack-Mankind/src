@@ -90,6 +90,7 @@ public:
         int a1_service_owner = -1;
         int a1_admission_candidate = -1;
         int a1_admission_blocker = -1;
+        std::vector<int> a1_request_queue;
         std::vector<ConflictMarker> conflicts;
         std::vector<A1GateMarker> a1_gate_markers;
     };
@@ -100,6 +101,7 @@ public:
                            a1_egress_owner_, a1_service_owner_,
                            a1_admission_candidate_,
                            a1_admission_blocker_,
+                           a1_request_queue_,
                            conflicts_, a1_gate_markers_};
     }
     void restore(const SimSnapshot& s) {
@@ -115,6 +117,7 @@ public:
         a1_service_owner_ = s.a1_service_owner;
         a1_admission_candidate_ = s.a1_admission_candidate;
         a1_admission_blocker_ = s.a1_admission_blocker;
+        a1_request_queue_ = s.a1_request_queue;
         conflicts_ = s.conflicts;
         a1_gate_markers_ = s.a1_gate_markers;
         a1_gate_plans_.clear();
@@ -141,9 +144,9 @@ public:
     }
     int a1AdmissionBlocker() const { return a1_admission_blocker_; }
 
-    // Read-only dispatch interlock. A reserved owner cannot stop an already
-    // moving vehicle, but it may prevent a new B->A1 task from being launched
-    // when that proposed track intersects its approach or cached exit chain.
+    // B->A1 dispatch is independent from the local A1 service transaction.
+    // Vehicles may travel concurrently and are serialized only after crossing
+    // the A1 request boundary.
     bool a1PickupDispatchAllowed(
         const VehicleAgent& proposed_pickup,
         const std::vector<VehicleAgent>& vehicles,
@@ -337,6 +340,9 @@ private:
     // fallback remain meaningful.
     int a1_admission_candidate_ = -1;
     int a1_admission_blocker_ = -1;
+    // Persistent FIFO of vehicles that crossed the local A1 request boundary.
+    // Entries keep their order across decision cycles and owner hand-offs.
+    std::vector<int> a1_request_queue_;
 };
 
 }  // namespace multi_vehicle

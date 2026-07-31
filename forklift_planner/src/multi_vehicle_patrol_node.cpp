@@ -2458,11 +2458,7 @@ public:
             const int owner_id =
                 rule_engine_->a1ServiceOwner() >= 0
                     ? rule_engine_->a1ServiceOwner()
-                    : (rule_engine_->a1EgressOwner() >= 0
-                           ? rule_engine_->a1EgressOwner()
-                           : (rule_engine_->a1AdmissionCandidate() >= 0
-                                  ? rule_engine_->a1AdmissionCandidate()
-                                  : rule_engine_->a1ReservedOwner()));
+                    : rule_engine_->a1EgressOwner();
             VehicleAgent* owner = agentById(owner_id);
             const bool owner_has_pending_leg =
                 owner != nullptr && owner->hasPendingDropoff() &&
