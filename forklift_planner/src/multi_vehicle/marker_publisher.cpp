@@ -485,7 +485,7 @@ void MarkerPublisher::addA1GateMarkers(
     auto sourceName = [](A1GateSource source) {
         switch (source) {
             case A1GateSource::TURN: return "TURN";
-            case A1GateSource::CORRIDOR: return "CORRIDOR";
+            case A1GateSource::LOCAL_CONFLICT: return "LOCAL";
         }
         return "?";
     };

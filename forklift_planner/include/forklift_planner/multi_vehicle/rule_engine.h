@@ -34,7 +34,7 @@ struct ConflictMarker {
 
 enum class A1GateSource {
     TURN,
-    CORRIDOR,
+    LOCAL_CONFLICT,
 };
 
 enum class A1AdmissionSide {
@@ -235,6 +235,8 @@ private:
         int waiter_id = -1;
         double stop_s = 0.0;
         double fixed_stop_s = 0.0;
+        double approach_stop_s = 0.0;
+        double departure_stop_s = 0.0;
         A1GateSource source = A1GateSource::TURN;
         std::vector<ConflictZone> approach_zones;
         std::vector<ConflictZone> departure_zones;

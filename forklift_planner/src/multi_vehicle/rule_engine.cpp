@@ -554,6 +554,8 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
     const double inf = std::numeric_limits<double>::infinity();
     plan.stop_s = inf;
     plan.fixed_stop_s = inf;
+    plan.approach_stop_s = inf;
+    plan.departure_stop_s = inf;
 
     auto clipOwnerRange = [](std::vector<ConflictZone> zones,
                              double begin_s, double end_s) {
@@ -595,11 +597,23 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
         }
         return zones;
     };
+    auto addStop = [&](const std::vector<ConflictZone>& zones,
+                       double* stop_s) {
+        for (const ConflictZone& z : zones) {
+            *stop_s = std::min(
+                *stop_s,
+                std::max(0.0, z.s_other_enter -
+                                  mp_.body_front_ext() -
+                                  cfg_.a1_stop_margin));
+        }
+    };
+
     if (owner.mission_phase == MissionPhase::TO_A1 &&
         owner.path_gen == transaction.admitted_path_gen) {
         plan.approach_zones = clipOwnerRange(
             fullConflictZones(owner, waiter),
             transaction.admission_stop_s, owner.track.length());
+        addStop(plan.approach_zones, &plan.approach_stop_s);
     }
 
     if (owner.hasPendingDropoff() &&
@@ -618,22 +632,30 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
             fullConflictZones(owner, waiter),
             0.0, transaction.release_s);
     }
+    addStop(plan.departure_zones, &plan.departure_stop_s);
+
     if (waiter.mission_phase == MissionPhase::TO_A1) {
         A1AdmissionSide waiter_side = A1AdmissionSide::NONE;
         plan.fixed_stop_s =
             a1AdmissionStopS(waiter, &waiter_side);
     }
 
-    // A1 is a local service mutex, not a predictor that reserves every
-    // future geometric intersection. Only another A1 requester is held, at
-    // its own physical admission line. The local conflict zones remain in
-    // the plan solely to verify that the area is clear before admission and
-    // to keep ordinary orange arbitration from overriding the active owner
-    // inside the local service prefix.
-    if (std::isfinite(plan.fixed_stop_s)) {
-        plan.stop_s = plan.fixed_stop_s;
-        plan.source = A1GateSource::TURN;
-    }
+    // Hold the waiter outside both its own admission boundary and the
+    // current owner's exact local protected prefix. These conflict gates are
+    // clipped at the local release boundary, so they do not restore any
+    // bridge or destination-B reservation.
+    auto consider = [&](double stop_s, A1GateSource source) {
+        if (!std::isfinite(stop_s)) return;
+        if (stop_s < plan.stop_s) {
+            plan.stop_s = stop_s;
+            plan.source = source;
+        }
+    };
+    consider(plan.fixed_stop_s, A1GateSource::TURN);
+    consider(plan.approach_stop_s,
+             A1GateSource::LOCAL_CONFLICT);
+    consider(plan.departure_stop_s,
+             A1GateSource::LOCAL_CONFLICT);
     return plan;
 }
 
@@ -699,7 +721,8 @@ bool RuleEngine::conflictZoneInA1Chain(
 const char* RuleEngine::a1GateSourceName(A1GateSource source) {
     switch (source) {
         case A1GateSource::TURN: return "turn";
-        case A1GateSource::CORRIDOR: return "corridor";
+        case A1GateSource::LOCAL_CONFLICT:
+            return "local_conflict";
     }
     return "unknown";
 }
@@ -1919,8 +1942,9 @@ void RuleEngine::resolveA1LocalService(
     }
 
     // Admit only the FIFO head. The local area must be physically clear, and
-    // every later A1 requester must still be able to stop at its own
-    // admission line. Ordinary loaded traffic creates no future reservation.
+    // every affected vehicle must still be able to stop at its selected
+    // local gate. Loaded traffic without a local intersection remains
+    // unrelated ordinary traffic.
     if (owner == nullptr && !a1_request_queue_.empty()) {
         VehicleAgent* candidate =
             findById(a1_request_queue_.front());
@@ -1954,19 +1978,21 @@ void RuleEngine::resolveA1LocalService(
                     continue;
                 }
 
-                // Another A1 requester must still be able to stop at its own
-                // admission line. Loaded ordinary traffic is not stopped or
-                // treated as a future route reservation; if it has already
-                // cleared the local area, it is unrelated to this admission.
-                if (other.mission_phase == MissionPhase::TO_A1) {
+                // The selected gate is the earlier of an A1 requester's own
+                // admission line and the complete-body stop line upstream of
+                // the candidate owner's local purple conflict interval.
+                if (std::isfinite(gate.stop_s)) {
                     const double distance =
-                        gate.fixed_stop_s - other.path_s;
-                    if (!std::isfinite(gate.fixed_stop_s) ||
-                        distance + 0.02 <
+                        gate.stop_s - other.path_s;
+                    if (distance + 0.02 <
                             a1SafeStoppingDistance(other, dt)) {
                         admissible = false;
                         blocker = other.id;
                     }
+                } else if (other.mission_phase ==
+                           MissionPhase::TO_A1) {
+                    admissible = false;
+                    blocker = other.id;
                 }
             }
             if (admissible) {
@@ -2059,8 +2085,11 @@ void RuleEngine::resolveA1LocalService(
             }
             applyActionRequest(
                 v, VehicleAction::STOP,
-                "wait_a1_turn_V" +
-                    std::to_string(owner->id),
+                gate.source == A1GateSource::TURN
+                    ? "wait_a1_turn_V" +
+                          std::to_string(owner->id)
+                    : "wait_a1_local_V" +
+                          std::to_string(owner->id),
                 owner->id);
         }
     }

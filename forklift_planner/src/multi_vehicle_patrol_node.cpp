@@ -1570,7 +1570,8 @@ private:
         auto gateSourceName = [](A1GateSource source) {
             switch (source) {
                 case A1GateSource::TURN: return "turn";
-                case A1GateSource::CORRIDOR: return "corridor";
+                case A1GateSource::LOCAL_CONFLICT:
+                    return "local_conflict";
             }
             return "unknown";
         };
