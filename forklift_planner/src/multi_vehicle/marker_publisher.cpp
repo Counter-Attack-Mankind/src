@@ -257,6 +257,15 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
     visualization_msgs::MarkerArray& arr) const {
     if (!cfg_.use_a1_cycle) return;
 
+    // Remove the old verbose service label from earlier builds.
+    visualization_msgs::Marker stale_service_label;
+    stale_service_label.header.frame_id = pp_.frame_id;
+    stale_service_label.header.stamp = ros::Time::now();
+    stale_service_label.ns = "a1_service_zone";
+    stale_service_label.id = 10;
+    stale_service_label.action = visualization_msgs::Marker::DELETE;
+    arr.markers.push_back(stale_service_label);
+
     // Static local loading throat. The active owner's exact approach/exit
     // prefix is shown separately by protected conflict markers.
     const double queue_y = 0.5 * (mp_.y6() + mp_.y7());
@@ -264,8 +273,10 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
     const double right_x1 = mp_.field_width - mp_.row1_mini_shelf;
     const std_msgs::ColorRGBA fill =
         rgba(1.00f, 0.20f, 0.10f, 0.15f);
-    const std_msgs::ColorRGBA edge =
+    const std_msgs::ColorRGBA admission_color =
         rgba(1.00f, 0.30f, 0.10f, 0.95f);
+    const std_msgs::ColorRGBA release_color =
+        rgba(0.12f, 0.95f, 0.38f, 0.96f);
 
     auto addBox = [&](int id, double x0, double x1,
                       double y0, double y1) {
@@ -303,7 +314,7 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
         m.action = visualization_msgs::Marker::ADD;
         m.pose.orientation.w = 1.0;
         m.scale.x = 0.026;
-        m.color = edge;
+        m.color = admission_color;
         m.points.push_back(pt3(x0, queue_y, 0.026));
         m.points.push_back(pt3(x1, queue_y, 0.026));
         arr.markers.push_back(m);
@@ -322,7 +333,7 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
         m.action = visualization_msgs::Marker::ADD;
         m.pose.orientation.w = 1.0;
         m.scale.x = 0.026;
-        m.color = edge;
+        m.color = release_color;
         m.points.push_back(pt3(x, mp_.y7(), 0.026));
         m.points.push_back(pt3(x, mp_.y8(), 0.026));
         arr.markers.push_back(m);
@@ -340,7 +351,7 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
     row1_release.action = visualization_msgs::Marker::ADD;
     row1_release.pose.orientation.w = 1.0;
     row1_release.scale.x = 0.026;
-    row1_release.color = edge;
+    row1_release.color = release_color;
     row1_release.points.push_back(
         pt3(mp_.row1_left_aisle, mp_.y7(), 0.026));
     row1_release.points.push_back(
@@ -348,22 +359,39 @@ void MarkerPublisher::addA1ServiceZoneMarkers(
             mp_.y7(), 0.026));
     arr.markers.push_back(row1_release);
 
-    visualization_msgs::Marker label;
-    label.header.frame_id = pp_.frame_id;
-    label.header.stamp = ros::Time::now();
-    label.ns = "a1_service_zone";
-    label.id = 10;
-    label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-    label.action = visualization_msgs::Marker::ADD;
-    label.pose.position.x = 0.5 * mp_.field_width;
-    label.pose.position.y =
-        mp_.field_height - 0.5 * mp_.bottom_shelf_depth;
-    label.pose.position.z = 0.115;
-    label.pose.orientation.w = 1.0;
-    label.scale.z = 0.085;
-    label.color = edge;
-    label.text = "A1 LOCAL SERVICE";
-    arr.markers.push_back(label);
+    auto addBoundaryLabel = [&](int id, double x, double y,
+                                const std::string& text,
+                                const std_msgs::ColorRGBA& color) {
+        visualization_msgs::Marker label;
+        label.header.frame_id = pp_.frame_id;
+        label.header.stamp = ros::Time::now();
+        label.ns = "a1_boundary_labels";
+        label.id = id;
+        label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+        label.action = visualization_msgs::Marker::ADD;
+        label.pose.position.x = x;
+        label.pose.position.y = y;
+        label.pose.position.z = 0.105;
+        label.pose.orientation.w = 1.0;
+        label.scale.z = 0.050;
+        label.color = color;
+        label.text = text;
+        arr.markers.push_back(label);
+    };
+    addBoundaryLabel(0, 0.5 * mp_.row1_left_aisle, queue_y,
+                     "ENTRY-L / RELEASE-DOWN-L", admission_color);
+    addBoundaryLabel(1, 0.5 * (right_x0 + right_x1), queue_y,
+                     "ENTRY-R / RELEASE-DOWN-R", admission_color);
+    addBoundaryLabel(2, mp_.tb_shelf_width,
+                     0.5 * (mp_.y7() + mp_.y8()),
+                     "RELEASE-L", release_color);
+    addBoundaryLabel(3, mp_.field_width - mp_.tb_shelf_width,
+                     0.5 * (mp_.y7() + mp_.y8()),
+                     "RELEASE-R", release_color);
+    addBoundaryLabel(4,
+                     mp_.row1_left_aisle +
+                         0.5 * mp_.row1_shelf_width,
+                     mp_.y7(), "RELEASE-ROW1", release_color);
 }
 
 void MarkerPublisher::addConflictMarkers(
@@ -371,7 +399,8 @@ void MarkerPublisher::addConflictMarkers(
     const std::vector<ConflictMarker>& conflicts) const {
     const char* same_ns = "conflict_same_direction";
     const char* mutual_ns = "conflict_crossing_or_opposing";
-    const char* a1_ns = "conflict_a1_protected";
+    const char* a1_ns = "conflict_a1_controlled";
+    const char* old_a1_ns = "conflict_a1_protected";
     auto deleteMarkers = [&](const char* marker_ns, int count) {
         for (int id = 0; id < count; ++id) {
             visualization_msgs::Marker m;
@@ -383,6 +412,10 @@ void MarkerPublisher::addConflictMarkers(
             arr.markers.push_back(m);
         }
     };
+    // Namespace changed from purple "protected" regions to gold A1
+    // controlled conflicts; explicitly clear markers published by old code.
+    deleteMarkers(old_a1_ns,
+                  last_a1_protected_conflict_marker_count_);
 
     if (!cfg_.show_prediction_conflicts) {
         deleteMarkers(same_ns,
@@ -428,9 +461,9 @@ void MarkerPublisher::addConflictMarkers(
         m.scale.y = c.scale_y;
         m.scale.z = 0.012;
         if (a1_protected) {
-            // Light purple: exact blocks belonging to the authoritative A1
-            // approach/load/departure transaction.
-            m.color = rgba(0.78f, 0.48f, 1.00f, 0.34f);
+            // Gold: ordinary geometry whose holder is dictated by the local
+            // A1 owner/clearing protocol, not by orange arbitration.
+            m.color = rgba(1.00f, 0.82f, 0.10f, 0.42f);
         } else if (same_direction) {
             // Light cyan: longitudinal following arbitration.
             m.color = rgba(0.35f, 0.82f, 1.00f, 0.28f);
@@ -482,18 +515,10 @@ void MarkerPublisher::addA1GateMarkers(
     const std::vector<A1GateMarker>& a1_gates) const {
     const char* gate_ns = "a1_authoritative_gate";
     int marker_id = 0;
-    auto sourceName = [](A1GateSource source) {
-        switch (source) {
-            case A1GateSource::TURN: return "TURN";
-            case A1GateSource::LOCAL_CONFLICT: return "LOCAL";
-        }
-        return "?";
-    };
-
     for (const A1GateMarker& gate : a1_gates) {
         const std_msgs::ColorRGBA color =
             gate.late ? rgba(1.00f, 0.16f, 0.26f, 0.98f)
-                      : rgba(0.90f, 0.58f, 1.00f, 0.98f);
+                      : rgba(1.00f, 0.82f, 0.10f, 0.98f);
         const double half_width =
             std::max(0.12, 0.75 * mp_.vehicle_width);
         const double dx = -std::sin(gate.theta) * half_width;
@@ -528,14 +553,11 @@ void MarkerPublisher::addA1GateMarkers(
         label.color = color;
         std::ostringstream text;
         if (gate.waiter_id == gate.owner_id) {
-            text << "A1 HEAD V" << gate.waiter_id;
+            text << "V" << gate.waiter_id << " WAIT A1";
         } else {
-            text << "A1 GATE V" << gate.waiter_id
-                 << "->V" << gate.owner_id;
+            text << "V" << gate.waiter_id
+                 << " YIELD A1/V" << gate.owner_id;
         }
-        text << " " << sourceName(gate.source)
-             << " A" << gate.approach_zone_count
-             << "/D" << gate.departure_zone_count;
         label.text = text.str();
         arr.markers.push_back(label);
     }

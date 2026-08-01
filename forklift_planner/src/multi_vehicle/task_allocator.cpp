@@ -1317,6 +1317,64 @@ bool TaskAllocator::reserveDropoffLeg(
     return false;
 }
 
+std::vector<A1DropoffOption> TaskAllocator::a1DropoffOptions(
+    const VehicleAgent& vehicle,
+    const std::vector<VehicleAgent>& all) const {
+    ensureA1LegCache();
+    std::vector<A1DropoffOption> preferred;
+    std::vector<A1DropoffOption> alternatives;
+    for (int target = 0;
+         target < static_cast<int>(map_.slots().size()); ++target) {
+        if (target == vehicle.current_slot ||
+            taskTargetDisabled(target) ||
+            slotReservedByOther(vehicle, all, target)) {
+            continue;
+        }
+        const DepotLegCache& leg =
+            a1_to_b_leg_cache_.at(static_cast<size_t>(target));
+        if (!leg.ready || !leg.valid || leg.path.empty()) continue;
+        if (cfg_.skip_arc_fallback_paths &&
+            leg.info.used_arc_fallback) {
+            continue;
+        }
+        A1DropoffOption option;
+        option.target_slot = target;
+        option.track.set(leg.path);
+        if (target == vehicle.pending_target_slot) {
+            preferred.push_back(std::move(option));
+        } else {
+            alternatives.push_back(std::move(option));
+        }
+    }
+    std::sort(
+        alternatives.begin(), alternatives.end(),
+        [](const A1DropoffOption& lhs,
+           const A1DropoffOption& rhs) {
+            if (std::abs(lhs.track.length() - rhs.track.length()) >
+                1e-9) {
+                return lhs.track.length() < rhs.track.length();
+            }
+            return lhs.target_slot < rhs.target_slot;
+        });
+    preferred.insert(preferred.end(),
+                     alternatives.begin(), alternatives.end());
+    return preferred;
+}
+
+void TaskAllocator::setPendingDropoffOption(
+    VehicleAgent& vehicle, const A1DropoffOption& option) const {
+    if (option.target_slot < 0 || option.track.empty()) return;
+    const int previous = vehicle.pending_target_slot;
+    vehicle.pending_target_slot = option.target_slot;
+    vehicle.pending_dropoff_track = option.track;
+    ++vehicle.pending_path_gen;
+    ROS_WARN(
+        "[multi_patrol][A1 target fallback] V%d B%d -> B%d "
+        "local-exit compatible len=%.3f pending_gen=%d",
+        vehicle.id, previous, option.target_slot,
+        option.track.length(), vehicle.pending_path_gen);
+}
+
 bool TaskAllocator::activateReservedDropoffLeg(VehicleAgent& vehicle) {
     if (!vehicle.hasPendingDropoff() ||
         taskTargetDisabled(vehicle.pending_target_slot)) {

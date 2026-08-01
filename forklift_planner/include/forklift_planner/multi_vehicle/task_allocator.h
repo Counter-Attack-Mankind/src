@@ -39,6 +39,11 @@ struct DepotLegCache {
     PathGenerationInfo info;
 };
 
+struct A1DropoffOption {
+    int target_slot = -1;
+    PathTrack track;
+};
+
 class TaskAllocator {
 public:
     TaskAllocator(const MapParam& mp, const PlannerParam& pp,
@@ -84,6 +89,15 @@ public:
     int nearestForwardTargetLen(const VehicleAgent& vehicle,
                                 const std::vector<VehicleAgent>& all,
                                 double& out_len) const;
+
+    // Candidate A1->B legs for atomic A1 admission. The currently specified
+    // target is returned first when valid; remaining free targets are ordered
+    // by path length. Selection is committed only through the setter below.
+    std::vector<A1DropoffOption> a1DropoffOptions(
+        const VehicleAgent& vehicle,
+        const std::vector<VehicleAgent>& all) const;
+    void setPendingDropoffOption(VehicleAgent& vehicle,
+                                 const A1DropoffOption& option) const;
 
 private:
     TaskPlanCache makeTaskPlan(int src_id, int target_id) const;

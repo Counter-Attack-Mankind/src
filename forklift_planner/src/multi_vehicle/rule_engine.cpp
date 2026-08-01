@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "forklift_planner/multi_vehicle/footprint.h"
+#include "forklift_planner/multi_vehicle/task_allocator.h"
 
 namespace forklift_planner {
 namespace multi_vehicle {
@@ -591,6 +592,114 @@ A1TransactionPlan RuleEngine::buildA1TransactionPlan(
     return plan;
 }
 
+bool RuleEngine::selectLocallyCompatibleA1Dropoff(
+    VehicleAgent& candidate,
+    const std::vector<VehicleAgent>& vehicles) {
+    if (task_allocator_ == nullptr) return candidate.hasPendingDropoff();
+    const std::vector<A1DropoffOption> options =
+        task_allocator_->a1DropoffOptions(candidate, vehicles);
+    for (size_t option_index = 0; option_index < options.size();
+         ++option_index) {
+        const A1DropoffOption& option = options[option_index];
+        VehicleAgent trial = candidate;
+        trial.pending_target_slot = option.target_slot;
+        trial.pending_dropoff_track = option.track;
+        // Keep future-conflict cache entries distinct while evaluating
+        // alternatives without mutating the real reservation.
+        trial.pending_path_gen = candidate.pending_path_gen +
+            1 + static_cast<int>(option_index);
+        const A1TransactionPlan transaction =
+            buildA1TransactionPlan(trial);
+        if (!transaction.valid()) continue;
+
+        bool compatible = true;
+        int incompatible_waiter = -1;
+        for (const VehicleAgent& other : vehicles) {
+            if (other.id == candidate.id || !other.active() ||
+                other.mission_phase != MissionPhase::TO_A1 ||
+                !other.hasPendingDropoff()) {
+                continue;
+            }
+            A1AdmissionSide side = A1AdmissionSide::NONE;
+            const double admission =
+                a1AdmissionStopS(other, &side);
+            if (!std::isfinite(admission) ||
+                side == A1AdmissionSide::NONE) {
+                compatible = false;
+                incompatible_waiter = other.id;
+                break;
+            }
+            VehicleAgent parked = other;
+            parked.path_s = std::max(
+                0.0, std::min(admission, parked.track.length()));
+            parked.current_speed = 0.0;
+            const A1GatePlan gate =
+                buildA1GatePlan(trial, parked, transaction);
+            bool blocks_before_release = waiterInsideA1Zones(
+                parked, gate.departure_zones);
+
+            // The local A1 gate deliberately clips protection at the release
+            // line.  That is the right run-time ownership boundary, but it is
+            // not sufficient for choosing the frozen A1->B leg: a waiter can
+            // be correctly parked at its admission line while occupying an
+            // ordinary conflict block whose owner-side stop line lies before
+            // the release line.  Selecting that B would create an unavoidable
+            // cycle (owner cannot release; waiter cannot enter).  Reject only
+            // the candidate route here; do not promote the remainder of the
+            // block to an A1-controlled region at run time.
+            if (!blocks_before_release) {
+                VehicleAgent departure = trial;
+                departure.track = trial.pending_dropoff_track;
+                departure.path_s = 0.0;
+                const std::vector<ConflictZone> full_blocks =
+                    computeConflictZonesFull(departure, parked);
+                const double front = mp_.body_front_ext();
+                const double rear = mp_.body_rear_ext();
+                for (const ConflictZone& z : full_blocks) {
+                    const bool waiter_occupies =
+                        parked.path_s + front >=
+                            z.s_other_enter - 1e-9 &&
+                        parked.path_s - rear <=
+                            z.s_other_exit + 1e-9;
+                    const double owner_stop_s =
+                        std::max(0.0, z.s_self_enter - front);
+                    if (waiter_occupies &&
+                        owner_stop_s <= transaction.release_s + 1e-9) {
+                        blocks_before_release = true;
+                        break;
+                    }
+                }
+            }
+            if (blocks_before_release) {
+                compatible = false;
+                incompatible_waiter = other.id;
+                break;
+            }
+        }
+        if (!compatible) {
+            ROS_INFO_THROTTLE(
+                1.0,
+                "[multi_patrol][A1 target check] V%d target=B%d "
+                "rejected: waiter V%d at its admission line blocks "
+                "the local exit prefix",
+                candidate.id, option.target_slot,
+                incompatible_waiter);
+            continue;
+        }
+
+        if (candidate.pending_target_slot != option.target_slot) {
+            task_allocator_->setPendingDropoffOption(candidate, option);
+        }
+        return true;
+    }
+    ROS_WARN_THROTTLE(
+        1.0,
+        "[multi_patrol][A1 target check] V%d has no A1->B option "
+        "compatible with all TO_A1 admission-line waiting poses",
+        candidate.id);
+    return false;
+}
+
 RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
     const VehicleAgent& owner, const VehicleAgent& waiter,
     const A1TransactionPlan& transaction) {
@@ -687,16 +796,27 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
             transaction.frozen_target_slot) {
         departure_all_zones = std::vector<ConflictZone>(
             pendingDepartureConflictBlocks(owner, waiter));
+        // A conflict is A1-controlled when its safe owner stop line is at or
+        // before the release line.  Testing only the geometric overlap entry
+        // misses the final body-length interval: ordinary arbitration would
+        // then brake the owner just short of release even though the actual
+        // overlap starts immediately beyond it.
+        const double release_control_end =
+            transaction.release_s + mp_.body_front_ext() +
+            cfg_.a1_stop_margin;
         plan.departure_zones = clipOwnerRange(
             departure_all_zones,
-            0.0, transaction.release_s);
+            0.0, release_control_end);
         plan.departure_uses_pending = true;
     } else if (owner.active() && owner.loaded &&
                owner.mission_phase == MissionPhase::TO_B) {
         departure_all_zones = fullConflictZones(owner, waiter);
+        const double release_control_end =
+            transaction.release_s + mp_.body_front_ext() +
+            cfg_.a1_stop_margin;
         plan.departure_zones = clipOwnerRange(
             departure_all_zones,
-            0.0, transaction.release_s);
+            0.0, release_control_end);
     }
     discardCleared(&plan.departure_zones);
     addStop(plan.departure_zones, &plan.departure_stop_s);
@@ -728,64 +848,12 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
     };
     selectStop();
 
-    // A gate is invalid if the waiter's complete stopped body would occupy
-    // any other owner/waiter conflict block. This is the failure mode where
-    // V0 was told to stop at s=0.846 inside an earlier [0.500,1.050] block on
-    // V1's frozen A1->B route. Add such predecessor blocks to the local chain
-    // and move the gate upstream until its complete envelope is clear.
-    //
-    // A departure block also belongs to this short handoff chain when its
-    // ordinary owner-side braking line lies at/before the A1 release point;
-    // otherwise ordinary arbitration can stop the owner before it is able to
-    // release A1. This protects only the immediate handoff, never the whole
-    // frozen route or destination B.
-    auto alreadyProtected = [&](const ConflictZone& zone,
-                                const std::vector<ConflictZone>& chain) {
-        return conflictZoneInA1Chain(zone, true, chain);
-    };
-    auto appendIfMissing = [&](const ConflictZone& zone,
-                               std::vector<ConflictZone>* chain) {
-        if (waiterCleared(zone)) return false;
-        if (alreadyProtected(zone, *chain)) return false;
-        chain->push_back(zone);
-        return true;
-    };
-    for (const ConflictZone& zone : departure_all_zones) {
-        const double owner_brake_s =
-            std::max(0.0, zone.s_self_enter - mp_.body_front_ext());
-        if (owner_brake_s <= transaction.release_s + 1e-9) {
-            appendIfMissing(zone, &plan.departure_zones);
-        }
-    }
-    selectStop();
-
-    const double waiter_front =
-        mp_.body_front_ext() + cfg_.a1_stop_margin;
-    const double waiter_rear = mp_.body_rear_ext();
-    bool expanded = true;
-    while (expanded && std::isfinite(plan.stop_s)) {
-        expanded = false;
-        auto includeGateBlockingZones =
-            [&](const std::vector<ConflictZone>& all_zones,
-                std::vector<ConflictZone>* chain) {
-                for (const ConflictZone& zone : all_zones) {
-                    const bool stopped_body_overlaps =
-                        plan.stop_s + waiter_front >
-                            zone.s_other_enter + 1e-9 &&
-                        plan.stop_s - waiter_rear <
-                            zone.s_other_exit - 1e-9;
-                    if (stopped_body_overlaps &&
-                        appendIfMissing(zone, chain)) {
-                        expanded = true;
-                    }
-                }
-            };
-        includeGateBlockingZones(
-            approach_all_zones, &plan.approach_zones);
-        includeGateBlockingZones(
-            departure_all_zones, &plan.departure_zones);
-        if (expanded) selectStop();
-    }
+    // Do not close the gate over predecessor conflicts outside the frozen
+    // admission-to-release prefix. Those blocks belong to ordinary orange
+    // arbitration: a waiter may traverse them and then stop at the local A1
+    // boundary. Expanding them into the A1 chain recreates a route-wide
+    // reservation and can form the cycle "waiter waits for A1 owner, owner
+    // waits for waiter on an upstream orange block".
     return plan;
 }
 
@@ -1403,7 +1471,9 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         (protect_departure &&
                          waiterInsideA1Zones(
                              *a1_waiter, gate.departure_zones));
-                    if (waiter_inside) {
+                    const bool clearing_existing_traffic =
+                        a1_clearing_vehicles_.count(a1_waiter->id) != 0;
+                    if (waiter_inside && !clearing_existing_traffic) {
                         ROS_ERROR_THROTTLE(
                             2.0,
                             "[multi_patrol][A1 invariant] V%d entered "
@@ -1412,9 +1482,16 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                             a1_waiter->id, service_owner->id);
                     }
                     if (protect_approach || protect_departure) {
-                        brakeIfNeeded(*a1_waiter,
-                                      gate.stop_s + front_ext,
-                                      service_owner->id);
+                        // A vehicle already past the enforceable stop point
+                        // when ownership was latched must clear forward. The
+                        // owner is held by resolveA1LocalService; all later
+                        // traffic is braked here and can never join the
+                        // clearing set.
+                        if (!clearing_existing_traffic) {
+                            brakeIfNeeded(*a1_waiter,
+                                          gate.stop_s + front_ext,
+                                          service_owner->id);
+                        }
                         const size_t before = zones.size();
                         zones.erase(
                             std::remove_if(
@@ -1435,8 +1512,11 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         ROS_INFO_THROTTLE(
                             2.0,
                             "[multi_patrol][A1 scope] owner=V%d waiter=V%d "
-                            "protected_removed=%zu ordinary_remaining=%zu",
-                            service_owner->id, a1_waiter->id, removed,
+                            "mode=%s protected_removed=%zu "
+                            "ordinary_remaining=%zu",
+                            service_owner->id, a1_waiter->id,
+                            clearing_existing_traffic ? "CLEARING" : "YIELD",
+                            removed,
                             zones.size());
                         if (zones.empty()) {
                             commit_owner_.erase(pkey);
@@ -1497,11 +1577,18 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             //    committed 逻辑保证不翻转,与时间窗无关。故去掉旧「自锁(blocker==partner→
             //    STOP→[0,∞])」不会让已设预约抖动。
             //  · DWELL(停驻)车是真正静止的静态障碍 → 仍按 STOP(占据其当前位置)。
-            auto predAction = [](bool is_dwell) -> VehicleAction {
-                return is_dwell ? VehicleAction::STOP : VehicleAction::NOMINAL;
+            auto predAction = [&](const VehicleAgent& v) -> VehicleAction {
+                const bool held_at_a1_gate =
+                    a1_service_owner_ >= 0 &&
+                    v.id != a1_service_owner_ &&
+                    a1_gate_plans_.count(v.id) != 0 &&
+                    a1_clearing_vehicles_.count(v.id) == 0 &&
+                    v.requested_action == VehicleAction::STOP;
+                return held_at_a1_gate ? VehicleAction::STOP
+                                       : VehicleAction::NOMINAL;
             };
-            const VehicleAction a_action = predAction(false);
-            const VehicleAction b_action = predAction(false);
+            const VehicleAction a_action = predAction(a);
+            const VehicleAction b_action = predAction(b);
 
             // ── §11.3 原子通行段:整片共享冲突区 = 单一互斥资源 ────────────────
             // 整片区域 = 所有冲突区在各自路径上的弧长外包 [se, sx]。同一时刻只允许
@@ -1915,11 +2002,10 @@ void RuleEngine::resolveA1LocalService(
     a1_gate_markers_.clear();
     a1_admission_candidate_ = -1;
     a1_admission_blocker_ = -1;
-    std::ostringstream a1_rviz_warn;
-    bool has_a1_rviz_warn = false;
     auto clearTransaction = [&]() {
         a1_service_owner_ = -1;
         a1_transaction_ = A1TransactionPlan{};
+        a1_clearing_vehicles_.clear();
     };
     if (!cfg_.use_a1_cycle) {
         clearTransaction();
@@ -1942,16 +2028,6 @@ void RuleEngine::resolveA1LocalService(
         return v.mode == VehicleMode::DWELL &&
                (v.mission_phase == MissionPhase::PICKUP_DWELL ||
                 v.mission_phase == MissionPhase::WAIT_DROPOFF_TASK);
-    };
-    auto zonesCleared = [&](const VehicleAgent& waiter,
-                            const std::vector<ConflictZone>& zones) {
-        for (const ConflictZone& z : zones) {
-            if (waiter.path_s - mp_.body_rear_ext() <=
-                z.s_other_exit + 1e-9) {
-                return false;
-            }
-        }
-        return true;
     };
     auto appendProtectedMarkers = [&](const VehicleAgent& owner,
                                       const VehicleAgent& waiter,
@@ -1992,7 +2068,8 @@ void RuleEngine::resolveA1LocalService(
                 waiter.path_s > clamped + 0.02});
     };
 
-    // Keep only live B->A1 requests. FIFO order is append-only.
+    // Keep only live B->A1 requests. Once registered, order is stable until
+    // ownership is released; live distance changes must never reshuffle it.
     a1_request_queue_.erase(
         std::remove_if(
             a1_request_queue_.begin(), a1_request_queue_.end(),
@@ -2001,14 +2078,18 @@ void RuleEngine::resolveA1LocalService(
                 return v == nullptr || !isApproaching(*v);
             }),
         a1_request_queue_.end());
-    // Register once the complete B->A1 and frozen A1->B transaction exists.
-    // A fixed distance-to-entry threshold is too late for routes whose first
-    // ordinary pair conflict lies farther upstream: one vehicle can become
-    // committed to that orange block before the A1 candidate even exists,
-    // making the required priority impossible to switch safely. Registration
-    // is only queue bookkeeping; protection remains limited to the local A1
-    // chain after ownership is granted.
-    std::vector<int> newly_requested;
+    const bool had_live_request_before_registration =
+        !a1_request_queue_.empty();
+    // Registration is local: a far-away vehicle does not reserve A1. The
+    // stopping-distance term makes the boundary physically enforceable, while
+    // a committed vehicle is always registered even if a coarse path starts
+    // on the A1 side of the nominal request distance.
+    struct NewRequest {
+        int id = -1;
+        double eta = std::numeric_limits<double>::infinity();
+        double distance = std::numeric_limits<double>::infinity();
+    };
+    std::vector<NewRequest> newly_requested;
     for (VehicleAgent& v : vehicles) {
         if (!isApproaching(v)) continue;
         const A1TransactionPlan candidate =
@@ -2055,16 +2136,37 @@ void RuleEngine::resolveA1LocalService(
             }
             continue;
         }
+        const double distance =
+            candidate.admission_stop_s - v.path_s;
+        const bool committed =
+            distance <= a1SafeStoppingDistance(v, dt) + 1e-9;
+        if (!committed && distance > cfg_.a1_request_distance) {
+            continue;
+        }
         if (std::find(a1_request_queue_.begin(),
                       a1_request_queue_.end(),
                       v.id) == a1_request_queue_.end()) {
-            newly_requested.push_back(v.id);
+            const double speed = std::max(
+                0.05, std::max(v.current_speed, cfg_.nominal_speed));
+            newly_requested.push_back(
+                NewRequest{v.id, std::max(0.0, distance) / speed,
+                           distance});
         }
     }
-    std::sort(newly_requested.begin(), newly_requested.end());
-    a1_request_queue_.insert(
-        a1_request_queue_.end(),
-        newly_requested.begin(), newly_requested.end());
+    std::sort(
+        newly_requested.begin(), newly_requested.end(),
+        [](const NewRequest& lhs, const NewRequest& rhs) {
+            if (std::abs(lhs.eta - rhs.eta) > 1e-9) {
+                return lhs.eta < rhs.eta;
+            }
+            if (std::abs(lhs.distance - rhs.distance) > 1e-9) {
+                return lhs.distance < rhs.distance;
+            }
+            return lhs.id < rhs.id;
+        });
+    for (const NewRequest& request : newly_requested) {
+        a1_request_queue_.push_back(request.id);
+    }
 
     VehicleAgent* owner = findById(a1_service_owner_);
     if (owner != nullptr && a1_transaction_.valid()) {
@@ -2143,112 +2245,185 @@ void RuleEngine::resolveA1LocalService(
         owner = nullptr;
     }
 
-    // Admit only the FIFO head. The local area must be physically clear, and
-    // every affected vehicle must still be able to stop at its selected
-    // local gate. Loaded traffic without a local intersection remains
-    // unrelated ordinary traffic.
-    if (owner == nullptr && !a1_request_queue_.empty()) {
-        VehicleAgent* candidate =
-            findById(a1_request_queue_.front());
+    // Latch one owner before it crosses the admission boundary. A TO_A1
+    // vehicle that is already within its stopping horizon is physically
+    // committed and takes precedence over an older but still safely stopped
+    // request. Existing ordinary/loaded traffic is drained after the owner is
+    // latched; requiring an empty corridor here can starve A1 forever.
+    bool owner_just_latched = false;
+    if (owner == nullptr && !a1_request_queue_.empty() &&
+        had_live_request_before_registration) {
+        int selected_id = a1_request_queue_.front();
+        double best_committed_distance =
+            std::numeric_limits<double>::infinity();
+        int committed_count = 0;
+        for (int request_id : a1_request_queue_) {
+            VehicleAgent* request = findById(request_id);
+            if (request == nullptr || !isApproaching(*request)) continue;
+            const A1TransactionPlan plan =
+                buildA1TransactionPlan(*request);
+            if (!plan.valid()) continue;
+            const double distance =
+                plan.admission_stop_s - request->path_s;
+            if (distance < -0.02) {
+                ++committed_count;
+                if (distance < best_committed_distance - 1e-9 ||
+                    (std::abs(distance - best_committed_distance) <=
+                         1e-9 &&
+                     request_id < selected_id)) {
+                    best_committed_distance = distance;
+                    selected_id = request_id;
+                }
+            }
+        }
+        if (committed_count > 1) {
+            ROS_ERROR_THROTTLE(
+                1.0,
+                "[multi_patrol][A1] multiple TO_A1 vehicles entered the "
+                "admission stopping horizon; selecting the most advanced "
+                "vehicle V%d", selected_id);
+        }
+
+        // If the distance-selected request is a follower on an existing
+        // same-lane TO_A1 chain, the physical leader must own A1 first. It may
+        // be just outside the request radius; admitting the follower would
+        // make it wait behind that leader while ordering the leader to yield
+        // to it. Follow the directed leader relation transitively.
+        if (committed_count == 0) {
+            std::set<int> promoted_ids{selected_id};
+            bool promoted = true;
+            while (promoted) {
+                promoted = false;
+                for (VehicleAgent& other : vehicles) {
+                    if (other.id == selected_id ||
+                        !isApproaching(other)) {
+                        continue;
+                    }
+                    const std::pair<int, int> pair_key{
+                        std::min(selected_id, other.id),
+                        std::max(selected_id, other.id)};
+                    auto leader_it = following_leader_.find(pair_key);
+                    auto holder_it = commit_owner_.find(pair_key);
+                    const bool ordinary_says_other_first =
+                        (leader_it != following_leader_.end() &&
+                         leader_it->second == other.id) ||
+                        (holder_it != commit_owner_.end() &&
+                         holder_it->second == other.id);
+                    if (ordinary_says_other_first) {
+                        const A1TransactionPlan leader_plan =
+                            buildA1TransactionPlan(other);
+                        if (leader_plan.valid() &&
+                            promoted_ids.insert(other.id).second) {
+                            selected_id = other.id;
+                            promoted = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        auto selected_it = std::find(
+            a1_request_queue_.begin(), a1_request_queue_.end(),
+            selected_id);
+        if (selected_it == a1_request_queue_.end()) {
+            a1_request_queue_.insert(
+                a1_request_queue_.begin(), selected_id);
+        } else if (selected_it != a1_request_queue_.begin()) {
+            a1_request_queue_.erase(selected_it);
+            a1_request_queue_.insert(
+                a1_request_queue_.begin(), selected_id);
+        }
+
+        auto existingLocalTraffic = [&](const VehicleAgent& service,
+                                        const A1TransactionPlan& proposed) {
+            for (VehicleAgent& other : vehicles) {
+                if (other.id == service.id || !other.active() ||
+                    other.mission_phase == MissionPhase::TO_A1) {
+                    continue;
+                }
+                const A1GatePlan proposed_gate =
+                    buildA1GatePlan(service, other, proposed);
+                const bool inside =
+                    waiterInsideA1Zones(
+                        other, proposed_gate.approach_zones) ||
+                    waiterInsideA1Zones(
+                        other, proposed_gate.departure_zones);
+                const double gate_distance =
+                    proposed_gate.stop_s - other.path_s;
+                const bool past_safe_stop =
+                    std::isfinite(proposed_gate.stop_s) &&
+                    gate_distance + 0.02 <
+                        a1SafeStoppingDistance(other, dt);
+                if (inside || past_safe_stop) return other.id;
+            }
+            return -1;
+        };
+
+        VehicleAgent* candidate = findById(selected_id);
+        // A deferred candidate can remain queued for many cycles.  Check its
+        // current local chain before the expensive all-B compatibility scan;
+        // the existing traffic must clear regardless of which fallback B is
+        // eventually selected, and recomputing every alternative at 10 Hz is
+        // unnecessary.
+        if (candidate != nullptr && isApproaching(*candidate)) {
+            const A1TransactionPlan current_proposed =
+                buildA1TransactionPlan(*candidate);
+            if (current_proposed.valid()) {
+                const int blocker =
+                    existingLocalTraffic(*candidate, current_proposed);
+                if (blocker >= 0) {
+                    a1_admission_candidate_ = candidate->id;
+                    a1_admission_blocker_ = blocker;
+                    candidate = nullptr;
+                }
+            }
+        }
+        if (candidate != nullptr && isApproaching(*candidate)) {
+            if (!selectLocallyCompatibleA1Dropoff(
+                    *candidate, vehicles)) {
+                a1_admission_candidate_ = candidate->id;
+                a1_admission_blocker_ = -1;
+                candidate = nullptr;
+            }
+        }
         if (candidate != nullptr && isApproaching(*candidate)) {
             A1TransactionPlan proposed =
                 buildA1TransactionPlan(*candidate);
             a1_admission_candidate_ = candidate->id;
-            bool admissible = proposed.valid();
-            int blocker = -1;
-            std::ostringstream admission_diag;
-            admission_diag
-                << "[multi_patrol][A1 admission check] candidate=V"
-                << candidate->id
-                << " candidate_s=" << candidate->path_s
-                << " entry_s=" << proposed.admission_stop_s
-                << " valid=" << (proposed.valid() ? 1 : 0)
-                << " invalid="
-                << a1InvalidReasonName(proposed.invalid_reason) << "\n";
-            for (VehicleAgent& other : vehicles) {
-                if (!admissible) break;
-                if (other.id == candidate->id || !other.active()) {
-                    continue;
-                }
-                const A1GatePlan gate =
-                    buildA1GatePlan(*candidate, other, proposed);
-                const bool approach_clear =
-                    zonesCleared(other, gate.approach_zones);
-                const bool departure_clear =
-                    zonesCleared(other, gate.departure_zones);
-                if (approach_clear && departure_clear) continue;
-                const bool inside =
-                    waiterInsideA1Zones(
-                        other, gate.approach_zones) ||
-                    waiterInsideA1Zones(
-                        other, gate.departure_zones);
-                admission_diag
-                    << "  other=V" << other.id
-                    << " s=" << other.path_s
-                    << " stop_s=" << gate.stop_s
-                    << " approach=" << gate.approach_zones.size()
-                    << " departure=" << gate.departure_zones.size()
-                    << " cleared=" << (approach_clear ? 1 : 0)
-                    << "/" << (departure_clear ? 1 : 0)
-                    << " inside=" << (inside ? 1 : 0)
-                    << " stop_need=" << a1SafeStoppingDistance(other, dt)
-                    << " stop_gap=" << (gate.stop_s - other.path_s)
-                    << "\n";
-                if (inside) {
-                    admissible = false;
-                    blocker = other.id;
-                    continue;
-                }
-
-                // The selected gate is the earlier of an A1 requester's own
-                // admission line and the complete-body stop line upstream of
-                // the candidate owner's local purple conflict interval.
-                if (std::isfinite(gate.stop_s)) {
-                    const double distance =
-                        gate.stop_s - other.path_s;
-                    const double stopping_travel = std::max(
-                        0.0,
-                        a1SafeStoppingDistance(other, dt) -
-                            cfg_.a1_stop_margin);
-                    if (distance + 0.02 <
-                            stopping_travel) {
-                        admissible = false;
-                        blocker = other.id;
-                    }
-                } else if (other.mission_phase ==
-                           MissionPhase::TO_A1) {
-                    admissible = false;
-                    blocker = other.id;
-                }
-            }
-            if (admissible) {
-                a1_transaction_ = proposed;
-                a1_service_owner_ = candidate->id;
-                owner = candidate;
-                ROS_INFO(
-                    "[multi_patrol][A1 admit] owner=V%d target=B%d "
-                    "entry_s=%.3f side=%s release_s=%.3f kind=%s",
-                    owner->id,
-                    a1_transaction_.frozen_target_slot,
-                    a1_transaction_.admission_stop_s,
-                    a1_transaction_.admission_side ==
-                            A1AdmissionSide::LEFT
-                        ? "LEFT" : "RIGHT",
-                    a1_transaction_.release_s,
-                    a1ReleaseKindName(
-                        a1_transaction_.release_kind));
-            } else {
-                a1_admission_blocker_ = blocker;
-                using Clock = std::chrono::steady_clock;
-                static Clock::time_point last_admission_print =
-                    Clock::time_point::min();
-                const Clock::time_point wall_now = Clock::now();
-                if (last_admission_print == Clock::time_point::min() ||
-                    wall_now - last_admission_print >=
-                        std::chrono::seconds(1)) {
-                    std::cerr << "[WARN][A1 admission terminal]\n"
-                              << admission_diag.str() << std::flush;
-                    last_admission_print = wall_now;
+            if (proposed.valid()) {
+                // Do not create an owner around traffic that already occupies
+                // this transaction's local approach/departure chain.  Doing
+                // so creates a cross-layer cycle: the new owner waits for the
+                // existing vehicle to clear, while an upstream ordinary block
+                // can still order that existing vehicle to yield to the new
+                // owner.  Keep the candidate behind its admission line and
+                // let ordinary arbitration drain the pre-existing traffic.
+                const int existing_local_traffic =
+                    existingLocalTraffic(*candidate, proposed);
+                if (existing_local_traffic >= 0) {
+                    a1_admission_blocker_ = existing_local_traffic;
+                    ROS_INFO_THROTTLE(
+                        1.0,
+                        "[multi_patrol][A1 admit] V%d deferred; "
+                        "existing V%d must clear the proposed local chain",
+                        candidate->id, existing_local_traffic);
+                } else {
+                    a1_transaction_ = proposed;
+                    a1_service_owner_ = candidate->id;
+                    owner = candidate;
+                    owner_just_latched = true;
+                    ROS_INFO(
+                        "[multi_patrol][A1 admit] owner=V%d target=B%d "
+                        "entry_s=%.3f side=%s release_s=%.3f kind=%s",
+                        owner->id,
+                        a1_transaction_.frozen_target_slot,
+                        a1_transaction_.admission_stop_s,
+                        a1_transaction_.admission_side ==
+                                A1AdmissionSide::LEFT
+                            ? "LEFT" : "RIGHT",
+                        a1_transaction_.release_s,
+                        a1ReleaseKindName(
+                            a1_transaction_.release_kind));
                 }
             }
         }
@@ -2298,83 +2473,108 @@ void RuleEngine::resolveA1LocalService(
                    ? A1ControlState::EGRESS
                    : A1ControlState::ACTIVE);
 
+    const std::set<int> previous_clearing = a1_clearing_vehicles_;
+    a1_clearing_vehicles_.clear();
     for (VehicleAgent& v : vehicles) {
         if (v.id == owner->id || !v.active()) continue;
         A1GatePlan gate =
             buildA1GatePlan(*owner, v, a1_transaction_);
+        const bool owner_exiting =
+            owner->active() && owner->loaded &&
+            owner->mission_phase == MissionPhase::TO_B;
+        const double fixed_gap =
+            std::isfinite(gate.fixed_stop_s)
+                ? gate.fixed_stop_s - v.path_s
+                : std::numeric_limits<double>::infinity();
+        const double staging_stop_travel = std::max(
+            0.0, a1SafeStoppingDistance(v, dt) -
+                     cfg_.a1_stop_margin);
+        const double enforceable_gate_gap =
+            std::isfinite(gate.stop_s)
+                ? gate.stop_s - v.path_s
+                : std::numeric_limits<double>::infinity();
+        const bool can_stop_at_current_gate =
+            std::isfinite(gate.stop_s) &&
+            enforceable_gate_gap + 0.02 >= staging_stop_travel;
+        const bool staged_at_admission =
+            v.mission_phase == MissionPhase::TO_A1 &&
+            std::isfinite(gate.fixed_stop_s) &&
+            v.current_speed <= 0.005 && fixed_gap <= 0.02;
+        const bool stage_to_admission =
+            owner_exiting &&
+            v.mission_phase == MissionPhase::TO_A1 &&
+            std::isfinite(gate.fixed_stop_s) &&
+            !staged_at_admission &&
+            !can_stop_at_current_gate &&
+            (previous_clearing.count(v.id) != 0 ||
+             fixed_gap > staging_stop_travel + 0.02) &&
+            (!gate.approach_zones.empty() ||
+             !gate.departure_zones.empty());
+        if (stage_to_admission) {
+            // Only a vehicle already too late for the current protected stop
+            // may clear forward to (never through) its red admission line.
+            // A newly activated B->A1 leg that can still stop before an
+            // owner-release conflict must use that earlier gate; otherwise a
+            // perfectly legal admission pose can still trap the owner just
+            // short of its release line.
+            gate.stop_s = gate.fixed_stop_s;
+            gate.source = A1GateSource::TURN;
+        }
         a1_gate_plans_[v.id] = gate;
         appendProtectedMarkers(*owner, v, gate);
-        if (!std::isfinite(gate.stop_s)) continue;
-
-        if (!has_a1_rviz_warn) {
-            has_a1_rviz_warn = true;
-            a1_rviz_warn
-                << "[multi_patrol][A1 RViz] purple=A1 protected, "
-                   "orange=ordinary crossing/opposing, "
-                   "cyan=same-direction\n"
-                << "  OWNER V" << owner->id
-                << " entry_s=" << a1_transaction_.admission_stop_s
-                << " release_s=" << a1_transaction_.release_s
-                << " release_kind="
-                << a1ReleaseKindName(a1_transaction_.release_kind)
-                << "\n";
-        }
-        const RoughWp gate_pose = v.track.poseAtS(gate.stop_s);
-        a1_rviz_warn
-            << "  GATE label=\"A1 GATE V" << v.id << "->V"
-            << owner->id << " "
-            << (gate.source == A1GateSource::TURN ? "TURN" : "LOCAL")
-            << " A" << gate.approach_zones.size()
-            << "/D" << gate.departure_zones.size() << "\""
-            << " meaning=waiter_V" << v.id << "_waits_for_owner_V"
-            << owner->id
-            << " stop_s=" << gate.stop_s
-            << " xy=(" << gate_pose.x << "," << gate_pose.y << ")"
-            << " candidates{turn=" << gate.fixed_stop_s
-            << ",approach=" << gate.approach_stop_s
-            << ",departure=" << gate.departure_stop_s << "}"
-            << " waiter_now_s=" << v.path_s
-            << " late=" << (v.path_s > gate.stop_s + 0.02 ? 1 : 0)
-            << "\n";
-        auto appendZones = [&](const char* prefix,
-                               const std::vector<ConflictZone>& zones) {
-            for (size_t zone_index = 0; zone_index < zones.size();
-                 ++zone_index) {
-                const ConflictZone& z = zones[zone_index];
-                a1_rviz_warn
-                    << "    " << prefix << zone_index
-                    << " owner_s=[" << z.s_self_enter << ","
-                    << z.s_self_exit << "]"
-                    << " waiter_s=[" << z.s_other_enter << ","
-                    << z.s_other_exit << "]"
-                    << " xy=(" << z.x << "," << z.y << ")"
-                    << " motion=" << (z.self_reverse ? "R" : "F")
-                    << "/" << (z.other_reverse ? "R" : "F")
-                    << " same_dir=" << (z.same_dir ? 1 : 0)
-                    << " waiter_cleared="
-                    << (v.path_s - mp_.body_rear_ext() >
-                                z.s_other_exit + 1e-9
-                            ? 1 : 0)
-                    << "\n";
+        if (!std::isfinite(gate.stop_s)) {
+            // The owner's pending A1->B path is replaced atomically by the
+            // active path after loading. Keep an existing clearing vehicle
+            // latched across that transition; otherwise it can disappear for
+            // one frame and be stopped inside a newly materialized active-leg
+            // conflict on the next frame.
+            if (previous_clearing.count(v.id) != 0 &&
+                !(owner->active() && owner->loaded &&
+                  owner->mission_phase == MissionPhase::TO_B)) {
+                a1_clearing_vehicles_.insert(v.id);
             }
-        };
-        appendZones("A", gate.approach_zones);
-        appendZones("D", gate.departure_zones);
-
-        addGateMarker(owner->id, v, gate.stop_s,
-                      gate.source, &gate);
+            continue;
+        }
         const bool inside =
             waiterInsideA1Zones(v, gate.approach_zones) ||
             waiterInsideA1Zones(v, gate.departure_zones);
         const double distance = gate.stop_s - v.path_s;
-        if (inside || distance <= a1SafeStoppingDistance(v, dt)) {
-            if (inside) {
-                ROS_ERROR_THROTTLE(
-                    2.0,
-                    "[multi_patrol][A1 invariant] V%d is inside "
-                    "owner V%d protected corridor",
-                    v.id, owner->id);
+        const double stopping_travel = std::max(
+            0.0, a1SafeStoppingDistance(v, dt) -
+                     cfg_.a1_stop_margin);
+        const bool too_late = distance + 0.02 < stopping_travel;
+        const bool was_clearing =
+            previous_clearing.count(v.id) != 0;
+        const bool may_clear_forward =
+            v.mission_phase != MissionPhase::TO_A1 ||
+            stage_to_admission;
+        const bool clearing = may_clear_forward &&
+            (stage_to_admission || was_clearing ||
+             (owner_just_latched && (inside || too_late)));
+
+        if (clearing) {
+            if (stage_to_admission &&
+                fixed_gap <= staging_stop_travel + 0.02) {
+                applyActionRequest(
+                    v, VehicleAction::STOP,
+                    "wait_a1_turn_V" + std::to_string(owner->id),
+                    owner->id);
             }
+            a1_clearing_vehicles_.insert(v.id);
+            continue;
+        }
+
+        addGateMarker(owner->id, v, gate.stop_s,
+                      gate.source, &gate);
+        if (inside && v.mission_phase == MissionPhase::TO_A1) {
+            ROS_ERROR_THROTTLE(
+                1.0,
+                "[multi_patrol][A1 admission] non-owner TO_A1 V%d "
+                "is already inside owner V%d local conflict; stopping "
+                "instead of allowing a second A1 entrant",
+                v.id, owner->id);
+        }
+        if (inside || distance <= a1SafeStoppingDistance(v, dt)) {
             applyActionRequest(
                 v, VehicleAction::STOP,
                 gate.source == A1GateSource::TURN
@@ -2385,17 +2585,19 @@ void RuleEngine::resolveA1LocalService(
                 owner->id);
         }
     }
-    if (has_a1_rviz_warn) {
-        using Clock = std::chrono::steady_clock;
-        static Clock::time_point last_terminal_print =
-            Clock::time_point::min();
-        const Clock::time_point wall_now = Clock::now();
-        if (last_terminal_print == Clock::time_point::min() ||
-            wall_now - last_terminal_print >= std::chrono::seconds(2)) {
-            std::cerr << "[WARN][A1 terminal]\n"
-                      << a1_rviz_warn.str() << std::flush;
-            last_terminal_print = wall_now;
-        }
+
+    if (!a1_clearing_vehicles_.empty() && owner->active()) {
+        const int blocker = *a1_clearing_vehicles_.begin();
+        a1_admission_blocker_ = blocker;
+        applyActionRequest(
+            *owner, VehicleAction::STOP,
+            "wait_a1_existing_clear_V" + std::to_string(blocker),
+            blocker);
+        ROS_INFO_THROTTLE(
+            1.0,
+            "[multi_patrol][A1 clearing] owner=V%d held; existing "
+            "traffic=%zu first=V%d",
+            owner->id, a1_clearing_vehicles_.size(), blocker);
     }
 }
 
@@ -2418,7 +2620,8 @@ void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles) {
         if (!v.active()) continue;
         if (cfg_.use_a1_cycle &&
             v.id == a1_service_owner_ &&
-            a1_transaction_.valid()) {
+            a1_transaction_.valid() &&
+            a1_clearing_vehicles_.empty()) {
             continue;
         }
         if (v.deadlock_breaker) continue;  // 破环车豁免:它正被授权冲出环
@@ -2902,8 +3105,12 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt) {
         v.reason = "clear";
     }
 
-    resolveA1LocalService(vehicles, dt);
+    // Establish the ordinary same-lane order first. A1 admission then chooses
+    // the front TO_A1 vehicle of that already-existing orange approach chain;
+    // selecting a follower as owner would create owner-waits-for-leader while
+    // leader-waits-for-owner.
     resolveFollowing(vehicles);
+    resolveA1LocalService(vehicles, dt);
     // 深层根治(用户洞察:路径固定→只信精确几何):停用粗粒度资源盒仲裁(路口/车道
     // 令牌),它把"共用一个路口盒"当冲突造成幻象冲突→打架→死锁。改由精确的 pairwise
     // 几何冲突(findConflictZones:沿固定路径采样车身OBB,只标真实重叠弧段)作唯一交叉
@@ -2924,8 +3131,8 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt) {
             const char* cause =
                 "ordinary crossing/opposing mutual exclusion";
             if (marker.kind == ConflictMarkerKind::A1_PROTECTED) {
-                color = "purple";
-                cause = "current A1 owner protected approach/departure block";
+                color = "gold";
+                cause = "A1 owner/clearing controlled local conflict";
             } else if (marker.kind ==
                        ConflictMarkerKind::SAME_DIRECTION) {
                 color = "cyan";

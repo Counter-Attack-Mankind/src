@@ -15,6 +15,8 @@
 namespace forklift_planner {
 namespace multi_vehicle {
 
+class TaskAllocator;
+
 enum class ConflictMarkerKind {
     SAME_DIRECTION,
     CROSSING_OR_OPPOSING,
@@ -124,6 +126,9 @@ public:
 
     // 接入资源地图(Phase 2:资源仲裁需要它把路径映射到资源占用)。
     void setResourceMap(const TrafficResourceMap* m) { resmap_ = m; }
+    void setTaskAllocator(TaskAllocator* allocator) {
+        task_allocator_ = allocator;
+    }
     void decide(std::vector<VehicleAgent>& vehicles, double dt);
     double speedForAction(VehicleAction action) const;
 
@@ -141,6 +146,7 @@ public:
         int a1_admission_blocker = -1;
         A1ControlState a1_control_state = A1ControlState::IDLE;
         std::vector<int> a1_request_queue;
+        std::set<int> a1_clearing_vehicles;
         std::vector<ConflictMarker> conflicts;
         std::vector<A1GateMarker> a1_gate_markers;
         A1TransactionPlan a1_transaction;
@@ -153,6 +159,7 @@ public:
                            a1_admission_blocker_,
                            a1_control_state_,
                            a1_request_queue_,
+                           a1_clearing_vehicles_,
                            conflicts_, a1_gate_markers_,
                            a1_transaction_};
     }
@@ -169,6 +176,7 @@ public:
         a1_admission_blocker_ = s.a1_admission_blocker;
         a1_control_state_ = s.a1_control_state;
         a1_request_queue_ = s.a1_request_queue;
+        a1_clearing_vehicles_ = s.a1_clearing_vehicles;
         conflicts_ = s.conflicts;
         a1_gate_markers_ = s.a1_gate_markers;
         a1_transaction_ = s.a1_transaction;
@@ -263,6 +271,9 @@ private:
         const A1TransactionPlan& transaction);
     A1TransactionPlan buildA1TransactionPlan(
         const VehicleAgent& candidate) const;
+    bool selectLocallyCompatibleA1Dropoff(
+        VehicleAgent& candidate,
+        const std::vector<VehicleAgent>& vehicles);
     double a1AdmissionStopS(
         const VehicleAgent& vehicle,
         A1AdmissionSide* side = nullptr) const;
@@ -361,6 +372,7 @@ private:
         pending_conflict_cache_;
     // Phase 2 资源模型:资源地图(只读)+ 资源令牌表(跨周期持久,§11.10)。
     const TrafficResourceMap* resmap_ = nullptr;
+    TaskAllocator* task_allocator_ = nullptr;
     ResourceTokenTable tokens_;
     double now_ = 0.0;  // 内部仿真时钟(每 decide 累加 dt),供令牌防抖/超时用
     // Sole owner of the local A1 service transaction.
@@ -375,6 +387,12 @@ private:
     // Persistent FIFO of vehicles that crossed the local A1 request boundary.
     // Entries keep their order across decision cycles and owner hand-offs.
     std::vector<int> a1_request_queue_;
+    // Ordinary/loaded vehicles that were already beyond their A1-controlled
+    // stop point when the current owner was latched. They keep moving on the
+    // current path until the local conflict is clear; no new vehicle may join
+    // this set. A TO_A1 vehicle is never a clearing vehicle: if physically
+    // committed while A1 is free it must become the service owner instead.
+    std::set<int> a1_clearing_vehicles_;
     // The sole authoritative A1 transaction. The target, pending path
     // generation and local release point are frozen atomically at admission.
     A1TransactionPlan a1_transaction_;

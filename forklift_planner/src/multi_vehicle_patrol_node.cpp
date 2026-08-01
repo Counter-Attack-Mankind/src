@@ -93,6 +93,7 @@ public:
         rule_engine_ = std::make_unique<forklift_planner::multi_vehicle::RuleEngine>(
             mp_, cfg_);
         rule_engine_->setResourceMap(resource_map_.get());
+        rule_engine_->setTaskAllocator(allocator_.get());
         marker_pub_ = std::make_unique<forklift_planner::multi_vehicle::MarkerPublisher>(
             nh_, mp_, pp_, map_->slots(), cfg_);
         // A方案:仿真也画每车完整轨迹。real 模式 setupRealIO 会再 advertise(同topic,无害)。
@@ -2667,6 +2668,14 @@ public:
                  tick_count_, sim_time_, hard_guard_events_, first_guard_tick_,
                  pairs.c_str(), deadlock_ticks_, deadlock_recoveries_, max_wait,
                  stuck_id);
+        std::cerr << "[BATCH_SUMMARY] ticks=" << tick_count_
+                  << " sim_t=" << sim_time_
+                  << " hard_guard=" << hard_guard_events_
+                  << " deadlock_ticks=" << deadlock_ticks_
+                  << " recoveries=" << deadlock_recoveries_
+                  << " max_wait=" << max_wait
+                  << " stuck=V" << stuck_id << "\n"
+                  << fleetSnapshot() << std::flush;
         return hard_guard_events_ > 0;
     }
     bool batchMode() const { return cfg_batch_ticks_ > 0; }
