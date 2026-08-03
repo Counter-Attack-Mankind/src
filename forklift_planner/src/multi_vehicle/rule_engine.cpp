@@ -653,16 +653,13 @@ bool RuleEngine::selectLocallyCompatibleA1Dropoff(
                 departure.path_s = 0.0;
                 const std::vector<ConflictZone> full_blocks =
                     computeConflictZonesFull(departure, parked);
-                const double front = mp_.body_front_ext();
-                const double rear = mp_.body_rear_ext();
                 for (const ConflictZone& z : full_blocks) {
                     const bool waiter_occupies =
-                        parked.path_s + front >=
-                            z.s_other_enter - 1e-9 &&
-                        parked.path_s - rear <=
-                            z.s_other_exit + 1e-9;
+                        parked.path_s >= z.s_other_enter - 1e-9 &&
+                        parked.path_s <= z.s_other_exit + 1e-9;
                     const double owner_stop_s =
-                        std::max(0.0, z.s_self_enter - front);
+                        std::max(0.0, z.s_self_enter -
+                                          cfg_.a1_stop_margin);
                     if (waiter_occupies &&
                         owner_stop_s <= transaction.release_s + 1e-9) {
                         blocks_before_release = true;
@@ -677,13 +674,148 @@ bool RuleEngine::selectLocallyCompatibleA1Dropoff(
             }
         }
         if (!compatible) {
-            ROS_INFO_THROTTLE(
+            ROS_WARN_THROTTLE(
                 1.0,
                 "[multi_patrol][A1 target check] V%d target=B%d "
                 "rejected: waiter V%d at its admission line blocks "
                 "the local exit prefix",
                 candidate.id, option.target_slot,
                 incompatible_waiter);
+            continue;
+        }
+
+        // Check the wait-for graph that would exist immediately after this
+        // target is frozen.  A1 ownership adds waiter->candidate edges, while
+        // the candidate's future departure may already be physically behind
+        // traffic occupying one of its ordinary conflict blocks.  Combining
+        // those prospective edges with the current ordinary reservations can
+        // otherwise create a cycle which no stop-line adjustment can solve
+        // (for example candidate->loaded car->A1 waiter->candidate).
+        std::set<int> live_ids;
+        for (const VehicleAgent& vehicle : vehicles) {
+            if (vehicle.active()) live_ids.insert(vehicle.id);
+        }
+        std::map<int, std::set<int>> wait_for;
+        for (const auto& reservation : commit_owner_) {
+            const int first = reservation.first.first;
+            const int second = reservation.first.second;
+            const int holder = reservation.second;
+            if (live_ids.count(first) == 0 ||
+                live_ids.count(second) == 0 ||
+                (holder != first && holder != second)) {
+                continue;
+            }
+            // A current approach reservation held by the candidate ends
+            // before its future departure starts.  Treating loser->candidate
+            // as transaction-long would combine two sequential phases into
+            // a false cycle.  A1-created gate edges are added separately.
+            if (holder == candidate.id) continue;
+            const int loser = holder == first ? second : first;
+            wait_for[loser].insert(holder);
+        }
+        for (const auto& following : following_leader_) {
+            const int first = following.first.first;
+            const int second = following.first.second;
+            const int leader = following.second;
+            if (live_ids.count(first) == 0 ||
+                live_ids.count(second) == 0 ||
+                (leader != first && leader != second)) {
+                continue;
+            }
+            if (leader == candidate.id) continue;
+            const int follower = leader == first ? second : first;
+            wait_for[follower].insert(leader);
+        }
+
+        VehicleAgent departure = trial;
+        departure.track = trial.pending_dropoff_track;
+        departure.path_s = 0.0;
+        departure.loaded = true;
+        departure.mission_phase = MissionPhase::TO_B;
+        departure.path_gen = trial.pending_path_gen;
+        for (const VehicleAgent& other : vehicles) {
+            if (other.id == candidate.id || !other.active()) continue;
+
+            // The A1 local gate applies to every non-owner, not only to an
+            // unloaded TO_A1 waiter.  A loaded vehicle which can still stop
+            // at the proposed gate will also wait for the new owner.  Missing
+            // that edge allowed V1(TO_B)->V2(A1 owner) while V2's departure
+            // simultaneously had to yield to V1 in the ordinary layer.
+            const A1GatePlan gate =
+                buildA1GatePlan(trial, other, transaction);
+            const std::pair<int, int> candidate_pair{
+                std::min(candidate.id, other.id),
+                std::max(candidate.id, other.id)};
+            const auto current_reservation =
+                commit_owner_.find(candidate_pair);
+            const bool candidate_already_first =
+                current_reservation != commit_owner_.end() &&
+                current_reservation->second == candidate.id;
+            const bool existing_traffic_will_clear =
+                other.mission_phase != MissionPhase::TO_A1 &&
+                candidate_already_first;
+            if (!existing_traffic_will_clear &&
+                std::isfinite(gate.stop_s) &&
+                other.path_s <= gate.stop_s + 0.02) {
+                wait_for[other.id].insert(candidate.id);
+            }
+
+            const std::vector<ConflictZone> departure_blocks =
+                computeConflictZonesFull(departure, other);
+            for (const ConflictZone& z : departure_blocks) {
+                const bool other_occupies =
+                    other.path_s >= z.s_other_enter - 1e-9 &&
+                    other.path_s <= z.s_other_exit + 1e-9;
+                if (other_occupies) {
+                    wait_for[candidate.id].insert(other.id);
+                    break;
+                }
+            }
+        }
+
+        std::map<int, int> predecessor;
+        std::vector<int> frontier{candidate.id};
+        std::set<int> visited{candidate.id};
+        bool dependency_cycle = false;
+        int cycle_tail = -1;
+        for (size_t head = 0;
+             head < frontier.size() && !dependency_cycle; ++head) {
+            const int from = frontier[head];
+            const auto edges = wait_for.find(from);
+            if (edges == wait_for.end()) continue;
+            for (const int to : edges->second) {
+                if (to == candidate.id && from != candidate.id) {
+                    dependency_cycle = true;
+                    cycle_tail = from;
+                    break;
+                }
+                if (visited.insert(to).second) {
+                    predecessor[to] = from;
+                    frontier.push_back(to);
+                }
+            }
+        }
+        if (dependency_cycle) {
+            std::vector<int> chain;
+            for (int node = cycle_tail;;) {
+                chain.push_back(node);
+                const auto previous = predecessor.find(node);
+                if (previous == predecessor.end()) break;
+                node = previous->second;
+            }
+            std::reverse(chain.begin(), chain.end());
+            std::ostringstream description;
+            description << "V" << candidate.id;
+            for (size_t i = 1; i < chain.size(); ++i) {
+                description << "->V" << chain[i];
+            }
+            description << "->V" << candidate.id;
+            ROS_WARN_THROTTLE(
+                1.0,
+                "[multi_patrol][A1 target check] V%d target=B%d "
+                "rejected: prospective wait cycle %s",
+                candidate.id, option.target_slot,
+                description.str().c_str());
             continue;
         }
 
@@ -711,6 +843,7 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
     plan.fixed_stop_s = inf;
     plan.approach_stop_s = inf;
     plan.departure_stop_s = inf;
+    double departure_handoff_stop_s = inf;
     std::vector<ConflictZone> approach_all_zones;
     std::vector<ConflictZone> departure_all_zones;
 
@@ -760,7 +893,6 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
             *stop_s = std::min(
                 *stop_s,
                 std::max(0.0, z.s_other_enter -
-                                  mp_.body_front_ext() -
                                   cfg_.a1_stop_margin));
         }
     };
@@ -770,8 +902,7 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
     // an A1 gate would place the stop line behind the vehicle and stop loaded
     // outbound traffic for a later owner.
     auto waiterCleared = [&](const ConflictZone& z) {
-        return waiter.path_s - mp_.body_rear_ext() >
-               z.s_other_exit + 1e-9;
+        return waiter.path_s > z.s_other_exit + 1e-9;
     };
     auto discardCleared = [&](std::vector<ConflictZone>* zones) {
         zones->erase(
@@ -796,14 +927,11 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
             transaction.frozen_target_slot) {
         departure_all_zones = std::vector<ConflictZone>(
             pendingDepartureConflictBlocks(owner, waiter));
-        // A conflict is A1-controlled when its safe owner stop line is at or
-        // before the release line.  Testing only the geometric overlap entry
-        // misses the final body-length interval: ordinary arbitration would
-        // then brake the owner just short of release even though the actual
-        // overlap starts immediately beyond it.
+        // Conflict intervals already describe reference poses whose complete
+        // OBBs overlap.  Keep only the owner's admission-to-release prefix;
+        // never add another vehicle length here.
         const double release_control_end =
-            transaction.release_s + mp_.body_front_ext() +
-            cfg_.a1_stop_margin;
+            transaction.release_s + cfg_.a1_stop_margin;
         plan.departure_zones = clipOwnerRange(
             departure_all_zones,
             0.0, release_control_end);
@@ -812,14 +940,38 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
                owner.mission_phase == MissionPhase::TO_B) {
         departure_all_zones = fullConflictZones(owner, waiter);
         const double release_control_end =
-            transaction.release_s + mp_.body_front_ext() +
-            cfg_.a1_stop_margin;
+            transaction.release_s + cfg_.a1_stop_margin;
         plan.departure_zones = clipOwnerRange(
             departure_all_zones,
             0.0, release_control_end);
     }
     discardCleared(&plan.departure_zones);
     addStop(plan.departure_zones, &plan.departure_stop_s);
+
+    // Ownership still ends at the configured release line, but the waiting
+    // pose must make that hand-off safe.  A path can visit the same physical
+    // crossing in multiple forward/reverse phases.  Clipping by owner arc
+    // length may retain one phase while a waiter's earlier phase at the same
+    // place starts farther upstream.  Parking between those two entries makes
+    // both cars committed as soon as A1 releases.  Use the earliest waiter
+    // entry among spatial aliases only for the stop position; do not add the
+    // aliases to departure_zones or expand A1 ownership beyond release_s.
+    constexpr double kPhysicalAliasDistance = 0.15;
+    for (const ConflictZone& full_zone : departure_all_zones) {
+        if (waiterCleared(full_zone)) continue;
+        for (const ConflictZone& local_zone : plan.departure_zones) {
+            if (std::hypot(full_zone.x - local_zone.x,
+                           full_zone.y - local_zone.y) >
+                kPhysicalAliasDistance) {
+                continue;
+            }
+            departure_handoff_stop_s = std::min(
+                departure_handoff_stop_s,
+                std::max(0.0, full_zone.s_other_enter -
+                                  cfg_.a1_stop_margin));
+            break;
+        }
+    }
 
     if (waiter.mission_phase == MissionPhase::TO_A1) {
         A1AdmissionSide waiter_side = A1AdmissionSide::NONE;
@@ -847,6 +999,13 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
                  A1GateSource::LOCAL_CONFLICT);
     };
     selectStop();
+    if (std::isfinite(departure_handoff_stop_s) &&
+        departure_handoff_stop_s < plan.stop_s) {
+        plan.departure_stop_s = std::min(
+            plan.departure_stop_s, departure_handoff_stop_s);
+        plan.stop_s = departure_handoff_stop_s;
+        plan.source = A1GateSource::LOCAL_CONFLICT;
+    }
 
     // Do not close the gate over predecessor conflicts outside the frozen
     // admission-to-release prefix. Those blocks belong to ordinary orange
@@ -860,13 +1019,10 @@ RuleEngine::A1GatePlan RuleEngine::buildA1GatePlan(
 bool RuleEngine::waiterInsideA1Zones(
     const VehicleAgent& waiter,
     const std::vector<ConflictZone>& zones) const {
-    const double rear = mp_.body_rear_ext();
     for (const ConflictZone& z : zones) {
-        // Match pairwise "committed" semantics. Conflict-zone coordinates
-        // already come from full-body OBB overlap samples; front expansion is
-        // used only to place the upstream stop line, not to declare invasion.
+        // Conflict-zone coordinates are already complete-body OBB samples.
         if (waiter.path_s > z.s_other_enter + 1e-9 &&
-            waiter.path_s - rear <= z.s_other_exit) {
+            waiter.path_s <= z.s_other_exit + 1e-9) {
             return true;
         }
     }
@@ -904,12 +1060,12 @@ bool RuleEngine::conflictZoneInA1Chain(
             owner_reverse == protected_zone.self_reverse &&
             waiter_reverse == protected_zone.other_reverse &&
             pair_zone.same_dir == protected_zone.same_dir;
-        const bool contains_local_slice =
-            owner_enter <= protected_zone.s_self_enter + kArcTol &&
-            owner_exit + kArcTol >= protected_zone.s_self_exit &&
-            waiter_enter <= protected_zone.s_other_enter + kArcTol &&
-            waiter_exit + kArcTol >= protected_zone.s_other_exit;
-        if (same_motion_class && contains_local_slice) {
+        const bool overlaps_local_slice =
+            owner_enter <= protected_zone.s_self_exit + kArcTol &&
+            owner_exit + kArcTol >= protected_zone.s_self_enter &&
+            waiter_enter <= protected_zone.s_other_exit + kArcTol &&
+            waiter_exit + kArcTol >= protected_zone.s_other_enter;
+        if (same_motion_class && overlaps_local_slice) {
             return true;
         }
     }
@@ -940,9 +1096,9 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::findConflictZones(
     // 前移,导致让行方的停止线(se-front)随它一起漂、永远追不上、最终蹭进区(实测 V1↔V5
     // 蹭撞的一半根因)。停止线必须是固定弧长,让行方才能稳稳停在区外。committed/cleared 仍按
     // 静态 se/sx 与当前 path_s 比较,语义不变。
-    const double rear_ext = mp_.body_rear_ext();
-    const double self_begin = std::max(0.0, self.path_s - rear_ext);
-    const double other_begin = std::max(0.0, other.path_s - rear_ext);
+    // Conflict blocks already contain complete-body OBB overlap poses.
+    const double self_begin = std::max(0.0, self.path_s);
+    const double other_begin = std::max(0.0, other.path_s);
 
     std::vector<ConflictZone> out;
     out.reserve(canon.size());
@@ -964,48 +1120,67 @@ void RuleEngine::recordConflictZones(
     const VehicleAgent& self, const VehicleAgent& other,
     const std::vector<ConflictZone>& zones, ConflictMarkerKind kind) {
     constexpr double kDisplayStep = 0.025;
-    const double pad =
-        std::max(0.03, 0.5 * mp_.vehicle_width +
-                           0.5 * cfg_.conflict_margin);
 
     for (const ConflictZone& z : zones) {
-        double x_min = std::numeric_limits<double>::infinity();
-        double y_min = std::numeric_limits<double>::infinity();
-        double x_max = -std::numeric_limits<double>::infinity();
-        double y_max = -std::numeric_limits<double>::infinity();
+        struct Bounds {
+            double x_min = std::numeric_limits<double>::infinity();
+            double y_min = std::numeric_limits<double>::infinity();
+            double x_max = -std::numeric_limits<double>::infinity();
+            double y_max = -std::numeric_limits<double>::infinity();
+        } self_bounds, other_bounds;
 
         auto includePathSpan = [&](const VehicleAgent& v,
-                                   double s_enter, double s_exit) {
+                                   double s_enter, double s_exit,
+                                   Bounds* bounds) {
             const double begin = std::max(0.0, s_enter);
             const double end = std::min(v.track.length(), s_exit);
             if (end < begin) return;
+            auto includeBody = [&](double s) {
+                const OBB body = makeBody(
+                    v.track.poseAtS(std::min(s, end)), mp_,
+                    0.5 * cfg_.conflict_margin);
+                const double c = std::abs(std::cos(body.theta));
+                const double q = std::abs(std::sin(body.theta));
+                const double ex = c * body.half_l + q * body.half_w;
+                const double ey = q * body.half_l + c * body.half_w;
+                bounds->x_min = std::min(bounds->x_min, body.x - ex);
+                bounds->y_min = std::min(bounds->y_min, body.y - ey);
+                bounds->x_max = std::max(bounds->x_max, body.x + ex);
+                bounds->y_max = std::max(bounds->y_max, body.y + ey);
+            };
             for (double s = begin; s <= end + 1e-9;
                  s += kDisplayStep) {
-                const RoughWp p = v.track.poseAtS(std::min(s, end));
-                x_min = std::min(x_min, p.x);
-                y_min = std::min(y_min, p.y);
-                x_max = std::max(x_max, p.x);
-                y_max = std::max(y_max, p.y);
+                includeBody(s);
             }
-            const RoughWp p = v.track.poseAtS(end);
-            x_min = std::min(x_min, p.x);
-            y_min = std::min(y_min, p.y);
-            x_max = std::max(x_max, p.x);
-            y_max = std::max(y_max, p.y);
+            includeBody(end);
         };
 
-        includePathSpan(self, z.s_self_enter, z.s_self_exit);
-        includePathSpan(other, z.s_other_enter, z.s_other_exit);
+        includePathSpan(self, z.s_self_enter, z.s_self_exit,
+                        &self_bounds);
+        includePathSpan(other, z.s_other_enter, z.s_other_exit,
+                        &other_bounds);
+        // Display the intersection of both swept-body bounds. The old union
+        // rectangle included the two approach arms and made safe gate lines
+        // look as if they were inside the protected collision area.
+        const double x_min = std::max(self_bounds.x_min,
+                                      other_bounds.x_min);
+        const double y_min = std::max(self_bounds.y_min,
+                                      other_bounds.y_min);
+        const double x_max = std::min(self_bounds.x_max,
+                                      other_bounds.x_max);
+        const double y_max = std::min(self_bounds.y_max,
+                                      other_bounds.y_max);
         if (!std::isfinite(x_min) || !std::isfinite(y_min) ||
-            !std::isfinite(x_max) || !std::isfinite(y_max)) {
+            !std::isfinite(x_max) || !std::isfinite(y_max) ||
+            x_max < x_min || y_max < y_min) {
             continue;
         }
 
         ConflictMarker marker;
         marker.x = 0.5 * (x_min + x_max);
         marker.y = 0.5 * (y_min + y_max);
-        marker.scale_x = std::max(0.06, x_max - x_min + 2.0 * pad);
-        marker.scale_y = std::max(0.06, y_max - y_min + 2.0 * pad);
+        marker.scale_x = std::max(0.03, x_max - x_min);
+        marker.scale_y = std::max(0.03, y_max - y_min);
         marker.vehicle_a = self.id;
         marker.vehicle_b = other.id;
         marker.kind = kind;
@@ -1044,9 +1219,6 @@ std::vector<std::string> RuleEngine::debugConflictLines(
     if (leader_it != following_leader_.end()) {
         following_leader = leader_it->second;
     }
-    const double front = mp_.body_front_ext();
-    const double rear = mp_.body_rear_ext();
-
     double se_a = std::numeric_limits<double>::infinity();
     double sx_a = -std::numeric_limits<double>::infinity();
     double se_b = std::numeric_limits<double>::infinity();
@@ -1067,11 +1239,9 @@ std::vector<std::string> RuleEngine::debugConflictLines(
     // block, so compute occupancy/time facts in a separate complete pass.
     for (const ConflictZone& z : zones) {
         const bool a_inside =
-            a.path_s + front >= z.s_self_enter &&
-            a.path_s - rear <= z.s_self_exit;
+            a.path_s >= z.s_self_enter && a.path_s <= z.s_self_exit;
         const bool b_inside =
-            b.path_s + front >= z.s_other_enter &&
-            b.path_s - rear <= z.s_other_exit;
+            b.path_s >= z.s_other_enter && b.path_s <= z.s_other_exit;
         a_inside_any = a_inside_any || a_inside;
         b_inside_any = b_inside_any || b_inside;
         both_inside_same_zone =
@@ -1152,11 +1322,9 @@ std::vector<std::string> RuleEngine::debugConflictLines(
     for (size_t i = 0; i < zones.size(); ++i) {
         const ConflictZone& z = zones[i];
         const bool a_inside =
-            a.path_s + front >= z.s_self_enter &&
-            a.path_s - rear <= z.s_self_exit;
+            a.path_s >= z.s_self_enter && a.path_s <= z.s_self_exit;
         const bool b_inside =
-            b.path_s + front >= z.s_other_enter &&
-            b.path_s - rear <= z.s_other_exit;
+            b.path_s >= z.s_other_enter && b.path_s <= z.s_other_exit;
         const OccupancyInterval oa = occupancyInterval(
             a, VehicleAction::NOMINAL, z.s_self_enter, z.s_self_exit);
         const OccupancyInterval ob = occupancyInterval(
@@ -1171,14 +1339,14 @@ std::vector<std::string> RuleEngine::debugConflictLines(
              << (z.other_reverse ? "R" : "F")
              << " xy=(" << z.x << "," << z.y << ")"
              << " | A[" << z.s_self_enter << "," << z.s_self_exit
-             << "] stop=" << z.s_self_enter - front
-             << " gap=" << z.s_self_enter - front - a.path_s
+             << "] stop=" << std::max(0.0, z.s_self_enter - cfg_.a1_stop_margin)
+             << " gap=" << std::max(0.0, z.s_self_enter - cfg_.a1_stop_margin) - a.path_s
              << " inside=" << static_cast<int>(a_inside)
              << " t=[" << (oa.occupies ? oa.enter : -1.0)
              << "," << (oa.occupies ? oa.exit : -1.0) << "]"
              << " | B[" << z.s_other_enter << "," << z.s_other_exit
-             << "] stop=" << z.s_other_enter - front
-             << " gap=" << z.s_other_enter - front - b.path_s
+             << "] stop=" << std::max(0.0, z.s_other_enter - cfg_.a1_stop_margin)
+             << " gap=" << std::max(0.0, z.s_other_enter - cfg_.a1_stop_margin) - b.path_s
              << " inside=" << static_cast<int>(b_inside)
              << " t=[" << (ob.occupies ? ob.enter : -1.0)
              << "," << (ob.occupies ? ob.exit : -1.0) << "]"
@@ -1200,19 +1368,16 @@ RuleEngine::OccupancyInterval RuleEngine::occupancyInterval(
     // 区段」必须用整车身范围 [s - rear_ext, s + front_ext]，而非仅参考点 s ——
     // 否则车头已插进区段、后轴还在区外的车会被判为「未占用」，对向车以为路空就
     // 撞上去（墨绿车身挡住路口、橙色照冲的根因）。
-    const double front_ext = mp_.body_front_ext();
-    const double rear_ext = mp_.body_rear_ext();
-
     const double current_s = (v.mode == VehicleMode::DWELL)
         ? v.track.length()
         : v.path_s;
     // 车尾(s - rear_ext)已越过区段出口 → 整车确实驶离，不再占用。
-    if (current_s - rear_ext > zone_exit_s + kEps) return out;
+    if (current_s > zone_exit_s + kEps) return out;
 
     // 车身(含前后伸)与区段相交即视为「此刻就压在区内」。
     const bool currently_inside =
-        current_s + front_ext >= zone_enter_s - kEps &&
-        current_s - rear_ext <= zone_exit_s + kEps;
+        current_s >= zone_enter_s - kEps &&
+        current_s <= zone_exit_s + kEps;
 
     if (v.mode == VehicleMode::DWELL || action == VehicleAction::STOP) {
         if (!currently_inside) return out;
@@ -1225,12 +1390,12 @@ RuleEngine::OccupancyInterval RuleEngine::occupancyInterval(
     if (currently_inside) {
         out.enter = 0.0;
         // 车尾清出区段：参考点须前进到 exit + rear_ext。
-        out.exit = timeToReachS(v, action, zone_exit_s + rear_ext);
+        out.exit = timeToReachS(v, action, zone_exit_s);
     } else {
         // 车头抵达入口 = 参考点到 (enter - front_ext)；车尾清出 = 参考点到
         // (exit + rear_ext)。全部用车身边界，不用裸参考点。
-        out.enter = timeToReachS(v, action, zone_enter_s - front_ext);
-        out.exit = timeToReachS(v, action, zone_exit_s + rear_ext);
+        out.enter = timeToReachS(v, action, zone_enter_s);
+        out.exit = timeToReachS(v, action, zone_exit_s);
     }
 
     if (!std::isfinite(out.enter) || !std::isfinite(out.exit)) return {};
@@ -1308,8 +1473,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
 
     // 后轴参考下，车身相对参考点(后轴)向前伸 body_front_ext、向后伸 body_rear_ext。
     // 「占用某区段」= 参考点 s ∈ [enter - 前伸, exit + 后伸]（车身任一点压在区段上）。
-    const double front_ext = mp_.body_front_ext();
-    const double rear_ext = mp_.body_rear_ext();
     constexpr double kFollowingCuspGuard = 0.15;
     auto reverseAt = [](const VehicleAgent& v, double s) {
         return v.track.typeAtS(
@@ -1342,9 +1505,10 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         // §9:破环车在所有层都是最高优先级,pairwise 不得给它刹车(否则它拿了
         // 最高优先级却被旧层摁停 → 蹭行,环破不了)。真碰撞仍由硬护栏 0 余量兜底。
         if (v.deadlock_breaker) return;
-        // 让行车停在「车头(参考点+前伸)正好抵到区段入口」处，即参考点停在
-        // zone_enter - 前伸，车身完全停在共享区外，owner 可无阻通过。
-        const double stop_line_s = zone_enter_s - front_ext;
+        // zone_enter_s is already the first complete-body OBB conflict pose.
+        // A small localization/sampling margin is sufficient for both gears.
+        const double stop_line_s =
+            std::max(0.0, zone_enter_s - cfg_.a1_stop_margin);
         const double dist_to_zone = std::max(0.0, stop_line_s - v.path_s);
         const double v_cur = std::max(0.0, v.current_speed);
         // 精确制动距离：v²/(2a) (制动段) + v·dt (本帧决策延迟 — STOP 命令在
@@ -1489,7 +1653,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         // clearing set.
                         if (!clearing_existing_traffic) {
                             brakeIfNeeded(*a1_waiter,
-                                          gate.stop_s + front_ext,
+                                          gate.stop_s + cfg_.a1_stop_margin,
                                           service_owner->id);
                         }
                         const size_t before = zones.size();
@@ -1547,11 +1711,11 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                                 std::cos(ha) * std::cos(hb) +
                                 std::sin(ha) * std::sin(hb);
                             const bool a_inside =
-                                a.path_s + front_ext >= z.s_self_enter &&
-                                a.path_s - rear_ext <= z.s_self_exit;
+                                a.path_s >= z.s_self_enter &&
+                                a.path_s <= z.s_self_exit;
                             const bool b_inside =
-                                b.path_s + front_ext >= z.s_other_enter &&
-                                b.path_s - rear_ext <= z.s_other_exit;
+                                b.path_s >= z.s_other_enter &&
+                                b.path_s <= z.s_other_exit;
                             return heading_dot > 0.7 && a_inside && b_inside &&
                                    std::min(z.s_self_exit -
                                                 z.s_self_enter,
@@ -1607,7 +1771,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             const bool a_committed = a.path_s > se_a;
             const bool b_committed = b.path_s > se_b;
             auto cleared = [&](const VehicleAgent& v, double sx) {
-                return v.path_s - rear_ext > sx;
+                return v.path_s > sx;
             };
 
             // A WAITING candidate has no A1 ownership yet. When admission is
@@ -1661,16 +1825,17 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     int owner_id = -1;
                     auto it = commit_owner_.find(pkey);
                     if (it != commit_owner_.end()) owner_id = it->second;
-                    const double fe = mp_.body_front_ext();
+                    const double stop_margin = cfg_.a1_stop_margin;
                     ROS_WARN("[DIAG wedge] V%d(s=%.3f,rem=%.3f,wait=%.1f,act=%d) vs "
                              "V%d(s=%.3f,rem=%.3f,wait=%.1f,act=%d) owner=V%d nzones=%zu | "
                              "A region[se=%.3f sx=%.3f] stopline=%.3f committed=%d | "
-                             "B region[se=%.3f sx=%.3f] stopline=%.3f committed=%d | front_ext=%.3f",
+                             "B region[se=%.3f sx=%.3f] stopline=%.3f committed=%d | stop_margin=%.3f",
                              a.id, a.path_s, a.remainingS(), a.wait_time, (int)a.action,
                              b.id, b.path_s, b.remainingS(), b.wait_time, (int)b.action,
                              owner_id, zones.size(),
-                             se_a, sx_a, se_a - fe, (int)a_committed,
-                             se_b, sx_b, se_b - fe, (int)b_committed, fe);
+                              se_a, sx_a, std::max(0.0, se_a - stop_margin), (int)a_committed,
+                              se_b, sx_b, std::max(0.0, se_b - stop_margin), (int)b_committed,
+                              stop_margin);
                     for (size_t zi = 0; zi < zones.size(); ++zi) {
                         ROS_WARN("[DIAG wedge]   zone%zu A[%.3f,%.3f] B[%.3f,%.3f] @(%.2f,%.2f)",
                                  zi, zones[zi].s_self_enter, zones[zi].s_self_exit,
@@ -1715,14 +1880,17 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             // 2) 时间窗闸:仅当两车「都按 NOMINAL 行驶」时占用同一块的时间确有重叠才协调
             //    (§15 不提前等)。这是客观的"会不会相遇",不随谁此刻停走而变 → 时窗错开
             //    的远车(如 TODO-1 的 V1)不会再把已在区口、能先清出的车(V4)钉住空等。
-            bool time_conflict = false;
-            for (const ConflictZone& z : zones) {
-                const OccupancyInterval oa = occupancyInterval(
-                    a, a_action, z.s_self_enter, z.s_self_exit);
-                const OccupancyInterval ob = occupancyInterval(
-                    b, b_action, z.s_other_enter, z.s_other_exit);
-                if (intervalsOverlap(oa, ob)) { time_conflict = true; break; }
-            }
+            // The reservation below is pair-wide and is released only after
+            // the holder clears [se, sx].  Its admission test must use that
+            // same atomic resource.  Testing each connected overlap sample
+            // independently misses paths which visit the same physical
+            // crossing in different motion phases: each car can enter a
+            // different sample and the pair then becomes mutually committed.
+            const OccupancyInterval oa =
+                occupancyInterval(a, a_action, se_a, sx_a);
+            const OccupancyInterval ob =
+                occupancyInterval(b, b_action, se_b, sx_b);
+            const bool time_conflict = intervalsOverlap(oa, ob);
             if (!time_conflict && !a_committed && !b_committed) {
                 continue;  // 时间上错开且都未进区 → 无需协调
             }
@@ -1784,8 +1952,6 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
         return v.remainingS() <= terminal_distance;
     };
 
-    const double front = mp_.body_front_ext();
-    const double rear = mp_.body_rear_ext();
     constexpr double kCuspGuard = 0.15;
     auto reverseAt = [](const VehicleAgent& v, double s) {
         return v.track.typeAtS(
@@ -1899,11 +2065,11 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
                     continue;
                 }
                 const bool a_relevant =
-                    a.path_s + front >= z.s_self_enter &&
-                    a.path_s - rear <= z.s_self_exit;
+                    a.path_s >= z.s_self_enter &&
+                    a.path_s <= z.s_self_exit;
                 const bool b_relevant =
-                    b.path_s + front >= z.s_other_enter &&
-                    b.path_s - rear <= z.s_other_exit;
+                    b.path_s >= z.s_other_enter &&
+                    b.path_s <= z.s_other_exit;
                 if (!a_relevant || !b_relevant) continue;
                 active_same.push_back(z);
                 const double score =
@@ -2055,10 +2221,29 @@ void RuleEngine::resolveA1LocalService(
         const double clamped =
             std::max(0.0, std::min(stop_s, waiter.track.length()));
         const RoughWp pose = waiter.track.poseAtS(clamped);
+        double zone_enter_s = 0.0;
+        bool has_zone_enter = false;
+        if (gate != nullptr && source == A1GateSource::LOCAL_CONFLICT) {
+            zone_enter_s = std::numeric_limits<double>::infinity();
+            auto considerZones = [&](const std::vector<ConflictZone>& zones) {
+                for (const ConflictZone& z : zones) {
+                    zone_enter_s = std::min(zone_enter_s,
+                                            z.s_other_enter);
+                }
+            };
+            considerZones(gate->approach_zones);
+            considerZones(gate->departure_zones);
+            has_zone_enter = std::isfinite(zone_enter_s);
+            if (!has_zone_enter) zone_enter_s = 0.0;
+        }
         a1_gate_markers_.push_back(
             A1GateMarker{
                 owner_id, waiter.id, clamped,
-                pose.x, pose.y, pose.theta, source,
+                pose.x, pose.y, pose.theta,
+                zone_enter_s,
+                waiter.track.typeAtS(clamped) == WpType::REVERSE,
+                has_zone_enter,
+                source,
                 gate == nullptr
                     ? 0
                     : static_cast<int>(gate->approach_zones.size()),
@@ -2215,6 +2400,13 @@ void RuleEngine::resolveA1LocalService(
                 a1_transaction_.release_s;
             const A1ReleaseKind release_kind =
                 a1_transaction_.release_kind;
+            // Do not erase pair-wide orange reservations here.  A valid
+            // ordinary reservation can span beyond the A1 release line; if
+            // it is dropped by vehicle id, both cars may already be committed
+            // to different motion-phase samples of the same crossing.  The
+            // pairwise pass later in this cycle owns reservation release: it
+            // removes entries whose path generation changed, whose conflict
+            // vanished, or whose holder cleared the remaining envelope.
             clearTransaction();
             owner = nullptr;
             a1_request_queue_.erase(
@@ -2223,7 +2415,8 @@ void RuleEngine::resolveA1LocalService(
                 a1_request_queue_.end());
             ROS_INFO(
                 "[multi_patrol][A1 release] owner=V%d target=B%d "
-                "release_s=%.3f kind=%s; vehicle is now ordinary traffic",
+                "release_s=%.3f kind=%s; "
+                "vehicle is now ordinary traffic",
                 released, target, release_s,
                 a1ReleaseKindName(release_kind));
         } else if (!(approaching || loading || exiting)) {
@@ -2341,6 +2534,18 @@ void RuleEngine::resolveA1LocalService(
                     other.mission_phase == MissionPhase::TO_A1) {
                     continue;
                 }
+                const std::pair<int, int> pair_key{
+                    std::min(service.id, other.id),
+                    std::max(service.id, other.id)};
+                const auto reservation = commit_owner_.find(pair_key);
+                if (reservation != commit_owner_.end() &&
+                    reservation->second == service.id) {
+                    // Ordinary arbitration has already established that the
+                    // candidate is physically committed and the incumbent
+                    // must yield. Reversing that order at A1 admission creates
+                    // service->incumbent->service immediately.
+                    continue;
+                }
                 const A1GatePlan proposed_gate =
                     buildA1GatePlan(service, other, proposed);
                 const bool inside =
@@ -2372,9 +2577,62 @@ void RuleEngine::resolveA1LocalService(
                 const int blocker =
                     existingLocalTraffic(*candidate, current_proposed);
                 if (blocker >= 0) {
-                    a1_admission_candidate_ = candidate->id;
-                    a1_admission_blocker_ = blocker;
-                    candidate = nullptr;
+                    // The direct incumbent may itself be unable to clear
+                    // because an A1 requester is physically in front of it.
+                    // Keeping the original queue head then closes the cycle
+                    // requester->candidate->incumbent->requester.  Follow
+                    // last cycle's concrete blocker chain and promote only a
+                    // queued TO_A1 vehicle that is actually on that chain.
+                    VehicleAgent* promoted = nullptr;
+                    VehicleAgent* dependency = findById(blocker);
+                    std::set<int> seen_dependencies;
+                    while (dependency != nullptr &&
+                           seen_dependencies.insert(
+                               dependency->id).second) {
+                        const auto previous_edge =
+                            previous_blocker_.find(dependency->id);
+                        if (previous_edge == previous_blocker_.end() ||
+                            previous_edge->second < 0) {
+                            break;
+                        }
+                        VehicleAgent* next =
+                            findById(previous_edge->second);
+                        if (next == nullptr) break;
+                        const bool queued =
+                            std::find(a1_request_queue_.begin(),
+                                      a1_request_queue_.end(),
+                                      next->id) !=
+                            a1_request_queue_.end();
+                        if (queued && isApproaching(*next)) {
+                            promoted = next;
+                            break;
+                        }
+                        dependency = next;
+                    }
+                    if (promoted != nullptr &&
+                        promoted->id != candidate->id) {
+                        const int previous_candidate = candidate->id;
+                        auto promoted_it = std::find(
+                            a1_request_queue_.begin(),
+                            a1_request_queue_.end(), promoted->id);
+                        if (promoted_it != a1_request_queue_.end()) {
+                            a1_request_queue_.erase(promoted_it);
+                        }
+                        a1_request_queue_.insert(
+                            a1_request_queue_.begin(), promoted->id);
+                        selected_id = promoted->id;
+                        candidate = promoted;
+                        ROS_INFO_THROTTLE(
+                            1.0,
+                            "[multi_patrol][A1 queue] promote V%d over "
+                            "V%d: it physically blocks incumbent V%d's "
+                            "clearance chain",
+                            promoted->id, previous_candidate, blocker);
+                    } else {
+                        a1_admission_candidate_ = candidate->id;
+                        a1_admission_blocker_ = blocker;
+                        candidate = nullptr;
+                    }
                 }
             }
         }
@@ -3093,6 +3351,10 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt) {
     resolveDeadlock(vehicles, dt);   // Phase4:用上周期等待边检测环、选破环车(reset 前)
     refreshResourceSpans(vehicles);  // Phase 2:刷新每车路径的资源占用缓存
 
+    previous_blocker_.clear();
+    for (const VehicleAgent& v : vehicles) {
+        previous_blocker_[v.id] = v.blocker_id;
+    }
     for (VehicleAgent& v : vehicles) {
         v.blocker_id = -1;
         if (v.mode != VehicleMode::ACTIVE) {

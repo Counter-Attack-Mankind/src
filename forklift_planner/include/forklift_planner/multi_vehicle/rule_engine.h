@@ -104,6 +104,9 @@ struct A1GateMarker {
     double x = 0.0;
     double y = 0.0;
     double theta = 0.0;
+    double zone_enter_s = 0.0;
+    bool reverse = false;
+    bool has_zone_enter = false;
     A1GateSource source = A1GateSource::TURN;
     int approach_zone_count = 0;
     int departure_zone_count = 0;
@@ -140,6 +143,7 @@ public:
         std::map<std::pair<int, int>, int> following_phase;
         ResourceTokenTable tokens;
         std::map<int, int> reservation_path_gen;
+        std::map<int, int> previous_blocker;
         double now = 0.0;
         int a1_service_owner = -1;
         int a1_admission_candidate = -1;
@@ -154,7 +158,8 @@ public:
     SimSnapshot snapshot() const {
         return SimSnapshot{commit_owner_, following_pairs_, following_leader_,
                            following_phase_, tokens_,
-                           reservation_path_gen_, now_, a1_service_owner_,
+                           reservation_path_gen_, previous_blocker_,
+                           now_, a1_service_owner_,
                            a1_admission_candidate_,
                            a1_admission_blocker_,
                            a1_control_state_,
@@ -170,6 +175,7 @@ public:
         following_phase_ = s.following_phase;
         tokens_ = s.tokens;
         reservation_path_gen_ = s.reservation_path_gen;
+        previous_blocker_ = s.previous_blocker;
         now_ = s.now;
         a1_service_owner_ = s.a1_service_owner;
         a1_admission_candidate_ = s.a1_admission_candidate;
@@ -340,6 +346,11 @@ private:
     // that created them. A path_gen change invalidates every reservation
     // involving that vehicle.
     std::map<int, int> reservation_path_gen_;
+    // Final wait-for edges from the preceding decision cycle.  decide()
+    // clears VehicleAgent::blocker_id before A1 arbitration and later rebuilds
+    // it in pairwise/forward-clearance passes, so queue promotion must read a
+    // preserved graph rather than the in-progress fields.
+    std::map<int, int> previous_blocker_;
 
     // 真·同向同车道跟车对(由 resolveFollowing 每周期重算认定;key={min,max} id)。
     // 唯一事实源:resolvePairwiseConflicts 仅当某对在此集合内才跳过(交 resolveFollowing

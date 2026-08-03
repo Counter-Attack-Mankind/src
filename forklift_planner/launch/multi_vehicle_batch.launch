@@ -3,6 +3,8 @@
        用法:roslaunch forklift_planner multi_vehicle_batch.launch minutes:=120 -->
   <arg name="minutes" default="120"/>
   <arg name="vehicle_count" default="8"/>
+  <arg name="coord_log_file"
+       default="$(find forklift_planner)/logs/multi_vehicle_coordination.log"/>
   <rosparam command="load" file="$(find forklift_map)/config/map_param.yaml" />
   <rosparam command="load" file="$(find forklift_planner)/config/planner_param.yaml" />
   <param name="/forklift_planner/multi_vehicle/a1_cycle_catalog_file"
@@ -15,5 +17,6 @@
         name="multi_vehicle_patrol_node"
         output="screen" required="true">
     <param name="batch_minutes" value="$(arg minutes)"/>
+    <param name="coord_log_file" value="$(arg coord_log_file)"/>
   </node>
 </launch>

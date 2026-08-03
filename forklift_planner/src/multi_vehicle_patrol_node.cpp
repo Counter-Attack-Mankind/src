@@ -1270,10 +1270,14 @@ private:
                                     ROS_ERROR(
                                         "[coord_diag][hard_guard_geometry] "
                                         "a1_gate owner=V%d waiter=V%d "
-                                        "stop_s=%.3f source=%d approach=%d "
+                                        "stop_s=%.3f gear=%s zone_enter=%s%.3f "
+                                        "source=%d approach=%d "
                                         "departure=%d late=%d",
                                         gate.owner_id, gate.waiter_id,
                                         gate.stop_s,
+                                        gate.reverse ? "R" : "F",
+                                        gate.has_zone_enter ? "" : "n/a:",
+                                        gate.zone_enter_s,
                                         static_cast<int>(gate.source),
                                         gate.approach_zone_count,
                                         gate.departure_zone_count,
@@ -1633,10 +1637,13 @@ private:
             std::snprintf(
                 line, sizeof(line),
                 "[coord_diag][a1_gate] owner=V%d waiter=V%d "
-                "stop_s=%.3f xy=(%.3f,%.3f) source=%s "
+                "stop_s=%.3f xy=(%.3f,%.3f) gear=%s "
+                "zone_enter=%s%.3f source=%s "
                 "approach_zones=%d departure_zones=%d late=%d",
                 gate.owner_id, gate.waiter_id, gate.stop_s,
-                gate.x, gate.y, gateSourceName(gate.source),
+                gate.x, gate.y, gate.reverse ? "R" : "F",
+                gate.has_zone_enter ? "" : "n/a:",
+                gate.zone_enter_s, gateSourceName(gate.source),
                 gate.approach_zone_count, gate.departure_zone_count,
                 static_cast<int>(gate.late));
             coordLog(line);

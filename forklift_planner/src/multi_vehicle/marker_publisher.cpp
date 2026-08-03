@@ -538,6 +538,32 @@ void MarkerPublisher::addA1GateMarkers(
         line.points.push_back(pt3(gate.x + dx, gate.y + dy, 0.034));
         arr.markers.push_back(line);
 
+        // Show the complete parked footprint at the authoritative stop pose.
+        // The gate line alone is a rear-axle reference and cannot demonstrate
+        // whether the vehicle body remains outside a protected region.
+        RoughWp gate_pose;
+        gate_pose.x = gate.x;
+        gate_pose.y = gate.y;
+        gate_pose.theta = gate.theta;
+        const OBB parked = makeBody(gate_pose, mp_, 0.0);
+        visualization_msgs::Marker footprint;
+        footprint.header.frame_id = pp_.frame_id;
+        footprint.header.stamp = ros::Time::now();
+        footprint.ns = gate_ns;
+        footprint.id = marker_id++;
+        footprint.type = visualization_msgs::Marker::CUBE;
+        footprint.action = visualization_msgs::Marker::ADD;
+        footprint.pose.position.x = parked.x;
+        footprint.pose.position.y = parked.y;
+        footprint.pose.position.z = 0.023;
+        footprint.pose.orientation.z = std::sin(0.5 * parked.theta);
+        footprint.pose.orientation.w = std::cos(0.5 * parked.theta);
+        footprint.scale.x = 2.0 * parked.half_l;
+        footprint.scale.y = 2.0 * parked.half_w;
+        footprint.scale.z = 0.010;
+        footprint.color = rgba(color.r, color.g, color.b, 0.20f);
+        arr.markers.push_back(footprint);
+
         visualization_msgs::Marker label;
         label.header.frame_id = pp_.frame_id;
         label.header.stamp = ros::Time::now();
@@ -557,6 +583,11 @@ void MarkerPublisher::addA1GateMarkers(
         } else {
             text << "V" << gate.waiter_id
                  << " YIELD A1/V" << gate.owner_id;
+        }
+        text << " " << (gate.reverse ? "R" : "F")
+             << " stop=" << gate.stop_s;
+        if (gate.has_zone_enter) {
+            text << " enter=" << gate.zone_enter_s;
         }
         label.text = text.str();
         arr.markers.push_back(label);
