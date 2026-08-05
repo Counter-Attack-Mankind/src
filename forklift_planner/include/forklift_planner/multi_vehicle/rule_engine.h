@@ -35,26 +35,51 @@ class RuleEngine {
 public:
     RuleEngine(const MapParam& mp, const MultiVehicleConfig& cfg);
 
+    // Reservation for one visible spatiotemporal conflict event. Arc ranges
+    // use canonical vehicle-id order (lo, hi).
+    struct ConflictReservation {
+        int owner_id = -1;
+        int gen_lo = -1;
+        int gen_hi = -1;
+        double enter_lo = 0.0;
+        double exit_lo = 0.0;
+        double enter_hi = 0.0;
+        double exit_hi = 0.0;
+        double x = 0.0;
+        double y = 0.0;
+        double first_conflict_t = 0.0;
+    };
+
     // 接入资源地图(Phase 2:资源仲裁需要它把路径映射到资源占用)。
     void setResourceMap(const TrafficResourceMap* m) { resmap_ = m; }
 
-    void decide(std::vector<VehicleAgent>& vehicles, double dt);
+    // prediction_horizon_override >= 0 constrains this decision to the
+    // remaining part of one already-active planning window. Normal callers
+    // keep the configured horizon by omitting it.
+    void decide(std::vector<VehicleAgent>& vehicles, double dt,
+                double prediction_horizon_override = -1.0);
     double speedForAction(VehicleAction action) const;
 
     // 前瞻仿真用:快照/恢复跨周期持久状态,使「克隆-空跑」忠实复现真实协调(确定性⇒预测准)。
     struct SimSnapshot {
-        std::map<std::pair<int, int>, int> commit_owner;
+        std::map<std::pair<int, int>, ConflictReservation> reservations;
         std::set<std::pair<int, int>> following_pairs;
         ResourceTokenTable tokens;
+        // conflicts_ is frame output, but sandbox rollout calls decide() and
+        // rewrites it on every predicted step. Snapshot it as well so a
+        // rollout cannot leak its final predicted frame into current RViz.
+        std::vector<ConflictMarker> conflicts;
         double now = 0.0;
     };
     SimSnapshot snapshot() const {
-        return SimSnapshot{commit_owner_, following_pairs_, tokens_, now_};
+        return SimSnapshot{conflict_reservations_, following_pairs_, tokens_,
+                           conflicts_, now_};
     }
     void restore(const SimSnapshot& s) {
-        commit_owner_ = s.commit_owner;
+        conflict_reservations_ = s.reservations;
         following_pairs_ = s.following_pairs;
         tokens_ = s.tokens;
+        conflicts_ = s.conflicts;
         now_ = s.now;
     }
     const std::vector<ConflictMarker>& conflicts() const { return conflicts_; }
@@ -80,12 +105,6 @@ private:
         bool same_dir = false;
     };
 
-    struct OccupancyInterval {
-        bool occupies = false;
-        double enter = 0.0;
-        double exit = 0.0;
-    };
-
     // 当前位置下、属于 (self,other) 的有效冲突块:取缓存的静态 C_ij(见
     // conflictBlocksCanonical),按 self/other 朝向取用,并裁掉任一方已完全清出的块、
     // 把入口夹到各自车尾起点——与历史"逐拍沿剩余路径扫描"的产物在同一离散精度下等价。
@@ -99,16 +118,11 @@ private:
     // 返回的块以 self=lo、other=hi 的朝向存储(s_self_*=lo 路径弧长)。
     const std::vector<ConflictZone>& conflictBlocksCanonical(
         const VehicleAgent& lo, const VehicleAgent& hi) const;
-    OccupancyInterval occupancyInterval(const VehicleAgent& v,
-                                        VehicleAction action,
-                                        double zone_enter_s,
-                                        double zone_exit_s) const;
-    bool intervalsOverlap(const OccupancyInterval& a,
-                          const OccupancyInterval& b) const;
     void recordConflictZones(const VehicleAgent& self,
                              const VehicleAgent& other,
                              const std::vector<ConflictZone>& zones,
-                             ConflictMarkerKind kind);
+                             ConflictMarkerKind kind,
+                             double first_conflict_t = 0.0);
     double timeToReachS(const VehicleAgent& v, VehicleAction action,
                         double target_s) const;
     double predictedTravelDistance(const VehicleAgent& v,
@@ -116,7 +130,8 @@ private:
                                    double t) const;
     void applyActionRequest(VehicleAgent& v, VehicleAction action,
                             const std::string& reason, int blocker_id = -1);
-    void resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles, double dt);
+    void resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles, double dt,
+                                  double prediction_horizon);
     void resolveFollowing(std::vector<VehicleAgent>& vehicles);
     // 普适前向净空护栏:任何车若沿自身固定路径在自己刹车距离内会撞上另一辆车的当前
     // 车身,提前 STOP(留余量、干净对停)。堵死 following/crossing 分类接缝处「两套都
@@ -138,12 +153,9 @@ private:
     const MultiVehicleConfig& cfg_;
     std::vector<ConflictMarker> conflicts_;
 
-    // 资源-时间窗调度的预约闭锁表（跨决策周期持久）。
-    // key = 两车 id 的有序对 {min,max}；value = 当前持有该共享冲突区路权(预约)
-    // 的车辆 id。一旦按规则裁决出 winner 并写入此表，让行方持续让行，直到 owner
-    // 车身(含后伸)完全驶出该共享区才释放——杜绝优先级随 wait_time 在过程中翻转
-    // 而把让行车提前放行导致的撞车。
-    std::map<std::pair<int, int>, int> commit_owner_;
+    // 未来时域内最早可见的局部冲突事件预约。它只锁定本次事件对应的弧长区间，
+    // 不再把同一车对完整路径上的所有几何交叉合并为一个大资源。
+    std::map<std::pair<int, int>, ConflictReservation> conflict_reservations_;
 
     // 真·同向同车道跟车对(由 resolveFollowing 每周期重算认定;key={min,max} id)。
     // 唯一事实源:resolvePairwiseConflicts 仅当某对在此集合内才跳过(交 resolveFollowing

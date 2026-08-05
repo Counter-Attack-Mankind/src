@@ -5,6 +5,7 @@
 #include <clocale>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <fstream>
 #include <memory>
 #include <deque>
@@ -148,6 +149,29 @@ private:
     using VehicleMode = forklift_planner::multi_vehicle::VehicleMode;
     using MissionPhase = forklift_planner::multi_vehicle::MissionPhase;
     using LegTargetKind = forklift_planner::multi_vehicle::LegTargetKind;
+
+    // Transitional simulation plan (stage 2 of the horizon refactor).
+    // The planner still uses the existing sandbox world model for now, but
+    // real simulation ticks execute these frozen decisions for one 2 s
+    // commitment window instead of invoking ordinary arbitration again.
+    struct SimPlannedAgentDecision {
+        int path_gen = -1;
+        VehicleMode mode = VehicleMode::NEED_TASK;
+        VehicleAction action = VehicleAction::STOP;
+        VehicleAction requested_action = VehicleAction::STOP;
+        int blocker_id = -1;
+        double wait_time = 0.0;
+        double action_hold_remaining = 0.0;
+        double cycle_break_immunity = 0.0;
+        bool deadlock_breaker = false;
+        double deadlock_breaker_hold = 0.0;
+        std::string reason;
+    };
+
+    struct SimPlanFrame {
+        std::vector<SimPlannedAgentDecision> agents;
+        forklift_planner::multi_vehicle::RuleEngine::SimSnapshot rule_state;
+    };
 
     void initCoordLog() {
         coord_log_.open(coord_log_file_, std::ios::out | std::ios::trunc);
@@ -439,7 +463,9 @@ private:
     // hold[i]=true 表示该车整段不动(静止特例)→ 控制器 idle 不控制。
 
     void rollWorldModel(double horizon, std::vector<sandbox_msgs::Trajectory>& out,
-                        std::vector<bool>& hold) {
+                        std::vector<bool>& hold,
+                        std::vector<SimPlanFrame>* plan_frames = nullptr,
+                        bool first_step_task_state_is_current = false) {
 
         const double dt = 1.0 / pp_.update_rate;            //系统每触发一次，就向前推进dt时间
         const int H = std::max(1, (int)std::lround(horizon / dt));      //四舍五入决定仿真步数，但至少模拟1步
@@ -487,11 +513,53 @@ private:
 
         //=====（将刚才判断记录的，作为预测的第0个点）====
         record(0);
+        if (plan_frames != nullptr) {
+            plan_frames->clear();
+            plan_frames->reserve(static_cast<size_t>(H));
+        }
 
         //开始向未来预测H步长，H = 预测时间/dt
         for (int s = 1; s <= H; ++s) {
-            updateDwellAndTasks(dt);
-            rule_engine_->decide(agents_, dt);
+            // The simulation executor calls updateDwellAndTasks() before it
+            // asks for a new plan. Its first planned control therefore starts
+            // from that already-updated task state; later frames advance the
+            // task state normally. Existing real rollout keeps the old order.
+            if (!(first_step_task_state_is_current && s == 1)) {
+                updateDwellAndTasks(dt);
+            }
+            if (plan_frames != nullptr) {
+                // All decisions used to build this active plan share one
+                // absolute end time. At future offset tau, only [tau, H]
+                // remains visible; never open a fresh H-second window and
+                // accidentally reason out to 2H.
+                const double tau = static_cast<double>(s - 1) * dt;
+                const double remaining_horizon =
+                    std::max(dt, horizon - tau);
+                rule_engine_->decide(agents_, dt, remaining_horizon);
+            } else {
+                rule_engine_->decide(agents_, dt);
+            }
+            if (plan_frames != nullptr) {
+                SimPlanFrame frame;
+                frame.agents.reserve(agents_.size());
+                for (const VehicleAgent& v : agents_) {
+                    SimPlannedAgentDecision d;
+                    d.path_gen = v.path_gen;
+                    d.mode = v.mode;
+                    d.action = v.action;
+                    d.requested_action = v.requested_action;
+                    d.blocker_id = v.blocker_id;
+                    d.wait_time = v.wait_time;
+                    d.action_hold_remaining = v.action_hold_remaining;
+                    d.cycle_break_immunity = v.cycle_break_immunity;
+                    d.deadlock_breaker = v.deadlock_breaker;
+                    d.deadlock_breaker_hold = v.deadlock_breaker_hold;
+                    d.reason = v.reason;
+                    frame.agents.push_back(std::move(d));
+                }
+                frame.rule_state = rule_engine_->snapshot();
+                plan_frames->push_back(std::move(frame));
+            }
             advanceVehicles(dt);
             record(s);
         }
@@ -504,6 +572,62 @@ private:
         sim_mode_ = prev;
     }
 
+    void buildSimulationHorizonPlan(
+        std::vector<sandbox_msgs::Trajectory>& trajs,
+        std::vector<bool>& hold) {
+        std::vector<SimPlanFrame> frames;
+        rollWorldModel(rb_horizon_, trajs, hold, &frames,
+                       /*first_step_task_state_is_current=*/true);
+        sim_plan_frames_ = std::move(frames);
+        sim_plan_cursor_ = 0;
+        sim_plan_valid_ = !sim_plan_frames_.empty();
+        sim_plan_start_time_ = sim_time_;
+        ++sim_plan_id_;
+        ROS_INFO("[sim_plan] built plan=%llu start=%.2f horizon=%.2f "
+                 "frames=%zu commit_frames=%d",
+                 static_cast<unsigned long long>(sim_plan_id_),
+                 sim_plan_start_time_, rb_horizon_, sim_plan_frames_.size(),
+                 rb_horizon_refresh_);
+    }
+
+    bool simulationPlanNeedsRefresh() const {
+        if (!sim_plan_valid_ || force_horizon_refresh_) return true;
+        if (sim_plan_cursor_ >= sim_plan_frames_.size()) return true;
+        if (sim_plan_cursor_ >= static_cast<size_t>(rb_horizon_refresh_)) {
+            return true;
+        }
+        const SimPlanFrame& frame = sim_plan_frames_[sim_plan_cursor_];
+        if (frame.agents.size() != agents_.size()) return true;
+        for (size_t i = 0; i < agents_.size(); ++i) {
+            if (frame.agents[i].path_gen != agents_[i].path_gen ||
+                frame.agents[i].mode != agents_[i].mode) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool executeSimulationPlanSample() {
+        if (simulationPlanNeedsRefresh()) return false;
+        const SimPlanFrame& frame = sim_plan_frames_[sim_plan_cursor_];
+        rule_engine_->restore(frame.rule_state);
+        for (size_t i = 0; i < agents_.size(); ++i) {
+            VehicleAgent& v = agents_[i];
+            const SimPlannedAgentDecision& d = frame.agents[i];
+            v.action = d.action;
+            v.requested_action = d.requested_action;
+            v.blocker_id = d.blocker_id;
+            v.wait_time = d.wait_time;
+            v.action_hold_remaining = d.action_hold_remaining;
+            v.cycle_break_immunity = d.cycle_break_immunity;
+            v.deadlock_breaker = d.deadlock_breaker;
+            v.deadlock_breaker_hold = d.deadlock_breaker_hold;
+            v.reason = d.reason;
+        }
+        ++sim_plan_cursor_;
+        return true;
+    }
+
     // 滚动时域发布:推演 rb_horizon_ 秒,把每车时间参数化轨迹发到 /traj_i(刷新=滚动)。
     // hold 车(整段不动)发单点轨迹(size=1)作静止标志 → 控制器 idle 不控制。
     // 滚动时域发布：重新推演并覆盖每辆车的短时轨迹。
@@ -512,7 +636,11 @@ private:
         std::vector<bool> hold;
         
         // =======世界模型推演，传入（预测时长，预测得到每辆车未来轨迹，预测得到每辆车未来是否保持静止）=============
-        rollWorldModel(rb_horizon_, trajs, hold);
+        if (cfg_.real_mode) {
+            rollWorldModel(rb_horizon_, trajs, hold);
+        } else {
+            buildSimulationHorizonPlan(trajs, hold);
+        }
 
 
         const ros::Time now = ros::Time::now();
@@ -1410,10 +1538,33 @@ private:
         //=======仿真模式=======
         // dt = 1.0 / pp_.update_rate; dt= 1 / 10 = 0.1s。
 
-        //从当前仿真状态的一拍推进，相当于系统真实时间向前走了一个dt
-        updateDwellAndTasks(dt);        //更新任务，到点停留并且分配新任务，生成路径
-        rule_engine_->decide(agents_, dt);      //多车协调决策，分配速度
-        advanceVehicles(dt);            //仿真推进
+        // 从当前仿真状态推进一拍。滚动模式下，普通协调只在构建10秒计划时
+        // 运行；随后20拍(2秒)逐拍执行冻结计划。0.1秒层只保留任务事件、
+        // 运动学推进和 advanceVehicles 内不可关闭的物理碰撞兜底。
+        updateDwellAndTasks(dt);
+        if (rb_one_shot_traj_) {
+            rule_engine_->decide(agents_, dt);
+        } else {
+            if (simulationPlanNeedsRefresh()) {
+                publishHorizon();
+                force_horizon_refresh_ = false;
+            }
+            if (!executeSimulationPlanSample()) {
+                // A task/path event may invalidate a just-built frame. Rebuild
+                // once immediately; only fall back to a current decision if
+                // planning itself produced no executable frame.
+                publishHorizon();
+                force_horizon_refresh_ = false;
+                if (!executeSimulationPlanSample()) {
+                    ROS_ERROR_THROTTLE(
+                        1.0,
+                        "[sim_plan] no executable frame; using one safe "
+                        "current-step decision");
+                    rule_engine_->decide(agents_, dt);
+                }
+            }
+        }
+        advanceVehicles(dt);
 
 
         //4. 仿真模式---一次性触发完成
@@ -1425,11 +1576,8 @@ private:
 
 
         //5. 仿真模式-----滚动时域规划完成 0.1*20=2s
-        else if (force_horizon_refresh_ ||
-                 tick_count_ % rb_horizon_refresh_ == 0) {
-            publishHorizon();       //从当前状态复制一份，临时向未来推演一段时间，生成未来轨迹
-            force_horizon_refresh_ = false;
-        }
+        // 滚动模式的轨迹已经在本拍执行前、计划创建时发布。这里不再进行
+        // 第二次沙盒推演，否则显示与实际执行会来自不同计划。
 
         logAgentStatus();
         logStuckDiagnostics();
@@ -1923,6 +2071,13 @@ private:
     int rb_horizon_refresh_ = 20;                        // 每多少拍重新推演刷新一次(5拍=0.5s)
     bool rb_one_shot_traj_ = false;                      // 一次性整条轨迹模式(默认):start后推演全程发一次latch
     bool force_horizon_refresh_ = false;                 // 新航段安装后立即覆盖发布
+
+    // 仿真专用:当前10秒协调计划及其2秒执行窗口。real_mode分支不读取这些字段。
+    std::vector<SimPlanFrame> sim_plan_frames_;
+    size_t sim_plan_cursor_ = 0;
+    bool sim_plan_valid_ = false;
+    uint64_t sim_plan_id_ = 0;
+    double sim_plan_start_time_ = 0.0;
     
     double rb_full_horizon_ = 180.0;                    // 一次性模式:全程推演上限时长(s),尾部静止点会裁掉
     bool one_shot_published_ = false;                   // 一次性轨迹是否已全部发完(防重复发)
@@ -2189,7 +2344,21 @@ public:
             ++tick_count_;
             sim_time_ += dt;
             updateDwellAndTasks(dt);
-            rule_engine_->decide(agents_, dt);
+            if (simulationPlanNeedsRefresh()) {
+                std::vector<sandbox_msgs::Trajectory> trajs;
+                std::vector<bool> hold;
+                buildSimulationHorizonPlan(trajs, hold);
+                force_horizon_refresh_ = false;
+            }
+            if (!executeSimulationPlanSample()) {
+                std::vector<sandbox_msgs::Trajectory> trajs;
+                std::vector<bool> hold;
+                buildSimulationHorizonPlan(trajs, hold);
+                force_horizon_refresh_ = false;
+                if (!executeSimulationPlanSample()) {
+                    rule_engine_->decide(agents_, dt);
+                }
+            }
             const unsigned long long guards_before = hard_guard_events_;
             advanceVehicles(dt);
             const bool new_collision = hard_guard_events_ > guards_before;

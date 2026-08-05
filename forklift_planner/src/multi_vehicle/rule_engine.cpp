@@ -328,7 +328,8 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::findConflictZones(
 
 void RuleEngine::recordConflictZones(
     const VehicleAgent& self, const VehicleAgent& other,
-    const std::vector<ConflictZone>& zones, ConflictMarkerKind kind) {
+    const std::vector<ConflictZone>& zones, ConflictMarkerKind kind,
+    double first_conflict_t) {
     constexpr double kDisplayStep = 0.025;
     const double pad =
         std::max(0.03, 0.5 * mp_.vehicle_width +
@@ -375,6 +376,7 @@ void RuleEngine::recordConflictZones(
         marker.vehicle_a = self.id;
         marker.vehicle_b = other.id;
         marker.kind = kind;
+        marker.t = first_conflict_t;
         conflicts_.push_back(marker);
     }
 }
@@ -384,8 +386,8 @@ void RuleEngine::debugDumpConflict(const VehicleAgent& a,
     const std::vector<ConflictZone> zones = findConflictZones(a, b);
     const std::pair<int, int> pkey{std::min(a.id, b.id), std::max(a.id, b.id)};
     int owner = -1;
-    auto it = commit_owner_.find(pkey);
-    if (it != commit_owner_.end()) owner = it->second;
+    auto it = conflict_reservations_.find(pkey);
+    if (it != conflict_reservations_.end()) owner = it->second.owner_id;
     const bool following = following_pairs_.count(pkey) > 0;
     const double f = mp_.body_front_ext();
     bool all_same = true;
@@ -408,63 +410,6 @@ void RuleEngine::debugDumpConflict(const VehicleAgent& a,
     }
 }
 
-RuleEngine::OccupancyInterval RuleEngine::occupancyInterval(
-    const VehicleAgent& v, VehicleAction action,
-    double zone_enter_s, double zone_exit_s) const {
-    OccupancyInterval out;
-    constexpr double kEps = 1e-6;
-
-    if (v.mode == VehicleMode::NEED_TASK || v.track.empty()) return out;
-
-    // 车身沿弧长向参考点(后轴)前方伸 front_ext、后方伸 rear_ext。判断「占用某
-    // 区段」必须用整车身范围 [s - rear_ext, s + front_ext]，而非仅参考点 s ——
-    // 否则车头已插进区段、后轴还在区外的车会被判为「未占用」，对向车以为路空就
-    // 撞上去（墨绿车身挡住路口、橙色照冲的根因）。
-    const double front_ext = mp_.body_front_ext();
-    const double rear_ext = mp_.body_rear_ext();
-
-    const double current_s = (v.mode == VehicleMode::DWELL)
-        ? v.track.length()
-        : v.path_s;
-    // 车尾(s - rear_ext)已越过区段出口 → 整车确实驶离，不再占用。
-    if (current_s - rear_ext > zone_exit_s + kEps) return out;
-
-    // 车身(含前后伸)与区段相交即视为「此刻就压在区内」。
-    const bool currently_inside =
-        current_s + front_ext >= zone_enter_s - kEps &&
-        current_s - rear_ext <= zone_exit_s + kEps;
-
-    if (v.mode == VehicleMode::DWELL || action == VehicleAction::STOP) {
-        if (!currently_inside) return out;
-        out.occupies = true;
-        out.enter = 0.0;
-        out.exit = std::numeric_limits<double>::infinity();
-        return out;
-    }
-
-    if (currently_inside) {
-        out.enter = 0.0;
-        // 车尾清出区段：参考点须前进到 exit + rear_ext。
-        out.exit = timeToReachS(v, action, zone_exit_s + rear_ext);
-    } else {
-        // 车头抵达入口 = 参考点到 (enter - front_ext)；车尾清出 = 参考点到
-        // (exit + rear_ext)。全部用车身边界，不用裸参考点。
-        out.enter = timeToReachS(v, action, zone_enter_s - front_ext);
-        out.exit = timeToReachS(v, action, zone_exit_s + rear_ext);
-    }
-
-    if (!std::isfinite(out.enter) || !std::isfinite(out.exit)) return {};
-    if (out.exit < out.enter) out.exit = out.enter;
-    out.occupies = true;
-    return out;
-}
-
-bool RuleEngine::intervalsOverlap(const OccupancyInterval& a,
-                                  const OccupancyInterval& b) const {
-    if (!a.occupies || !b.occupies) return false;
-    constexpr double kTimeEps = 1e-4;
-    return a.enter < b.exit - kTimeEps && b.enter < a.exit - kTimeEps;
-}
 
 double RuleEngine::timeToReachS(const VehicleAgent& v, VehicleAction action,
                                  double target_s) const {
@@ -496,25 +441,109 @@ void RuleEngine::applyActionRequest(VehicleAgent& v, VehicleAction action,
     }
 }
 
-void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
-                                          double dt) {
-    // 资源-时间窗调度。对每一对车：沿各自固定路径找出车身 OBB 会重叠的弧长冲突区
-    // 段(findConflictZones，已含后轴车尾后伸)，用解析时间窗(occupancyInterval)判断
-    // 二者占用该区段的时间是否重叠；若重叠则按规则裁决谁先走(priorityWinner)，并把
-    // 这一裁决「预约闭锁」(commit_owner_) —— owner 保持路权直到车身完全驶出共享区，
-    // 期间不因 wait_time/饥饿等状态变化而翻转，让行方持续让行。硬护栏(patrol node)仍
-    // 是不可关闭的安全底线。
 
-    // 后轴参考下，车身相对参考点(后轴)向前伸 body_front_ext、向后伸 body_rear_ext。
-    // 「占用某区段」= 参考点 s ∈ [enter - 前伸, exit + 后伸]（车身任一点压在区段上）。
-    const double front_ext = mp_.body_front_ext();
-    const double rear_ext = mp_.body_rear_ext();
-    auto insideZone = [&](const VehicleAgent& v, double enter_s, double exit_s) {
-        const double s =
-            (v.mode == VehicleMode::DWELL) ? v.track.length() : v.path_s;
-        return s >= enter_s - front_ext && s <= exit_s + rear_ext;
+void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
+                                          double dt,
+                                          double prediction_horizon) {
+    // Complete routes are used only as a geometric lookup table. Conflict
+    // existence is decided on one shared finite time grid: compare the two
+    // inflated complete-body OBBs predicted at the same time t in [0, T].
+    struct PredictedSample {
+        double t = 0.0;
+        double s = 0.0;
+        double speed = 0.0;
+        OBB body;
+    };
+    struct TimedEvent {
+        bool valid = false;
+        size_t zone_index = 0;
+        double first_t = 0.0;
+        double last_t = 0.0;
     };
 
+    const double horizon =
+        std::max(cfg_.prediction_step, prediction_horizon);
+    const double prediction_step = std::max(0.02, cfg_.prediction_step);
+    const int prediction_count = std::max(
+        1, static_cast<int>(std::ceil(horizon / prediction_step)));
+    const double footprint_margin = 0.5 * cfg_.conflict_margin;
+
+    auto curvatureSpeedAt = [&](const VehicleAgent& v, double query_s) {
+        if (cfg_.lat_accel_max <= 0.0 || v.track.empty()) {
+            return std::numeric_limits<double>::infinity();
+        }
+        const double length = v.track.length();
+        const double s = std::max(0.0, std::min(query_s, length));
+        constexpr double sample_ds = 0.05;
+        const RoughWp pa = v.track.poseAtS(std::max(0.0, s - sample_ds));
+        const RoughWp pb = v.track.poseAtS(s);
+        const RoughWp pc = v.track.poseAtS(std::min(length, s + sample_ds));
+        const double abx = pb.x - pa.x;
+        const double aby = pb.y - pa.y;
+        const double acx = pc.x - pa.x;
+        const double acy = pc.y - pa.y;
+        const double lab = std::hypot(abx, aby);
+        const double lbc = std::hypot(pc.x - pb.x, pc.y - pb.y);
+        const double lac = std::hypot(acx, acy);
+        if (lab < 1e-4 || lbc < 1e-4 || lac < 1e-4) {
+            return std::numeric_limits<double>::infinity();
+        }
+        const double kappa =
+            2.0 * std::abs(abx * acy - aby * acx) / (lab * lbc * lac);
+        if (kappa < 1e-3) {
+            return std::numeric_limits<double>::infinity();
+        }
+        return std::max(std::sqrt(cfg_.lat_accel_max / kappa),
+                        cfg_.nominal_speed * cfg_.creep_ratio);
+    };
+
+    auto predict = [&](const VehicleAgent& v) {
+        std::vector<PredictedSample> out;
+        out.reserve(static_cast<size_t>(prediction_count + 1));
+        double s = std::max(0.0, std::min(v.path_s, v.track.length()));
+        double speed = std::max(0.0, v.current_speed);
+        out.push_back(PredictedSample{
+            0.0, s, speed,
+            makeBody(v.track.poseAtS(s), mp_, footprint_margin)});
+        for (int k = 1; k <= prediction_count; ++k) {
+            const double previous_t = (k - 1) * prediction_step;
+            const double t = std::min(horizon, k * prediction_step);
+            const double step = t - previous_t;
+            if (step <= 1e-9) continue;
+            if (s >= v.track.length() - 1e-9) {
+                s = v.track.length();
+                speed = 0.0;
+            } else {
+                const double desired = std::min(
+                    speedForAction(VehicleAction::NOMINAL),
+                    curvatureSpeedAt(v, s));
+                if (desired > speed) {
+                    speed = std::min(desired, speed + cfg_.max_accel * step);
+                } else {
+                    speed = std::max(desired, speed - cfg_.max_decel * step);
+                }
+                s = std::min(v.track.length(), s + speed * step);
+            }
+            out.push_back(PredictedSample{
+                t, s, speed,
+                makeBody(v.track.poseAtS(s), mp_, footprint_margin)});
+        }
+        return out;
+    };
+
+    std::vector<std::vector<PredictedSample>> predictions(vehicles.size());
+    for (size_t i = 0; i < vehicles.size(); ++i) {
+        if (vehicles[i].active() && !vehicles[i].track.empty()) {
+            predictions[i] = predict(vehicles[i]);
+        }
+    }
+
+    auto agentById = [&](int id) -> VehicleAgent* {
+        for (VehicleAgent& v : vehicles) {
+            if (v.id == id) return &v;
+        }
+        return nullptr;
+    };
     auto terminalDocking = [&](const VehicleAgent& v) {
         if (!v.active()) return false;
         const double terminal_distance =
@@ -522,233 +551,214 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         return v.remainingS() <= terminal_distance;
     };
 
-    auto brakeIfNeeded = [&](VehicleAgent& v, double zone_enter_s,
-                             int other_id) {
-        // §9:破环车在所有层都是最高优先级,pairwise 不得给它刹车(否则它拿了
-        // 最高优先级却被旧层摁停 → 蹭行,环破不了)。真碰撞仍由硬护栏 0 余量兜底。
+    // ConflictZone arc intervals already represent rear-axle reference poses
+    // whose inflated complete-body OBBs overlap. Do not expand them by another
+    // vehicle length when deciding entry, clearance, or the stop line.
+    constexpr double kStopBuffer = 0.01;
+    auto insideInterval = [](const VehicleAgent& v, double enter_s,
+                             double exit_s) {
+        return v.path_s > enter_s + 1e-9 &&
+               v.path_s <= exit_s + 1e-9;
+    };
+    auto brakeBefore = [&](VehicleAgent& v, double conflict_enter_s,
+                           int other_id) {
         if (v.deadlock_breaker) return;
-        // 让行车停在「车头(参考点+前伸)正好抵到区段入口」处，即参考点停在
-        // zone_enter - 前伸，车身完全停在共享区外，owner 可无阻通过。
-        const double stop_line_s = zone_enter_s - front_ext;
-        const double dist_to_zone = std::max(0.0, stop_line_s - v.path_s);
-        const double v_cur = std::max(0.0, v.current_speed);
-        // 精确制动距离：v²/(2a) (制动段) + v·dt (本帧决策延迟 — STOP 命令在
-        // 下一帧才生效，这帧车辆还在以当前速度行驶)。全部基于当前状态，
-        // 不依赖任何固定经验参数。
-        const double braking_dist =
-            (v_cur * v_cur) / (2.0 * std::max(1e-6, cfg_.max_decel));
-        const double reaction_dist = v_cur * dt;
-        if (dist_to_zone <= braking_dist + reaction_dist) {
+        const double stop_s = std::max(0.0, conflict_enter_s - kStopBuffer);
+        const double distance = stop_s - v.path_s;
+        const double speed = std::max(0.0, v.current_speed);
+        const double stopping_distance =
+            speed * speed / (2.0 * std::max(1e-6, cfg_.max_decel)) +
+            speed * dt;
+        if (distance <= stopping_distance + 1e-9) {
             applyActionRequest(v, VehicleAction::STOP,
-                               "brake_V" + std::to_string(other_id), other_id);
+                               "time_brake_V" + std::to_string(other_id),
+                               other_id);
         }
     };
 
-    // 给定一个冲突区段，取属于 agent `is_a`(true=self/a, false=other/b) 一侧的弧长
-    // 入口/出口。findConflictZones(a,b) 中 self=a，故 a 用 s_self_*，b 用 s_other_*。
-    auto sideEnter = [](const ConflictZone& z, bool is_a) {
-        return is_a ? z.s_self_enter : z.s_other_enter;
-    };
-    auto sideExit = [](const ConflictZone& z, bool is_a) {
-        return is_a ? z.s_self_exit : z.s_other_exit;
-    };
-
-    // 预约表剪枝：owner 已不在 ACTIVE(任务结束/重分配/进入 DWELL) 的条目作废。
-    auto agentById = [&](int id) -> VehicleAgent* {
-        for (VehicleAgent& v : vehicles) {
-            if (v.id == id) return &v;
-        }
-        return nullptr;
-    };
-    for (auto it = commit_owner_.begin(); it != commit_owner_.end();) {
-        VehicleAgent* owner = agentById(it->second);
-        if (owner == nullptr || owner->mode != VehicleMode::ACTIVE) {
-            it = commit_owner_.erase(it);
+    // Drop event reservations when a participant or its route changes.
+    for (auto it = conflict_reservations_.begin();
+         it != conflict_reservations_.end();) {
+        VehicleAgent* lo = agentById(it->first.first);
+        VehicleAgent* hi = agentById(it->first.second);
+        const ConflictReservation& r = it->second;
+        if (lo == nullptr || hi == nullptr || !lo->active() || !hi->active() ||
+            lo->path_gen != r.gen_lo || hi->path_gen != r.gen_hi) {
+            it = conflict_reservations_.erase(it);
         } else {
             ++it;
         }
     }
 
+    auto reservationZone = [](const ConflictReservation& r, bool a_is_lo) {
+        ConflictZone z;
+        z.s_self_enter = a_is_lo ? r.enter_lo : r.enter_hi;
+        z.s_self_exit = a_is_lo ? r.exit_lo : r.exit_hi;
+        z.s_other_enter = a_is_lo ? r.enter_hi : r.enter_lo;
+        z.s_other_exit = a_is_lo ? r.exit_hi : r.exit_lo;
+        z.x = r.x;
+        z.y = r.y;
+        return z;
+    };
+
     for (size_t i = 0; i < vehicles.size(); ++i) {
         VehicleAgent& a = vehicles[i];
-        if (!a.active()) continue;
-
+        if (!a.active() || predictions[i].empty()) continue;
         for (size_t j = i + 1; j < vehicles.size(); ++j) {
             VehicleAgent& b = vehicles[j];
-            // DWELL(泊在货位)的车是「静态障碍」,不参与会动的车之间的预约式交叉协调——
-            // 那套带 conflict_margin 提前量的门控,会把仅从它旁边经过、本可贴安全余量通过的
-            // 车干等到它出库(实测 V3 被泊车 V4 干等 30s;紫/蓝车同样)。静态障碍由三处既有且
-            // 正确的机制接管:resolveTargetSlotOccupancy(想进它占用的库位→口外等)、
-            // enforceForwardClearance(沿前向 0 余量净空、真要贴上才停)、硬护栏(0 余量兜底)。
-            // 故此处 DWELL/inactive 一律跳过;b 通过后必为 ACTIVE。
-            if (!b.active()) continue;
+            if (!b.active() || predictions[j].empty()) continue;
 
-            // 先取缓存的冲突块(静态 C_ij + 当前位置裁剪),后续跟车判定/门控都基于它。
+            const std::pair<int, int> key{std::min(a.id, b.id),
+                                          std::max(a.id, b.id)};
+            const bool a_is_lo = a.id == key.first;
+            if (following_pairs_.count(key)) {
+                conflict_reservations_.erase(key);
+                continue;
+            }
+
             const std::vector<ConflictZone> zones = findConflictZones(a, b);
-            const std::pair<int, int> pkey{std::min(a.id, b.id),
-                                           std::max(a.id, b.id)};
             if (zones.empty()) {
-                commit_owner_.erase(pkey);  // 无共享冲突区:释放可能残留的预约。
+                conflict_reservations_.erase(key);
                 continue;
             }
 
-            // 协调图第4步(改):同向同车道跟车交 resolveFollowing 管纵向跟距。是否跳过
-            // 完全以 resolveFollowing 本周期认定的 following_pairs_ 为唯一事实源——
-            // 「被跳过 ⟺ 被 following 接管」,杜绝两层判据不一致留下的缝隙(旧版 pairwise
-            // 用块处/瞬时朝向自行判定,与 following 的判据不符 → 某些对被 pairwise 跳过却
-            // 无人接管 → 头对头/汇入对撞,实测 V1↔V4 / V0↔V7 / V1↔V5)。不在该集合中的对
-            // 一律由下方原子门门控,绝不漏。
-            if (following_pairs_.count(pkey)) continue;
+            // Honor the previously selected local event, not every later
+            // crossing of the same pair of complete paths.
+            auto reservation_it = conflict_reservations_.find(key);
+            if (reservation_it != conflict_reservations_.end()) {
+                ConflictReservation& r = reservation_it->second;
+                VehicleAgent& lo = a_is_lo ? a : b;
+                VehicleAgent& hi = a_is_lo ? b : a;
+                VehicleAgent& owner = r.owner_id == lo.id ? lo : hi;
+                VehicleAgent& waiter = r.owner_id == lo.id ? hi : lo;
+                const double owner_enter = r.owner_id == lo.id
+                    ? r.enter_lo : r.enter_hi;
+                const double owner_exit = r.owner_id == lo.id
+                    ? r.exit_lo : r.exit_hi;
+                const double waiter_enter = r.owner_id == lo.id
+                    ? r.enter_hi : r.enter_lo;
+                const double waiter_exit = r.owner_id == lo.id
+                    ? r.exit_hi : r.exit_lo;
 
-            // 协调图第3步:时间窗用「两车都按 NOMINAL」预测占用——回答的是「若双方都
-            // 正常行驶,会不会在同一冲突块里相遇」这一与当前谁停谁走无关的客观问题。
-            //  · 治 TODO-1:让行方不再因为「此刻为对方停住」就被钉成永久占用([0,∞])而
-            //    时窗恒真、白等对方走完全程;按 NOMINAL 它若能在对方到达前清出本块,则时窗
-            //    不相交 → 不需让行,直接放行(实测 V4 出库 1.3s 清出口,远早于 V1 到达)。
-            //  · 同时根除原 ghost-clearance 对撞:两车都按 NOMINAL 评估,不存在「一方因慢/
-            //    停而显得不在场」的前提 → B 不会误判 A 已消失而冲进共享块。
-            //  · 稳定性不靠此处:真冲突一旦裁出 holder 并预约,由 step1(持有到清出)+
-            //    committed 逻辑保证不翻转,与时间窗无关。故去掉旧「自锁(blocker==partner→
-            //    STOP→[0,∞])」不会让已设预约抖动。
-            //  · DWELL(停驻)车是真正静止的静态障碍 → 仍按 STOP(占据其当前位置)。
-            auto predAction = [](bool is_dwell) -> VehicleAction {
-                return is_dwell ? VehicleAction::STOP : VehicleAction::NOMINAL;
-            };
-            const VehicleAction a_action = predAction(false);
-            const VehicleAction b_action = predAction(false);
-
-            // ── §11.3 原子通行段:整片共享冲突区 = 单一互斥资源 ────────────────
-            // 整片区域 = 所有冲突区在各自路径上的弧长外包 [se, sx]。同一时刻只允许
-            // 一辆持有整片区域;持有车走到车身完全驶出整片区域才释放;另一辆在整片区域
-            // 上游停止线(车身完全在区外)等待。从源头杜绝两车同时挤进互相挡的区域。
-            const double kInf = std::numeric_limits<double>::infinity();
-            double se_a = kInf, sx_a = -kInf, se_b = kInf, sx_b = -kInf;
-            for (const ConflictZone& z : zones) {
-                se_a = std::min(se_a, sideEnter(z, true));
-                sx_a = std::max(sx_a, sideExit(z, true));
-                se_b = std::min(se_b, sideEnter(z, false));
-                sx_b = std::max(sx_b, sideExit(z, false));
-            }
-            // 「已驶入区内」= 参考点越过区域入口(车头刚停在停止线 path_s=se-front_ext
-            // < se 不算)。「已完全清出」= 车尾越过区域出口。
-            const bool a_committed = a.path_s > se_a;
-            const bool b_committed = b.path_s > se_b;
-            auto cleared = [&](const VehicleAgent& v, double sx) {
-                return v.path_s - rear_ext > sx;
-            };
-
-            // [DIAG wedge] 某对车卡很久(wait>8s)→ 打印整片区域几何 + 各冲突区明细,
-            // 定位根因。每对只打一次,只读。
-            {
-                static std::map<std::pair<int, int>, double> wedge_logged;
-                const bool stuck = (a.wait_time > 8.0 || b.wait_time > 8.0);
-                auto wit = wedge_logged.find(pkey);
-                const bool due = (wit == wedge_logged.end()) ||
-                                 (now_ - wit->second > 3.0);
-                if (stuck && due) {
-                    wedge_logged[pkey] = now_;
-                    int owner_id = -1;
-                    auto it = commit_owner_.find(pkey);
-                    if (it != commit_owner_.end()) owner_id = it->second;
-                    const double fe = mp_.body_front_ext();
-                    ROS_WARN("[DIAG wedge] V%d(s=%.3f,rem=%.3f,wait=%.1f,act=%d) vs "
-                             "V%d(s=%.3f,rem=%.3f,wait=%.1f,act=%d) owner=V%d nzones=%zu | "
-                             "A region[se=%.3f sx=%.3f] stopline=%.3f committed=%d | "
-                             "B region[se=%.3f sx=%.3f] stopline=%.3f committed=%d | front_ext=%.3f",
-                             a.id, a.path_s, a.remainingS(), a.wait_time, (int)a.action,
-                             b.id, b.path_s, b.remainingS(), b.wait_time, (int)b.action,
-                             owner_id, zones.size(),
-                             se_a, sx_a, se_a - fe, (int)a_committed,
-                             se_b, sx_b, se_b - fe, (int)b_committed, fe);
-                    for (size_t zi = 0; zi < zones.size(); ++zi) {
-                        ROS_WARN("[DIAG wedge]   zone%zu A[%.3f,%.3f] B[%.3f,%.3f] @(%.2f,%.2f)",
-                                 zi, zones[zi].s_self_enter, zones[zi].s_self_exit,
-                                 zones[zi].s_other_enter, zones[zi].s_other_exit,
-                                 zones[zi].x, zones[zi].y);
-                    }
-                }
-            }
-
-            // 1) 已有预约:持有车保持路权直到完全清出整片区域;另一辆在上游停止线等。
-            {
-                auto it = commit_owner_.find(pkey);
-                if (it != commit_owner_.end()) {
-                    const bool owner_is_a = (it->second == a.id);
-                    VehicleAgent& owner = owner_is_a ? a : b;
-                    VehicleAgent& other = owner_is_a ? b : a;
-                    const double owner_sx = owner_is_a ? sx_a : sx_b;
-                    const double other_se = owner_is_a ? se_b : se_a;
-                    const bool owner_committed = owner_is_a ? a_committed : b_committed;
-                    const bool other_committed = owner_is_a ? b_committed : a_committed;
-                    if (cleared(owner, owner_sx)) {
-                        commit_owner_.erase(it);  // 持有车已清出 → 释放,落下方重裁
-                    } else if (other_committed && !owner_committed) {
-                        // 互斥铁律:让行方已陷在共享区内、而持有方还在区外进不来 →
-                        // 持有方此刻无法穿越(会撞区内的让行方),应改由「已在区内者」持有
-                        // 先清出,持有方退为区外等待。释放预约,落下方按 committed 重裁。
-                        // (修 V6↔V7:owner=V6 在区外硬往里开、撞 V7 困在区内的死锁)
-                        commit_owner_.erase(it);
+                if (owner.path_s > owner_exit + 1e-9) {
+                    conflict_reservations_.erase(reservation_it);
+                } else {
+                    const bool owner_inside =
+                        insideInterval(owner, owner_enter, owner_exit);
+                    const bool waiter_inside =
+                        insideInterval(waiter, waiter_enter, waiter_exit);
+                    if (waiter_inside && !owner_inside &&
+                        owner.path_s <= owner_enter + 1e-9) {
+                        // Current physical occupancy overrides an old forecast.
+                        r.owner_id = waiter.id;
+                        brakeBefore(owner, owner_enter, waiter.id);
                     } else {
-                        brakeIfNeeded(other, other_se, owner.id);
-                        // Crossing and opposing traffic use the same atomic
-                        // mutual-exclusion arbitration, so RViz shows them as
-                        // one visual class.
-                        recordConflictZones(
-                            a, b, zones,
-                            ConflictMarkerKind::CROSSING_OR_OPPOSING);
-                        continue;  // 持有到清出,绝不翻转
+                        brakeBefore(waiter, waiter_enter, owner.id);
                     }
+                    const ConflictZone rz = reservationZone(r, a_is_lo);
+                    recordConflictZones(
+                        a, b, std::vector<ConflictZone>{rz},
+                        ConflictMarkerKind::CROSSING_OR_OPPOSING,
+                        r.first_conflict_t);
+                    continue;
                 }
             }
 
-            // 2) 时间窗闸:仅当两车「都按 NOMINAL 行驶」时占用同一块的时间确有重叠才协调
-            //    (§15 不提前等)。这是客观的"会不会相遇",不随谁此刻停走而变 → 时窗错开
-            //    的远车(如 TODO-1 的 V1)不会再把已在区口、能先清出的车(V4)钉住空等。
-            bool time_conflict = false;
-            for (const ConflictZone& z : zones) {
-                const OccupancyInterval oa = occupancyInterval(
-                    a, a_action, z.s_self_enter, z.s_self_exit);
-                const OccupancyInterval ob = occupancyInterval(
-                    b, b_action, z.s_other_enter, z.s_other_exit);
-                if (intervalsOverlap(oa, ob)) { time_conflict = true; break; }
+            // Locate the first contiguous same-time body overlap in this
+            // horizon. Geometric crossings at different times are ignored.
+            TimedEvent event;
+            const size_t count =
+                std::min(predictions[i].size(), predictions[j].size());
+            for (size_t k = 0; k < count; ++k) {
+                const bool hit = overlaps(predictions[i][k].body,
+                                          predictions[j][k].body);
+                if (!hit) {
+                    if (event.valid) break;
+                    continue;
+                }
+                if (!event.valid) {
+                    event.valid = true;
+                    event.first_t = predictions[i][k].t;
+                    const double sa = predictions[i][k].s;
+                    const double sb = predictions[j][k].s;
+                    double best_score = std::numeric_limits<double>::infinity();
+                    for (size_t zi = 0; zi < zones.size(); ++zi) {
+                        const ConflictZone& z = zones[zi];
+                        auto intervalDistance = [](double value, double begin,
+                                                   double end) {
+                            if (value < begin) return begin - value;
+                            if (value > end) return value - end;
+                            return 0.0;
+                        };
+                        const double score =
+                            intervalDistance(sa, z.s_self_enter, z.s_self_exit) +
+                            intervalDistance(sb, z.s_other_enter, z.s_other_exit);
+                        if (score < best_score) {
+                            best_score = score;
+                            event.zone_index = zi;
+                        }
+                    }
+                }
+                event.last_t = predictions[i][k].t;
             }
-            if (!time_conflict && !a_committed && !b_committed) {
-                continue;  // 时间上错开且都未进区 → 无需协调
-            }
-            recordConflictZones(
-                a, b, zones,
-                ConflictMarkerKind::CROSSING_OR_OPPOSING);
+            if (!event.valid) continue;
 
-            // 3) 无预约:裁决整片区域的持有车(holder)并预约。
-            //    互斥优先:已在区内者必须清出→它持有;都不在→末端泊入/出库(CLEAR/EXIT,
-            //    §11.1)优先,否则统一优先级 priorityWinner。
+            const ConflictZone& zone = zones[event.zone_index];
+            const bool a_inside =
+                insideInterval(a, zone.s_self_enter, zone.s_self_exit);
+            const bool b_inside =
+                insideInterval(b, zone.s_other_enter, zone.s_other_exit);
             int holder = -1;
-            if (a_committed && !b_committed) {
-                holder = a.id;
-            } else if (b_committed && !a_committed) {
-                holder = b.id;
-            } else if (a_committed && b_committed) {
-                // 两车都已在区内(原子门失效的残留态)→ 真楔死,双停,交硬护栏+破环逃生。
-                brakeIfNeeded(a, se_a, b.id);
-                brakeIfNeeded(b, se_b, a.id);
-                continue;
+            if (a_inside != b_inside) {
+                holder = a_inside ? a.id : b.id;
+            } else if (a_inside && b_inside) {
+                // If both are already committed, clear the one that can leave
+                // this local event sooner instead of creating a double stop.
+                const double a_clear = timeToReachS(
+                    a, VehicleAction::NOMINAL, zone.s_self_exit);
+                const double b_clear = timeToReachS(
+                    b, VehicleAction::NOMINAL, zone.s_other_exit);
+                if (std::abs(a_clear - b_clear) > prediction_step) {
+                    holder = a_clear < b_clear ? a.id : b.id;
+                } else {
+                    holder = priorityWinner(a, b);
+                }
             } else {
-                const bool a_term = terminalDocking(a);
-                const bool b_term = terminalDocking(b);
-                if (a_term != b_term) holder = a_term ? a.id : b.id;  // CLEAR 优先
-                else holder = priorityWinner(a, b);  // -1=tiebreak 关
+                const bool a_terminal = terminalDocking(a);
+                const bool b_terminal = terminalDocking(b);
+                if (a_terminal != b_terminal) {
+                    holder = a_terminal ? a.id : b.id;
+                } else {
+                    holder = priorityWinner(a, b);
+                }
             }
+
+            recordConflictZones(
+                a, b, std::vector<ConflictZone>{zone},
+                ConflictMarkerKind::CROSSING_OR_OPPOSING, event.first_t);
+            if (holder < 0) {
+                brakeBefore(a, zone.s_self_enter, b.id);
+                brakeBefore(b, zone.s_other_enter, a.id);
+                continue;
+            }
+
+            ConflictReservation r;
+            r.owner_id = holder;
+            r.gen_lo = a_is_lo ? a.path_gen : b.path_gen;
+            r.gen_hi = a_is_lo ? b.path_gen : a.path_gen;
+            r.enter_lo = a_is_lo ? zone.s_self_enter : zone.s_other_enter;
+            r.exit_lo = a_is_lo ? zone.s_self_exit : zone.s_other_exit;
+            r.enter_hi = a_is_lo ? zone.s_other_enter : zone.s_self_enter;
+            r.exit_hi = a_is_lo ? zone.s_other_exit : zone.s_self_exit;
+            r.x = zone.x;
+            r.y = zone.y;
+            r.first_conflict_t = event.first_t;
+            conflict_reservations_[key] = r;
 
             if (holder == a.id) {
-                brakeIfNeeded(b, se_b, a.id);
-                commit_owner_[pkey] = a.id;
-            } else if (holder == b.id) {
-                brakeIfNeeded(a, se_a, b.id);
-                commit_owner_[pkey] = b.id;
+                brakeBefore(b, zone.s_other_enter, a.id);
             } else {
-                // tiebreak 关闭:双方停,不预约(纯避撞,可能死锁)。
-                brakeIfNeeded(a, se_a, b.id);
-                brakeIfNeeded(b, se_b, a.id);
+                brakeBefore(a, zone.s_self_enter, b.id);
             }
         }
     }
@@ -1304,7 +1314,8 @@ void RuleEngine::resolveDeadlock(std::vector<VehicleAgent>& vehicles, double dt)
     }
 }
 
-void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt) {
+void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
+                        double prediction_horizon_override) {
     conflicts_.clear();
     now_ += dt;                      // 内部仿真时钟(令牌防抖/超时)
     resolveDeadlock(vehicles, dt);   // Phase4:用上周期等待边检测环、选破环车(reset 前)
@@ -1328,7 +1339,10 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt) {
     // 几何冲突(findConflictZones:沿固定路径采样车身OBB,只标真实重叠弧段)作唯一交叉
     // 协调权威。八竿子打不着的两车它根本不报冲突→各自全速。
     // arbitrateResources(vehicles, dt);   // 已停用(资源盒=幻象冲突源)
-    resolvePairwiseConflicts(vehicles, dt);// 精确几何冲突:交叉协调的唯一权威(§8.6)
+    const double pairwise_horizon = prediction_horizon_override >= 0.0
+        ? prediction_horizon_override
+        : cfg_.prediction_horizon;
+    resolvePairwiseConflicts(vehicles, dt, pairwise_horizon);
     resolveTargetSlotOccupancy(vehicles);  // slot-mouth queueing (spec 6/7)
     enforceForwardClearance(vehicles);     // 普适前向净空兜底:堵分类接缝→防十字楔死
     applyRequestedActions(vehicles, dt);

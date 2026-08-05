@@ -2,8 +2,17 @@
   <!-- 无头快速回归:狂跑 N 仿真分钟(确定性,不启 rviz/不按实时),节点退出码 1=有碰撞。
        用法:roslaunch forklift_planner multi_vehicle_batch.launch minutes:=120 -->
   <arg name="minutes" default="120"/>
+  <arg name="vehicle_count" default="8"/>
+  <arg name="enable_deadlock_recovery" default="false"/>
+  <arg name="use_a1_cycle" default="true"/>
   <rosparam command="load" file="$(find forklift_map)/config/map_param.yaml" />
   <rosparam command="load" file="$(find forklift_planner)/config/planner_param.yaml" />
+  <param name="/forklift_planner/multi_vehicle/vehicle_count"
+         value="$(arg vehicle_count)"/>
+  <param name="/forklift_planner/multi_vehicle/enable_deadlock_recovery"
+         value="$(arg enable_deadlock_recovery)"/>
+  <param name="/forklift_planner/multi_vehicle/use_a1_cycle"
+         value="$(arg use_a1_cycle)"/>
   <param name="/forklift_planner/multi_vehicle/a1_cycle_catalog_file"
          value="$(find forklift_planner)/config/a1_cycle_path_catalog.yaml"/>
 
