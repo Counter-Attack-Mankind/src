@@ -724,12 +724,27 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     holder = priorityWinner(a, b);
                 }
             } else {
-                const bool a_terminal = terminalDocking(a);
-                const bool b_terminal = terminalDocking(b);
-                if (a_terminal != b_terminal) {
-                    holder = a_terminal ? a.id : b.id;
+                const bool a_a1_departure =
+                    a.a1_departure_committed &&
+                    a.path_s < a.a1_departure_priority_until_s - 1e-9;
+                const bool b_a1_departure =
+                    b.a1_departure_committed &&
+                    b.path_s < b.a1_departure_priority_until_s - 1e-9;
+                if (a_a1_departure != b_a1_departure) {
+                    // Normal A1 case: neither vehicle has entered this event,
+                    // so the prepared pickup departure owns only this visible
+                    // spatiotemporal conflict. An already-inside vehicle is
+                    // handled by the branch above and is never forced to obey
+                    // an impossible late stop.
+                    holder = a_a1_departure ? a.id : b.id;
                 } else {
-                    holder = priorityWinner(a, b);
+                    const bool a_terminal = terminalDocking(a);
+                    const bool b_terminal = terminalDocking(b);
+                    if (a_terminal != b_terminal) {
+                        holder = a_terminal ? a.id : b.id;
+                    } else {
+                        holder = priorityWinner(a, b);
+                    }
                 }
             }
 

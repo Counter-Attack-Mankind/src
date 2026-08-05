@@ -62,10 +62,132 @@ void shelfCellY(const MapParam& p, int row_id, double& y0, double& y1) {
 MarkerPublisher::MarkerPublisher(ros::NodeHandle& nh, const MapParam& mp,
                                  const PlannerParam& pp,
                                  const std::vector<Slot>& slots,
-                                 const MultiVehicleConfig& cfg)
-    : mp_(mp), pp_(pp), slots_(slots), cfg_(cfg) {
+                                 const MultiVehicleConfig& cfg,
+                                 const Slot& a1_pickup,
+                                 const A1LocalRegion& a1_local_region)
+    : mp_(mp), pp_(pp), slots_(slots), cfg_(cfg),
+      a1_pickup_(a1_pickup), a1_local_region_(a1_local_region) {
     pub_ = nh.advertise<visualization_msgs::MarkerArray>(
         "/forklift_planner/markers", 10);
+}
+
+void MarkerPublisher::addA1DefinitionMarkers(
+    visualization_msgs::MarkerArray& arr) const {
+    if (!cfg_.use_a1_cycle || !cfg_.show_a1_local_region) return;
+    const ros::Time now = ros::Time::now();
+
+    if (a1_local_region_.valid) {
+        visualization_msgs::Marker region;
+        region.header.frame_id = pp_.frame_id;
+        region.header.stamp = now;
+        region.ns = "a1_local_region";
+        region.id = 0;
+        region.type = visualization_msgs::Marker::CUBE;
+        region.action = visualization_msgs::Marker::ADD;
+        region.pose.position.x =
+            0.5 * (a1_local_region_.min_x + a1_local_region_.max_x);
+        region.pose.position.y =
+            0.5 * (a1_local_region_.min_y + a1_local_region_.max_y);
+        region.pose.position.z = 0.011;
+        region.pose.orientation.w = 1.0;
+        region.scale.x = a1_local_region_.max_x - a1_local_region_.min_x;
+        region.scale.y = a1_local_region_.max_y - a1_local_region_.min_y;
+        region.scale.z = 0.006;
+        // Blue-green: fixed A1 geometry, distinct from orange predicted
+        // conflicts. This marker does not impose a traffic rule.
+        region.color = rgba(0.05f, 0.72f, 0.78f, 0.24f);
+        arr.markers.push_back(region);
+
+        visualization_msgs::Marker outline;
+        outline.header = region.header;
+        outline.ns = "a1_local_region";
+        outline.id = 1;
+        outline.type = visualization_msgs::Marker::LINE_STRIP;
+        outline.action = visualization_msgs::Marker::ADD;
+        outline.pose.orientation.w = 1.0;
+        outline.scale.x = 0.018;
+        outline.color = rgba(0.05f, 0.95f, 1.0f, 0.95f);
+        outline.points.push_back(pt3(a1_local_region_.min_x,
+                                     a1_local_region_.min_y, 0.035));
+        outline.points.push_back(pt3(a1_local_region_.max_x,
+                                     a1_local_region_.min_y, 0.035));
+        outline.points.push_back(pt3(a1_local_region_.max_x,
+                                     a1_local_region_.max_y, 0.035));
+        outline.points.push_back(pt3(a1_local_region_.min_x,
+                                     a1_local_region_.max_y, 0.035));
+        outline.points.push_back(pt3(a1_local_region_.min_x,
+                                     a1_local_region_.min_y, 0.035));
+        arr.markers.push_back(outline);
+    }
+
+    // Complete parked vehicle body at the physical pickup pose. The path
+    // endpoint itself remains a rear-axle reference and is intentionally not
+    // used as the visual pickup footprint.
+    visualization_msgs::Marker pickup;
+    pickup.header.frame_id = pp_.frame_id;
+    pickup.header.stamp = now;
+    pickup.ns = "a1_pickup_definition";
+    pickup.id = 0;
+    pickup.type = visualization_msgs::Marker::CUBE;
+    pickup.action = visualization_msgs::Marker::ADD;
+    pickup.pose.position.x = a1_pickup_.cx;
+    pickup.pose.position.y = a1_pickup_.cy;
+    pickup.pose.position.z = 0.026;
+    pickup.pose.orientation.z = std::sin(0.5 * a1_pickup_.dock_theta);
+    pickup.pose.orientation.w = std::cos(0.5 * a1_pickup_.dock_theta);
+    pickup.scale.x = mp_.vehicle_length;
+    pickup.scale.y = mp_.vehicle_width;
+    pickup.scale.z = 0.020;
+    pickup.color = rgba(0.20f, 1.00f, 0.30f, 0.42f);
+    arr.markers.push_back(pickup);
+
+    visualization_msgs::Marker direction;
+    direction.header = pickup.header;
+    direction.ns = "a1_pickup_definition";
+    direction.id = 1;
+    direction.type = visualization_msgs::Marker::ARROW;
+    direction.action = visualization_msgs::Marker::ADD;
+    direction.pose.orientation.w = 1.0;
+    direction.scale.x = 0.018;
+    direction.scale.y = 0.045;
+    direction.scale.z = 0.065;
+    direction.color = rgba(0.20f, 1.00f, 0.30f, 1.0f);
+    direction.points.push_back(pt3(a1_pickup_.cx, a1_pickup_.cy, 0.065));
+    direction.points.push_back(pt3(
+        a1_pickup_.cx + 0.24 * std::cos(a1_pickup_.dock_theta),
+        a1_pickup_.cy + 0.24 * std::sin(a1_pickup_.dock_theta), 0.065));
+    arr.markers.push_back(direction);
+
+    visualization_msgs::Marker pre_dock;
+    pre_dock.header = pickup.header;
+    pre_dock.ns = "a1_pickup_definition";
+    pre_dock.id = 2;
+    pre_dock.type = visualization_msgs::Marker::SPHERE;
+    pre_dock.action = visualization_msgs::Marker::ADD;
+    pre_dock.pose.position.x = a1_pickup_.pre_dock_x;
+    pre_dock.pose.position.y = a1_pickup_.pre_dock_y;
+    pre_dock.pose.position.z = 0.045;
+    pre_dock.pose.orientation.w = 1.0;
+    pre_dock.scale.x = 0.055;
+    pre_dock.scale.y = 0.055;
+    pre_dock.scale.z = 0.055;
+    pre_dock.color = rgba(1.0f, 1.0f, 1.0f, 0.95f);
+    arr.markers.push_back(pre_dock);
+
+    visualization_msgs::Marker label;
+    label.header = pickup.header;
+    label.ns = "a1_pickup_definition";
+    label.id = 3;
+    label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+    label.action = visualization_msgs::Marker::ADD;
+    label.pose.position.x = a1_pickup_.cx;
+    label.pose.position.y = a1_pickup_.cy;
+    label.pose.position.z = 0.19;
+    label.pose.orientation.w = 1.0;
+    label.scale.z = 0.075;
+    label.color = rgba(0.20f, 1.00f, 0.30f, 1.0f);
+    label.text = "A1 PICKUP (5s)";
+    arr.markers.push_back(label);
 }
 
 void MarkerPublisher::addPathMarker(visualization_msgs::MarkerArray& arr,
@@ -362,6 +484,7 @@ void MarkerPublisher::publish(
     ++publish_seq_;
     visualization_msgs::MarkerArray arr;
     addVisitedSlotMarkers(arr, visited_slots);
+    addA1DefinitionMarkers(arr);
     addOriginAxes(arr);  // 地图原点+XY正方向(标定核对用)
     for (const VehicleAgent& v : vehicles) {
         addPathMarker(arr, v);

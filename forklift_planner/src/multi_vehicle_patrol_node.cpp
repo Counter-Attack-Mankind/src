@@ -91,8 +91,6 @@ public:
         rule_engine_ = std::make_unique<forklift_planner::multi_vehicle::RuleEngine>(
             mp_, cfg_);
         rule_engine_->setResourceMap(resource_map_.get());
-        marker_pub_ = std::make_unique<forklift_planner::multi_vehicle::MarkerPublisher>(
-            nh_, mp_, pp_, map_->slots(), cfg_);
         // A方案:仿真也画每车完整轨迹。real 模式 setupRealIO 会再 advertise(同topic,无害)。
         horizon_marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>(
             "/forklift_planner/markers", 10);
@@ -100,6 +98,13 @@ public:
         if (cfg_.precompute_task_filter) {
             allocator_->buildCache();
         }
+        const Slot a1_pickup = allocator_->a1PickupSlot();
+        forklift_planner::multi_vehicle::A1LocalRegion a1_region;
+        if (cfg_.use_a1_cycle) {
+            a1_region = allocator_->a1LocalRegion();
+        }
+        marker_pub_ = std::make_unique<forklift_planner::multi_vehicle::MarkerPublisher>(
+            nh_, mp_, pp_, map_->slots(), cfg_, a1_pickup, a1_region);
         initAgents();
         visited_slots_.assign(map_->slots().size(), false);
         one_shot_done_.assign(agents_.size(), false);
@@ -588,6 +593,20 @@ private:
                  static_cast<unsigned long long>(sim_plan_id_),
                  sim_plan_start_time_, rb_horizon_, sim_plan_frames_.size(),
                  rb_horizon_refresh_);
+        for (const VehicleAgent& v : agents_) {
+            if (v.mode != VehicleMode::DWELL ||
+                v.mission_phase != MissionPhase::PICKUP_DWELL ||
+                !v.pending_dropoff_valid) {
+                continue;
+            }
+            ROS_WARN("[multi_patrol][A1 EXIT HORIZON] V%d target=B%d "
+                     "dwell_part=%.2fs departure_window=%.2fs "
+                     "total_horizon=%.2fs",
+                     v.id, v.pending_dropoff_slot,
+                     std::min(v.dwell_remaining, rb_horizon_),
+                     std::max(0.0, rb_horizon_ - v.dwell_remaining),
+                     rb_horizon_);
+        }
     }
 
     bool simulationPlanNeedsRefresh() const {
@@ -664,7 +683,8 @@ private:
             const VehicleAgent& v = agents_[i];
 
             // ========（若车辆正在休眠，则发布单点静止轨迹，不刷新轨迹）=============
-            if (v.mode == VehicleMode::DWELL || v.dwell_remaining > 1e-6) {
+            if ((v.mode == VehicleMode::DWELL || v.dwell_remaining > 1e-6) &&
+                !v.pending_dropoff_valid) {
                 if (i < traj_pubs_.size()) {
                     sandbox_msgs::Trajectory hold;
                     hold.target = static_cast<int>(i);
@@ -857,16 +877,20 @@ private:
                 if (v.dwell_remaining > 1e-9) continue;
 
                 // A rollout may predict arrival at A1, but it must not invent
-                // a B assignment before the real pickup event. Hold at A1 and
-                // force a new rollout after the real task transition.
+                // a new B assignment. It may, however, activate the departure
+                // plan that was prepared and reserved at the real A1 arrival.
                 if (sim_mode_) {
-                    v.dwell_remaining = 0.0;
+                    if (v.mission_phase == MissionPhase::PICKUP_DWELL &&
+                        v.pending_dropoff_valid) {
+                        allocator_->activatePreparedDropoffLeg(
+                            v, /*emit_log=*/false);
+                    } else {
+                        v.dwell_remaining = 0.0;
+                    }
                     continue;
                 }
 
                 if (v.mission_phase == MissionPhase::PICKUP_DWELL) {
-                    v.loaded = true;
-                    v.mission_phase = MissionPhase::WAIT_DROPOFF_TASK;
                     const int old_gen = v.path_gen;
                     allocator_->assignDropoffLeg(v, agents_);
                     if (v.path_gen != old_gen) force_horizon_refresh_ = true;
@@ -976,6 +1000,19 @@ private:
             v.mission_phase = MissionPhase::PICKUP_DWELL;
             v.dwell_remaining = cfg_.pickup_dwell_time;
             v.reason = "pickup_dwell";
+            // Simulation-only behavior for now: choose and reserve B at the
+            // real A1 arrival so the next rollout can contain 5 s pickup plus
+            // the future A1 exit. Do not change the proven real-vehicle task
+            // timing until the simulation design has been validated.
+            if (!sim_mode_ && !cfg_.real_mode) {
+                if (allocator_->prepareDropoffLeg(v, agents_)) {
+                    force_horizon_refresh_ = true;
+                } else {
+                    ROS_ERROR("[multi_patrol][A1 EXIT PREPARE FAILED] V%d "
+                              "has no reservable A1->B task at pickup start",
+                              v.id);
+                }
+            }
             return;
         }
 
@@ -1368,6 +1405,17 @@ private:
             v.current_speed = next_speed[i];
             v.path_s = next_s[i];
 
+            if (v.a1_departure_committed &&
+                v.path_s >= v.a1_departure_priority_until_s - 1e-9) {
+                v.a1_departure_committed = false;
+                if (!sim_mode_) {
+                    ROS_INFO("[multi_patrol][A1 EXIT PRIORITY RELEASE] V%d "
+                             "s=%.3f threshold=%.3f",
+                             v.id, v.path_s,
+                             v.a1_departure_priority_until_s);
+                }
+            }
+
             if (v.path_s >= v.track.length() - 1e-9) {
                 handleLegArrival(v);
                 // 批处理(长测)里关掉每次到位的 INFO——24h×8车×数千任务=2万+条,会把
@@ -1486,6 +1534,128 @@ private:
     }
 
     //==================== 最重要的节拍函数======================================
+    // Diagnostic-only branch for the unresolved A1 case: another vehicle is
+    // already physically inside the visible portion of a prepared A1 exit.
+    // This method never issues a recovery action.
+    void diagnoseA1ExitIntrusions() {
+        if (sim_mode_ || cfg_.real_mode || !cfg_.use_a1_cycle) return;
+
+        std::set<std::pair<int, int>> current;
+        const double step = std::max(0.02, cfg_.prediction_step);
+        const double footprint_margin = 0.5 * cfg_.conflict_margin;
+
+        for (const VehicleAgent& owner : agents_) {
+            const bool pending_owner =
+                owner.mode == VehicleMode::DWELL &&
+                owner.mission_phase == MissionPhase::PICKUP_DWELL &&
+                owner.pending_dropoff_valid &&
+                !owner.pending_dropoff_track.empty();
+            const bool active_owner =
+                owner.active() && owner.a1_departure_committed;
+            if (!pending_owner && !active_owner) {
+                continue;
+            }
+
+            const double dwell_before_motion =
+                pending_owner ? owner.dwell_remaining : 0.0;
+            const double motion_time =
+                std::max(0.0, rb_horizon_ - dwell_before_motion);
+            if (motion_time <= 1e-9) continue;
+
+            VehicleAgent preview = owner;
+            if (pending_owner) {
+                preview.track = owner.pending_dropoff_track;
+                preview.path_s = 0.0;
+                preview.current_speed = 0.0;
+            }
+            preview.mode = VehicleMode::ACTIVE;
+
+            struct ExitSample {
+                double t;
+                double s;
+                forklift_planner::multi_vehicle::OBB body;
+            };
+            std::vector<ExitSample> exit_samples;
+            exit_samples.push_back(ExitSample{
+                dwell_before_motion, preview.path_s,
+                forklift_planner::multi_vehicle::makeBody(
+                    preview.track.poseAtS(preview.path_s), mp_,
+                    footprint_margin)});
+            double elapsed = 0.0;
+            while (elapsed < motion_time - 1e-9 &&
+                   preview.path_s < preview.track.length() - 1e-9) {
+                const double sample_dt = std::min(step, motion_time - elapsed);
+                const double desired = std::min(
+                    rule_engine_->speedForAction(VehicleAction::NOMINAL),
+                    curvatureSpeed(preview));
+                preview.current_speed =
+                    limitedSpeed(preview.current_speed, desired, sample_dt);
+                preview.path_s = std::min(
+                    preview.track.length(),
+                    preview.path_s + preview.current_speed * sample_dt);
+                elapsed += sample_dt;
+                exit_samples.push_back(ExitSample{
+                    dwell_before_motion + elapsed, preview.path_s,
+                    forklift_planner::multi_vehicle::makeBody(
+                        preview.track.poseAtS(preview.path_s), mp_,
+                        footprint_margin)});
+            }
+
+            for (const VehicleAgent& other : agents_) {
+                if (other.id == owner.id ||
+                    (other.mode != VehicleMode::ACTIVE &&
+                     other.mode != VehicleMode::DWELL) ||
+                    other.track.empty()) {
+                    continue;
+                }
+                const forklift_planner::multi_vehicle::OBB other_body =
+                    forklift_planner::multi_vehicle::makeBody(
+                        poseForCollision(other, other.path_s), mp_,
+                        footprint_margin);
+                const ExitSample* hit = nullptr;
+                for (const ExitSample& sample : exit_samples) {
+                    if (forklift_planner::multi_vehicle::overlaps(
+                            sample.body, other_body)) {
+                        hit = &sample;
+                        break;
+                    }
+                }
+                if (hit == nullptr) continue;
+
+                const std::pair<int, int> key{owner.id, other.id};
+                current.insert(key);
+                if (active_a1_exit_intrusions_.count(key) == 0) {
+                    char line[420];
+                    std::snprintf(
+                        line, sizeof(line),
+                        "[multi_patrol][A1 EXIT INTRUSION ENTER] owner=V%d "
+                        "target=B%d blocker=V%d dwell_remaining=%.2fs "
+                        "visible_exit_t=%.2fs owner_exit_s=%.3f "
+                        "blocker_phase=%d blocker_s=%.3f action=DIAG_ONLY",
+                        owner.id,
+                        pending_owner ? owner.pending_dropoff_slot
+                                      : owner.target_slot,
+                        other.id, dwell_before_motion, hit->t, hit->s,
+                        static_cast<int>(other.mission_phase), other.path_s);
+                    ROS_WARN("%s", line);
+                    coordLog(line);
+                }
+            }
+        }
+
+        for (const auto& old : active_a1_exit_intrusions_) {
+            if (current.count(old) != 0) continue;
+            char line[180];
+            std::snprintf(
+                line, sizeof(line),
+                "[multi_patrol][A1 EXIT INTRUSION CLEAR] owner=V%d blocker=V%d",
+                old.first, old.second);
+            ROS_WARN("%s", line);
+            coordLog(line);
+        }
+        active_a1_exit_intrusions_.swap(current);
+    }
+
     void tick(const ros::TimerEvent&) {
         const double dt = 1.0 / pp_.update_rate;        //控制周期与仿真系统推移周期一致
         ++tick_count_;          //记录系统运行了多少隔周期
@@ -1565,6 +1735,7 @@ private:
             }
         }
         advanceVehicles(dt);
+        diagnoseA1ExitIntrusions();
 
 
         //4. 仿真模式---一次性触发完成
@@ -2102,6 +2273,7 @@ private:
     std::vector<ros::Time> last_status_log_time_;
     std::vector<ros::Time> last_diag_time_;  // TEMPORARY: [DIAG stuck] throttle
     unsigned long long tick_count_ = 0;
+    std::set<std::pair<int, int>> active_a1_exit_intrusions_;
     double sim_time_ = 0.0;
 
     // 无头批处理(快速回归)统计。确定性仿真:同种子同代码必得同结果,故脱离 RViz、
@@ -2361,6 +2533,7 @@ public:
             }
             const unsigned long long guards_before = hard_guard_events_;
             advanceVehicles(dt);
+            diagnoseA1ExitIntrusions();
             const bool new_collision = hard_guard_events_ > guards_before;
 
             hist.push_back(fleetSnapshot());

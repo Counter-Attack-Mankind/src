@@ -22,6 +22,19 @@ struct MultiVehicleConfig {
     double dwell_time = 20.0;       // sleep time
     double pickup_dwell_time = 5.0; // A1 pickup operation
     double unload_dwell_time = 5.0; // B-slot unload operation
+
+    // A1 is an independent physical pickup station. These values describe
+    // the parked vehicle BODY CENTER and its pre-dock reference; path points
+    // remain rear-axle referenced and are converted by the path generator.
+    double a1_pickup_center_x = 1.250;
+    double a1_pickup_center_y = 4.375;
+    double a1_pickup_theta = 1.5707963267948966;
+    double a1_pre_dock_x = 1.250;
+    double a1_pre_dock_y = 4.100;
+    // Padding around the complete-body swept envelope. At this stage the
+    // region is diagnostic/visual only and does not change traffic decisions.
+    double a1_local_region_margin = 0.02;
+    bool show_a1_local_region = true;
     double rolling_horizon = 10.0;          // future planner time 
     double rolling_refresh_period = 2.0;        //  refresh period
 

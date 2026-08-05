@@ -8,6 +8,7 @@
 #include "forklift_map/map_param.h"
 #include "forklift_map/map_types.h"
 #include "forklift_planner/multi_vehicle/rule_engine.h"
+#include "forklift_planner/multi_vehicle/task_allocator.h"
 #include "forklift_planner/multi_vehicle/vehicle_agent.h"
 #include "forklift_planner/planner_param.h"
 
@@ -19,7 +20,9 @@ public:
     MarkerPublisher(ros::NodeHandle& nh, const MapParam& mp,
                     const PlannerParam& pp,
                     const std::vector<Slot>& slots,
-                    const MultiVehicleConfig& cfg);
+                    const MultiVehicleConfig& cfg,
+                    const Slot& a1_pickup,
+                    const A1LocalRegion& a1_local_region);
 
     // 地图原点+XY轴(标定核对)。public:real_mode 启动时可经 latched 话题先发一次,
     // 不必等所有车动捕就绪(否则 tick 早退、per-tick publish 不跑 → 摆车前看不到轴)。
@@ -42,12 +45,15 @@ private:
                                const std::vector<bool>& visited_slots) const;
     void addConflictMarkers(visualization_msgs::MarkerArray& arr,
                             const std::vector<ConflictMarker>& conflicts) const;
+    void addA1DefinitionMarkers(visualization_msgs::MarkerArray& arr) const;
 
     ros::Publisher pub_;
     const MapParam& mp_;
     const PlannerParam& pp_;
     const std::vector<Slot>& slots_;
     const MultiVehicleConfig& cfg_;
+    Slot a1_pickup_;
+    A1LocalRegion a1_local_region_;
     mutable int last_same_direction_conflict_marker_count_ = 0;
     mutable int last_crossing_opposing_conflict_marker_count_ = 0;
     mutable int publish_seq_ = 0;

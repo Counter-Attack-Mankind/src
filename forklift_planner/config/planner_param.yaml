@@ -53,7 +53,16 @@ forklift_planner:
     dwell_time: 5.0               # s，到达目标货位后的休眠/等待时间
     pickup_dwell_time: 5.0        # s，A1取货作业时间
     unload_dwell_time: 5.0        # s，B库位卸货作业时间
-    rolling_horizon: 10.0         # s，每次生成未来多长时间的轨迹
+
+    # A1 独立取货设施。pickup_center 是装货姿态下的车身几何中心；
+    # 路径仍以后轴为参考点，由车辆几何参数自动换算。
+    a1_pickup_center_x: 1.250
+    a1_pickup_center_y: 4.375
+    a1_pickup_theta: 1.5707963267948966
+    a1_pre_dock_x: 1.250
+    a1_pre_dock_y: 4.100
+    a1_local_region_margin: 0.02
+    rolling_horizon: 15.0         # s，每次生成未来多长时间的轨迹
     rolling_refresh_period: 2.0   # s，每隔多久重新计算并覆盖发布轨迹
 
     # 实车模式：true 时读取 /object，发布 /traj_i 与 /coord_speed_i
@@ -61,7 +70,7 @@ forklift_planner:
     one_shot_traj: false        # true=一次性规划，false=滚动时域
 
     # 前瞻预测参数
-    prediction_horizon: 10.0
+    prediction_horizon: 15.0
     prediction_step: 0.05
 
     # 离散动作速度比例
@@ -120,3 +129,4 @@ forklift_planner:
     # 可视化
     show_paths: true
     show_prediction_conflicts: true
+    show_a1_local_region: true

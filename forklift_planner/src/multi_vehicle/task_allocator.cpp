@@ -259,21 +259,109 @@ Slot TaskAllocator::makeA1DepotSlot() const {
     a1.row_id = 0;
     a1.col = -1;
     a1.occupied = false;
-    if (map_.slots().size() > 5) {
-        const Slot& b4 = map_.slots().at(4);
-        const Slot& b5 = map_.slots().at(5);
-        a1.cx = 0.5 * (b4.cx + b5.cx);
-        a1.cy = 0.5 * (b4.cy + b5.cy);
-        a1.pre_dock_x = 0.5 * (b4.pre_dock_x + b5.pre_dock_x);
-        a1.pre_dock_y = 0.5 * (b4.pre_dock_y + b5.pre_dock_y);
-    } else {
-        a1.cx = mp_.field_width * 0.5;
-        a1.cy = mp_.field_height - 0.125;
-        a1.pre_dock_x = a1.cx;
-        a1.pre_dock_y = std::max(0.0, a1.cy - 0.275);
-    }
-    a1.dock_theta = kPi * 0.5;
+    a1.cx = cfg_.a1_pickup_center_x;
+    a1.cy = cfg_.a1_pickup_center_y;
+    a1.pre_dock_x = cfg_.a1_pre_dock_x;
+    a1.pre_dock_y = cfg_.a1_pre_dock_y;
+    a1.dock_theta = cfg_.a1_pickup_theta;
     return a1;
+}
+
+Slot TaskAllocator::a1PickupSlot() const {
+    return makeA1DepotSlot();
+}
+
+const A1LocalRegion& TaskAllocator::a1LocalRegion() const {
+    ensureA1LegCache();
+    return a1_local_region_;
+}
+
+void TaskAllocator::computeA1LocalRegion() const {
+    A1LocalRegion region;
+    region.margin = cfg_.a1_local_region_margin;
+    double min_x = std::numeric_limits<double>::infinity();
+    double min_y = std::numeric_limits<double>::infinity();
+    double max_x = -std::numeric_limits<double>::infinity();
+    double max_y = -std::numeric_limits<double>::infinity();
+
+    auto includePose = [&](const RoughWp& pose) {
+        for (const FootprintPoint& corner :
+             footprintCorners(pose, mp_, region.margin)) {
+            min_x = std::min(min_x, corner.x);
+            min_y = std::min(min_y, corner.y);
+            max_x = std::max(max_x, corner.x);
+            max_y = std::max(max_y, corner.y);
+        }
+    };
+
+    // The physical pickup pose is specified by body center. Convert it to the
+    // rear-axle reference used by RoughPath before constructing its footprint.
+    const Slot a1 = makeA1DepotSlot();
+    RoughWp pickup_ref;
+    pickup_ref.x = a1.cx - mp_.rear_axle_to_center * std::cos(a1.dock_theta);
+    pickup_ref.y = a1.cy - mp_.rear_axle_to_center * std::sin(a1.dock_theta);
+    pickup_ref.theta = a1.dock_theta;
+    pickup_ref.type = WpType::REVERSE;
+    includePose(pickup_ref);
+
+    // For each A1->B path, include the complete-body sweep from the pickup
+    // pose through its first REVERSE->FORWARD cusp. This is precisely the
+    // local undocking/change-direction maneuver discussed for B28/B30; the
+    // remainder of the route is deliberately excluded.
+    for (const DepotLegCache& leg : a1_to_b_leg_cache_) {
+        if (!leg.ready || !leg.valid || leg.path.empty()) continue;
+        ++region.outgoing_paths;
+        const RoughPath& path = leg.path;
+        size_t end = 0;
+        if (path.front().type == WpType::REVERSE) {
+            while (end + 1 < path.size() &&
+                   path[end + 1].type == WpType::REVERSE) {
+                ++end;
+            }
+            ++region.outgoing_reverse_prefixes;
+        }
+        for (size_t k = 0; k <= end; ++k) includePose(path[k]);
+    }
+
+    if (!std::isfinite(min_x) || !std::isfinite(min_y) ||
+        !std::isfinite(max_x) || !std::isfinite(max_y)) {
+        a1_local_region_ = region;
+        ROS_ERROR("[multi_patrol][A1] failed to build local region");
+        return;
+    }
+
+    // B->A1 paths all terminate at the independently configured pickup pose.
+    // Count them as an ingress consistency check, but do not expand the local
+    // box with their preceding corridor segments: doing so turns a local A1
+    // maneuver region into most of the top corridor.
+    for (const DepotLegCache& leg : b_to_a1_leg_cache_) {
+        if (!leg.ready || !leg.valid || leg.path.empty()) continue;
+        ++region.incoming_paths;
+    }
+
+    region.valid = true;
+    // The physical map boundary is already an impenetrable wall. Clip the
+    // diagnostic AABB to it rather than drawing the small safety padding
+    // outside the mapped field (A1 sits directly against the top boundary).
+    region.min_x = std::max(0.0, min_x);
+    region.min_y = std::max(0.0, min_y);
+    region.max_x = std::min(mp_.field_width, max_x);
+    region.max_y = std::min(mp_.field_height, max_y);
+    a1_local_region_ = region;
+
+    ROS_WARN("[multi_patrol][A1 definition] pickup_body_center=(%.3f,%.3f) "
+             "theta=%.1fdeg pre_dock=(%.3f,%.3f) rear_axle=(%.3f,%.3f) "
+             "dwell=%.2fs",
+             a1.cx, a1.cy, a1.dock_theta * 180.0 / kPi,
+             a1.pre_dock_x, a1.pre_dock_y,
+             pickup_ref.x, pickup_ref.y, cfg_.pickup_dwell_time);
+    ROS_WARN("[multi_patrol][A1 local region] geometry-only AABB "
+             "x=[%.3f,%.3f] y=[%.3f,%.3f] size=(%.3f,%.3f) margin=%.3f "
+             "A1->B=%d reverse-prefix=%d B->A1=%d; traffic enforcement=OFF",
+             region.min_x, region.max_x, region.min_y, region.max_y,
+             region.max_x - region.min_x, region.max_y - region.min_y,
+             region.margin, region.outgoing_paths,
+             region.outgoing_reverse_prefixes, region.incoming_paths);
 }
 
 RoughPath TaskAllocator::concatPaths(const RoughPath& first,
@@ -517,11 +605,13 @@ void TaskAllocator::ensureA1LegCache() const {
 
     if (loadA1LegCacheFromFile()) {
         a1_leg_cache_ready_ = true;
+        computeA1LocalRegion();
         return;
     }
 
     buildA1LegCacheFromGenerator();
     a1_leg_cache_ready_ = true;
+    computeA1LocalRegion();
     if (cfg_.save_a1_cycle_catalog) {
         saveA1LegCacheToFile();
     }
@@ -791,6 +881,9 @@ int TaskAllocator::activeTargetCount(const VehicleAgent& vehicle,
              other.mode == VehicleMode::DWELL) &&
             other.target_slot == target) {
             ++count;
+        } else if (other.pending_dropoff_valid &&
+                   other.pending_dropoff_slot == target) {
+            ++count;
         }
     }
     return count;
@@ -835,6 +928,9 @@ bool TaskAllocator::slotReservedByOther(const VehicleAgent& vehicle,
         if (o.id == vehicle.id) continue;
         if (o.target_slot == slot &&
             (o.mode == VehicleMode::ACTIVE || o.mode == VehicleMode::DWELL)) {
+            return true;
+        }
+        if (o.pending_dropoff_valid && o.pending_dropoff_slot == slot) {
             return true;
         }
         if (o.current_slot == slot &&
@@ -1150,6 +1246,11 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
     vehicle.dwell_remaining = 0.0;
     vehicle.target_slot = -1;  // A1 is not an element of map_.slots().
     vehicle.loaded = false;
+    vehicle.pending_dropoff_slot = -1;
+    vehicle.pending_dropoff_track = PathTrack{};
+    vehicle.pending_dropoff_valid = false;
+    vehicle.a1_departure_committed = false;
+    vehicle.a1_departure_priority_until_s = 0.0;
     vehicle.leg_target = LegTargetKind::A1;
     vehicle.mission_phase = MissionPhase::TO_A1;
     vehicle.mode = VehicleMode::ACTIVE;
@@ -1162,8 +1263,8 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
     return true;
 }
 
-bool TaskAllocator::tryPlanFromA1(VehicleAgent& vehicle, int target,
-                                  bool require_no_arc) {
+bool TaskAllocator::tryPrepareFromA1(VehicleAgent& vehicle, int target,
+                                     bool require_no_arc) {
     if (target < 0 ||
         target >= static_cast<int>(map_.slots().size())) {
         return false;
@@ -1175,8 +1276,115 @@ bool TaskAllocator::tryPlanFromA1(VehicleAgent& vehicle, int target,
     if (require_no_arc && leg.info.used_arc_fallback) return false;
 
     rememberTask(vehicle, target);
+    vehicle.pending_dropoff_slot = target;
+    vehicle.pending_dropoff_track.set(leg.path);
+    vehicle.pending_dropoff_valid = true;
+
+    // The privileged departure prefix ends only after the complete vehicle
+    // body has cleared the first REVERSE->FORWARD cusp. This is path-local;
+    // it does not protect the complete route to B.
+    double cusp_s = 0.0;
+    for (size_t i = 1; i < leg.path.size(); ++i) {
+        cusp_s += std::hypot(leg.path[i].x - leg.path[i - 1].x,
+                             leg.path[i].y - leg.path[i - 1].y);
+        if (leg.path[i - 1].type == WpType::REVERSE &&
+            leg.path[i].type != WpType::REVERSE) {
+            break;
+        }
+    }
+    vehicle.a1_departure_priority_until_s = std::min(
+        vehicle.pending_dropoff_track.length(), cusp_s + mp_.body_rear_ext());
+
+    ROS_WARN("[multi_patrol][A1 EXIT PREPARED] V%d target=B%d "
+             "pickup_dwell=%.2fs exit_len=%.3f priority_until_s=%.3f "
+             "horizon_refresh=IMMEDIATE",
+             vehicle.id, target, cfg_.pickup_dwell_time,
+             vehicle.pending_dropoff_track.length(),
+             vehicle.a1_departure_priority_until_s);
+    return true;
+}
+
+bool TaskAllocator::prepareDropoffLeg(
+    VehicleAgent& vehicle, const std::vector<VehicleAgent>& all) {
+    if (!cfg_.use_a1_cycle) return false;
+    if (vehicle.pending_dropoff_valid) return true;
+
+    const bool prefer_no_arc = cfg_.skip_arc_fallback_paths;
+    ensureA1LegCache();
+    const auto exitPlanAvailable = [&](int target, bool require_no_arc) {
+        if (target < 0 ||
+            target >= static_cast<int>(a1_to_b_leg_cache_.size())) {
+            return false;
+        }
+        const DepotLegCache& leg =
+            a1_to_b_leg_cache_.at(static_cast<size_t>(target));
+        return leg.ready && leg.valid && !leg.path.empty() &&
+               (!require_no_arc || !leg.info.used_arc_fallback);
+    };
+
+    // At this point the B->A1 leg has already been completed. Select using
+    // only the still-future A1->B leg; otherwise an arc/failure on the past
+    // approach could incorrectly reject an otherwise valid departure.
+    const auto chooseExitTarget = [&](bool require_no_arc) {
+        std::vector<int> candidates;
+        for (int candidate = 0;
+             candidate < static_cast<int>(map_.slots().size());
+             ++candidate) {
+            if (candidate == vehicle.current_slot ||
+                slotReservedByOther(vehicle, all, candidate) ||
+                !hasValidOutbound(candidate) ||
+                !exitPlanAvailable(candidate, require_no_arc)) {
+                continue;
+            }
+            candidates.push_back(candidate);
+        }
+        if (candidates.empty()) return -1;
+        std::random_device rd;
+        std::uniform_int_distribution<size_t> pick(0, candidates.size() - 1);
+        return candidates[pick(rd)];
+    };
+
+    int target = chooseExitTarget(prefer_no_arc);
+
+    // Preserve the configured first-cycle target preference, but reserve it
+    // at pickup start so every rollout sees one deterministic A1 exit intent.
+    if (vehicle.task_count == 0 && vehicle.id >= 0 &&
+        vehicle.id < static_cast<int>(cfg_.target_slots.size())) {
+        const int preset = cfg_.target_slots[vehicle.id];
+        if (preset >= 0 &&
+            preset < static_cast<int>(map_.slots().size()) &&
+            preset != vehicle.current_slot &&
+            !slotReservedByOther(vehicle, all, preset) &&
+            hasValidOutbound(preset) &&
+            exitPlanAvailable(preset, prefer_no_arc)) {
+            target = preset;
+        }
+    }
+
+    if (target >= 0 &&
+        tryPrepareFromA1(vehicle, target, prefer_no_arc)) {
+        return true;
+    }
+    if (prefer_no_arc && !cfg_.reject_curvature_discontinuity) {
+        target = chooseExitTarget(false);
+        if (target >= 0 && tryPrepareFromA1(vehicle, target, false)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TaskAllocator::activatePreparedDropoffLeg(VehicleAgent& vehicle,
+                                               bool emit_log) {
+    if (!vehicle.pending_dropoff_valid ||
+        vehicle.pending_dropoff_track.empty() ||
+        vehicle.pending_dropoff_slot < 0) {
+        return false;
+    }
+
+    const int target = vehicle.pending_dropoff_slot;
     vehicle.target_slot = target;
-    vehicle.track.set(leg.path);
+    vehicle.track = vehicle.pending_dropoff_track;
     ++vehicle.path_gen;
     vehicle.path_s = 0.0;
     vehicle.current_speed = 0.0;
@@ -1188,43 +1396,32 @@ bool TaskAllocator::tryPlanFromA1(VehicleAgent& vehicle, int target,
     vehicle.mode = VehicleMode::ACTIVE;
     vehicle.action = VehicleAction::NOMINAL;
     vehicle.requested_action = VehicleAction::NOMINAL;
-    vehicle.reason = "new_dropoff_leg";
-    ROS_INFO("[multi_patrol][A1] V%d dropoff leg: A1 -> B%d  wpts=%zu len=%.3f",
-             vehicle.id, target, vehicle.track.path().size(),
-             vehicle.track.length());
+    vehicle.reason = "new_prepared_dropoff_leg";
+    vehicle.a1_departure_committed = !cfg_.real_mode;
+    vehicle.pending_dropoff_slot = -1;
+    vehicle.pending_dropoff_track = PathTrack{};
+    vehicle.pending_dropoff_valid = false;
+
+    if (emit_log) {
+        ROS_INFO("[multi_patrol][A1] V%d activate prepared dropoff: A1 -> B%d "
+                 "len=%.3f priority_until_s=%.3f",
+                 vehicle.id, target, vehicle.track.length(),
+                 vehicle.a1_departure_priority_until_s);
+    }
     return true;
 }
 
 bool TaskAllocator::assignDropoffLeg(
     VehicleAgent& vehicle, const std::vector<VehicleAgent>& all) {
     if (!cfg_.use_a1_cycle) return false;
-    const bool prefer_no_arc = cfg_.skip_arc_fallback_paths;
-    int target = chooseNextTarget(vehicle, all, prefer_no_arc);
-
-    // Preserve the existing first-cycle preset semantics, but apply it only
-    // now, after pickup at A1, rather than before the vehicle leaves its B slot.
-    if (vehicle.task_count == 0 &&
-        vehicle.id >= 0 &&
-        vehicle.id < static_cast<int>(cfg_.target_slots.size())) {
-        const int preset = cfg_.target_slots[vehicle.id];
-        if (preset >= 0 &&
-            preset < static_cast<int>(map_.slots().size()) &&
-            preset != vehicle.current_slot &&
-            !slotReservedByOther(vehicle, all, preset) &&
-            planAvailable(vehicle, preset, prefer_no_arc)) {
-            target = preset;
-        }
+    if (vehicle.pending_dropoff_valid) {
+        return activatePreparedDropoffLeg(vehicle);
     }
 
-    if (target >= 0 &&
-        tryPlanFromA1(vehicle, target, prefer_no_arc)) {
-        return true;
-    }
-    if (prefer_no_arc && !cfg_.reject_curvature_discontinuity) {
-        target = chooseNextTarget(vehicle, all, false);
-        if (target >= 0 && tryPlanFromA1(vehicle, target, false)) {
-            return true;
-        }
+    // Legacy/fallback path: if no preview was prepared (for example in real
+    // mode), prepare and activate at pickup completion in the same tick.
+    if (prepareDropoffLeg(vehicle, all)) {
+        return activatePreparedDropoffLeg(vehicle);
     }
 
     vehicle.mode = VehicleMode::DWELL;
