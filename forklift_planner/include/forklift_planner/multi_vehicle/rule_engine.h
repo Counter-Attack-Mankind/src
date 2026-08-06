@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -34,6 +35,10 @@ struct ConflictMarker {
 class RuleEngine {
 public:
     RuleEngine(const MapParam& mp, const MultiVehicleConfig& cfg);
+
+    void setCoordLogSink(const std::function<void(const std::string&)>& sink) {
+        coord_log_sink_ = sink;
+    }
 
     // Reservation for one visible spatiotemporal conflict event. Arc ranges
     // use canonical vehicle-id order (lo, hi).
@@ -71,17 +76,8 @@ public:
         std::vector<ConflictMarker> conflicts;
         double now = 0.0;
     };
-    SimSnapshot snapshot() const {
-        return SimSnapshot{conflict_reservations_, following_pairs_, tokens_,
-                           conflicts_, now_};
-    }
-    void restore(const SimSnapshot& s) {
-        conflict_reservations_ = s.reservations;
-        following_pairs_ = s.following_pairs;
-        tokens_ = s.tokens;
-        conflicts_ = s.conflicts;
-        now_ = s.now;
-    }
+    SimSnapshot snapshot() const;
+    void restore(const SimSnapshot& s);
     const std::vector<ConflictMarker>& conflicts() const { return conflicts_; }
 
     int priorityWinner(const VehicleAgent& a, const VehicleAgent& b) const;
@@ -176,6 +172,7 @@ private:
     // Phase 2 资源模型:资源地图(只读)+ 资源令牌表(跨周期持久,§11.10)。
     const TrafficResourceMap* resmap_ = nullptr;
     ResourceTokenTable tokens_;
+    std::function<void(const std::string&)> coord_log_sink_;
     double now_ = 0.0;  // 内部仿真时钟(每 decide 累加 dt),供令牌防抖/超时用
 };
 

@@ -50,6 +50,18 @@ bool startsWith(const std::string& s, const char* prefix) {
     return s.size() >= p.size() && s.compare(0, p.size(), p) == 0;
 }
 
+const char* missionPhaseName(MissionPhase phase) {
+    switch (phase) {
+        case MissionPhase::DIRECT_TO_B: return "DIRECT_TO_B";
+        case MissionPhase::TO_A1: return "TO_A1";
+        case MissionPhase::PICKUP_DWELL: return "PICKUP_DWELL";
+        case MissionPhase::WAIT_DROPOFF_TASK: return "WAIT_DROPOFF_TASK";
+        case MissionPhase::TO_B: return "TO_B";
+        case MissionPhase::UNLOAD_DWELL: return "UNLOAD_DWELL";
+    }
+    return "UNKNOWN";
+}
+
 void writeLegSection(std::ostream& os, const char* name,
                      const std::vector<DepotLegCache>& legs) {
     os << "section: " << name << "\n";
@@ -1313,8 +1325,25 @@ bool TaskAllocator::tryPrepareFromA1(VehicleAgent& vehicle, int target,
 
 bool TaskAllocator::prepareDropoffLeg(
     VehicleAgent& vehicle, const std::vector<VehicleAgent>& all) {
-    if (!cfg_.use_a1_cycle) return false;
-    if (vehicle.pending_dropoff_valid) return true;
+    const auto log_result = [&](int target, bool success) {
+        if (!coord_log_sink_) return;
+        std::ostringstream line;
+        line << "[PREPARE_DROPOFF] V" << vehicle.id
+             << " target=B" << target
+             << " success=" << (success ? 1 : 0)
+             << " pending_dropoff="
+             << (vehicle.pending_dropoff_valid ? 1 : 0)
+             << " path_gen=" << vehicle.path_gen;
+        coord_log_sink_(line.str());
+    };
+    if (!cfg_.use_a1_cycle) {
+        log_result(-1, false);
+        return false;
+    }
+    if (vehicle.pending_dropoff_valid) {
+        log_result(vehicle.pending_dropoff_slot, true);
+        return true;
+    }
 
     const bool prefer_no_arc = cfg_.skip_arc_fallback_paths;
     ensureA1LegCache();
@@ -1369,14 +1398,17 @@ bool TaskAllocator::prepareDropoffLeg(
 
     if (target >= 0 &&
         tryPrepareFromA1(vehicle, target, prefer_no_arc)) {
+        log_result(vehicle.pending_dropoff_slot, true);
         return true;
     }
     if (prefer_no_arc && !cfg_.reject_curvature_discontinuity) {
         target = chooseExitTarget(false);
         if (target >= 0 && tryPrepareFromA1(vehicle, target, false)) {
+            log_result(vehicle.pending_dropoff_slot, true);
             return true;
         }
     }
+    log_result(target, false);
     return false;
 }
 
@@ -1389,6 +1421,8 @@ bool TaskAllocator::activatePreparedDropoffLeg(VehicleAgent& vehicle,
     }
 
     const int target = vehicle.pending_dropoff_slot;
+    const MissionPhase old_phase = vehicle.mission_phase;
+    const int old_path_gen = vehicle.path_gen;
     vehicle.target_slot = target;
     vehicle.track = vehicle.pending_dropoff_track;
     ++vehicle.path_gen;
@@ -1407,6 +1441,18 @@ bool TaskAllocator::activatePreparedDropoffLeg(VehicleAgent& vehicle,
     vehicle.pending_dropoff_slot = -1;
     vehicle.pending_dropoff_track = PathTrack{};
     vehicle.pending_dropoff_valid = false;
+
+    if (coord_log_sink_) {
+        std::ostringstream line;
+        line << "[ACTIVATE_DROPOFF] V" << vehicle.id
+             << " phase=" << missionPhaseName(old_phase)
+             << "->" << missionPhaseName(vehicle.mission_phase)
+             << " target=B" << target
+             << " pending_dropoff="
+             << (vehicle.pending_dropoff_valid ? 1 : 0)
+             << " path_gen=" << old_path_gen << "->" << vehicle.path_gen;
+        coord_log_sink_(line.str());
+    }
 
     if (emit_log) {
         ROS_INFO("[multi_patrol][A1] V%d activate prepared dropoff: A1 -> B%d "

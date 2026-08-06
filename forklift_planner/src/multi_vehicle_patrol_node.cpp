@@ -90,6 +90,11 @@ public:
             mp_, pp_, cfg_, *map_, *generator_);
         rule_engine_ = std::make_unique<forklift_planner::multi_vehicle::RuleEngine>(
             mp_, cfg_);
+        const auto coord_log_sink = [this](const std::string& line) {
+            coordLog(line);
+        };
+        allocator_->setCoordLogSink(coord_log_sink);
+        rule_engine_->setCoordLogSink(coord_log_sink);
         rule_engine_->setResourceMap(resource_map_.get());
         // A方案:仿真也画每车完整轨迹。real 模式 setupRealIO 会再 advertise(同topic,无害)。
         horizon_marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>(
@@ -222,6 +227,14 @@ private:
             case MissionPhase::WAIT_DROPOFF_TASK: return "WAIT_DROPOFF_TASK";
             case MissionPhase::TO_B: return "TO_B";
             case MissionPhase::UNLOAD_DWELL: return "UNLOAD_DWELL";
+        }
+        return "UNKNOWN";
+    }
+
+    const char* legTargetName(LegTargetKind target) const {
+        switch (target) {
+            case LegTargetKind::B_SLOT: return "B_SLOT";
+            case LegTargetKind::A1: return "A1";
         }
         return "UNKNOWN";
     }
@@ -566,6 +579,21 @@ private:
                 plan_frames->push_back(std::move(frame));
             }
             advanceVehicles(dt);
+            for (const VehicleAgent& v : agents_) {
+                char line[320];
+                std::snprintf(
+                    line, sizeof(line),
+                    "[ROLLOUT] t=%.2f V%d mode=%s phase=%s leg=%s "
+                    "s=%.3f/%.3f pending_dropoff=%d dropoff_slot=%d "
+                    "path_gen=%d",
+                    static_cast<double>(s) * dt, v.id, modeName(v.mode),
+                    missionPhaseName(v.mission_phase),
+                    legTargetName(v.leg_target), v.path_s,
+                    v.track.empty() ? 0.0 : v.track.length(),
+                    v.pending_dropoff_valid ? 1 : 0,
+                    v.pending_dropoff_slot, v.path_gen);
+                coordLog(line);
+            }
             record(s);
         }
 
@@ -1022,12 +1050,26 @@ private:
         v.requested_action = VehicleAction::STOP;
 
         if (cfg_.use_a1_cycle && v.leg_target == LegTargetKind::A1) {
+            const MissionPhase old_phase = v.mission_phase;
             // A1 is a virtual pickup point, not a B slot. Do not write its
             // virtual id into current_slot or visited_slots_.
             v.loaded = false;
             v.mission_phase = MissionPhase::PICKUP_DWELL;
             v.dwell_remaining = cfg_.pickup_dwell_time;
             v.reason = "pickup_dwell";
+            if (!sim_mode_) {
+                char line[300];
+                std::snprintf(
+                    line, sizeof(line),
+                    "[A1_ARRIVAL] V%d phase=%s->%s pending_dropoff=%d "
+                    "dropoff_slot=%d track_size=%zu path_gen=%d",
+                    v.id, missionPhaseName(old_phase),
+                    missionPhaseName(v.mission_phase),
+                    v.pending_dropoff_valid ? 1 : 0,
+                    v.pending_dropoff_slot,
+                    v.pending_dropoff_track.path().size(), v.path_gen);
+                coordLog(line);
+            }
             // Simulation-only behavior for now: choose and reserve B at the
             // real A1 arrival so the next rollout can contain 5 s pickup plus
             // the future A1 exit. Do not change the proven real-vehicle task

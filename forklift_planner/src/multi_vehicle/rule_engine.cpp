@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
 #include <limits>
 #include <map>
+#include <sstream>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -25,7 +27,94 @@ struct OverlapSample {
     double y = 0.0;
 };
 
+const char* missionPhaseName(MissionPhase phase) {
+    switch (phase) {
+        case MissionPhase::DIRECT_TO_B: return "DIRECT_TO_B";
+        case MissionPhase::TO_A1: return "TO_A1";
+        case MissionPhase::PICKUP_DWELL: return "PICKUP_DWELL";
+        case MissionPhase::WAIT_DROPOFF_TASK: return "WAIT_DROPOFF_TASK";
+        case MissionPhase::TO_B: return "TO_B";
+        case MissionPhase::UNLOAD_DWELL: return "UNLOAD_DWELL";
+    }
+    return "UNKNOWN";
+}
+
+void logConflictReservation(
+    const std::function<void(const std::string&)>& sink,
+    const std::pair<int, int>& key, const char* op,
+    const RuleEngine::ConflictReservation& reservation) {
+    if (!sink) return;
+    std::ostringstream line;
+    line << std::fixed << std::setprecision(3)
+         << "[CONFLICT_RESERVATION] pair=V" << key.first
+         << "-V" << key.second << " op=" << op
+         << " owner=V" << reservation.owner_id
+         << " t=" << reservation.first_conflict_t
+         << " zone=(" << reservation.x << "," << reservation.y << ")";
+    sink(line.str());
+}
+
+bool sameReservation(const RuleEngine::ConflictReservation& a,
+                     const RuleEngine::ConflictReservation& b) {
+    return a.owner_id == b.owner_id &&
+           a.gen_lo == b.gen_lo && a.gen_hi == b.gen_hi &&
+           a.enter_lo == b.enter_lo && a.exit_lo == b.exit_lo &&
+           a.enter_hi == b.enter_hi && a.exit_hi == b.exit_hi &&
+           a.x == b.x && a.y == b.y &&
+           a.first_conflict_t == b.first_conflict_t;
+}
+
+void logA1Decision(const std::function<void(const std::string&)>& sink,
+                   const MultiVehicleConfig& cfg, const VehicleAgent& vehicle,
+                   const VehicleAgent* blocker, int blocker_id) {
+    if (!sink || vehicle.track.empty()) return;
+    const RoughWp pose = vehicle.track.poseAtS(vehicle.path_s);
+    const double dist_to_a1 = std::hypot(
+        pose.x - cfg.a1_pickup_center_x,
+        pose.y - cfg.a1_pickup_center_y);
+    std::ostringstream line;
+    line << std::fixed << std::setprecision(3)
+         << "[A1_DECISION] V" << vehicle.id
+         << " action=" << actionName(vehicle.requested_action)
+         << " reason=" << vehicle.reason
+         << " blocker=V" << blocker_id
+         << " phase=" << missionPhaseName(vehicle.mission_phase)
+         << " dist_to_A1=" << dist_to_a1
+         << " blocker_phase="
+         << (blocker ? missionPhaseName(blocker->mission_phase) : "UNKNOWN");
+    sink(line.str());
+}
+
 }  // namespace
+
+RuleEngine::SimSnapshot RuleEngine::snapshot() const {
+    return SimSnapshot{conflict_reservations_, following_pairs_, tokens_,
+                       conflicts_, now_};
+}
+
+void RuleEngine::restore(const SimSnapshot& s) {
+    for (const auto& current : conflict_reservations_) {
+        if (s.reservations.count(current.first) == 0) {
+            logConflictReservation(coord_log_sink_, current.first, "delete",
+                                   current.second);
+        }
+    }
+    for (const auto& incoming : s.reservations) {
+        const auto current = conflict_reservations_.find(incoming.first);
+        if (current == conflict_reservations_.end()) {
+            logConflictReservation(coord_log_sink_, incoming.first, "create",
+                                   incoming.second);
+        } else if (!sameReservation(current->second, incoming.second)) {
+            logConflictReservation(coord_log_sink_, incoming.first, "update",
+                                   incoming.second);
+        }
+    }
+    conflict_reservations_ = s.reservations;
+    following_pairs_ = s.following_pairs;
+    tokens_ = s.tokens;
+    conflicts_ = s.conflicts;
+    now_ = s.now;
+}
 
 double RuleEngine::speedForAction(VehicleAction action) const {
     switch (action) {
@@ -584,6 +673,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         const ConflictReservation& r = it->second;
         if (lo == nullptr || hi == nullptr || !lo->active() || !hi->active() ||
             lo->path_gen != r.gen_lo || hi->path_gen != r.gen_hi) {
+            logConflictReservation(coord_log_sink_, it->first, "delete", r);
             it = conflict_reservations_.erase(it);
         } else {
             ++it;
@@ -612,13 +702,23 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                                           std::max(a.id, b.id)};
             const bool a_is_lo = a.id == key.first;
             if (following_pairs_.count(key)) {
-                conflict_reservations_.erase(key);
+                const auto old = conflict_reservations_.find(key);
+                if (old != conflict_reservations_.end()) {
+                    logConflictReservation(coord_log_sink_, key, "delete",
+                                           old->second);
+                    conflict_reservations_.erase(old);
+                }
                 continue;
             }
 
             const std::vector<ConflictZone> zones = findConflictZones(a, b);
             if (zones.empty()) {
-                conflict_reservations_.erase(key);
+                const auto old = conflict_reservations_.find(key);
+                if (old != conflict_reservations_.end()) {
+                    logConflictReservation(coord_log_sink_, key, "delete",
+                                           old->second);
+                    conflict_reservations_.erase(old);
+                }
                 continue;
             }
 
@@ -641,6 +741,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     ? r.exit_hi : r.exit_lo;
 
                 if (owner.path_s > owner_exit + 1e-9) {
+                    logConflictReservation(coord_log_sink_, key, "delete", r);
                     conflict_reservations_.erase(reservation_it);
                 } else {
                     const bool owner_inside =
@@ -651,9 +752,20 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         owner.path_s <= owner_enter + 1e-9) {
                         // Current physical occupancy overrides an old forecast.
                         r.owner_id = waiter.id;
+                        logConflictReservation(coord_log_sink_, key, "update", r);
                         brakeBefore(owner, owner_enter, waiter.id);
+                        if (owner.reason ==
+                            "time_brake_V" + std::to_string(waiter.id)) {
+                            logA1Decision(coord_log_sink_, cfg_, owner, &waiter,
+                                          waiter.id);
+                        }
                     } else {
                         brakeBefore(waiter, waiter_enter, owner.id);
+                        if (waiter.reason ==
+                            "time_brake_V" + std::to_string(owner.id)) {
+                            logA1Decision(coord_log_sink_, cfg_, waiter, &owner,
+                                          owner.id);
+                        }
                     }
                     const ConflictZone rz = reservationZone(r, a_is_lo);
                     recordConflictZones(
@@ -754,6 +866,12 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             if (holder < 0) {
                 brakeBefore(a, zone.s_self_enter, b.id);
                 brakeBefore(b, zone.s_other_enter, a.id);
+                if (a.reason == "time_brake_V" + std::to_string(b.id)) {
+                    logA1Decision(coord_log_sink_, cfg_, a, &b, b.id);
+                }
+                if (b.reason == "time_brake_V" + std::to_string(a.id)) {
+                    logA1Decision(coord_log_sink_, cfg_, b, &a, a.id);
+                }
                 continue;
             }
 
@@ -769,11 +887,18 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             r.y = zone.y;
             r.first_conflict_t = event.first_t;
             conflict_reservations_[key] = r;
+            logConflictReservation(coord_log_sink_, key, "create", r);
 
             if (holder == a.id) {
                 brakeBefore(b, zone.s_other_enter, a.id);
+                if (b.reason == "time_brake_V" + std::to_string(a.id)) {
+                    logA1Decision(coord_log_sink_, cfg_, b, &a, a.id);
+                }
             } else {
                 brakeBefore(a, zone.s_self_enter, b.id);
+                if (a.reason == "time_brake_V" + std::to_string(b.id)) {
+                    logA1Decision(coord_log_sink_, cfg_, a, &b, b.id);
+                }
             }
         }
     }
@@ -909,6 +1034,16 @@ void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles) {
             applyActionRequest(v, VehicleAction::STOP,
                                "clear_block_V" + std::to_string(block_id),
                                block_id);
+            if (v.reason == "clear_block_V" + std::to_string(block_id)) {
+                const VehicleAgent* blocker = nullptr;
+                for (const VehicleAgent& candidate : vehicles) {
+                    if (candidate.id == block_id) {
+                        blocker = &candidate;
+                        break;
+                    }
+                }
+                logA1Decision(coord_log_sink_, cfg_, v, blocker, block_id);
+            }
         }
     }
 }

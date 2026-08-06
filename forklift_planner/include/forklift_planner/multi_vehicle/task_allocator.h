@@ -1,8 +1,10 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <random>
+#include <string>
 #include <vector>
 
 #include "forklift_map/forklift_map.h"
@@ -58,6 +60,10 @@ public:
     TaskAllocator(const MapParam& mp, const PlannerParam& pp,
                   const MultiVehicleConfig& cfg,
                   const ForkliftMap& map, PathGenerator& generator);
+
+    void setCoordLogSink(const std::function<void(const std::string&)>& sink) {
+        coord_log_sink_ = sink;
+    }
 
     void buildCache();
     bool assignNextTask(VehicleAgent& vehicle,
@@ -177,6 +183,7 @@ private:
     std::vector<int> outbound_valid_counts_;
     std::vector<int> outbound_cross_row_counts_;
     mutable std::mt19937 task_rng_;
+    std::function<void(const std::string&)> coord_log_sink_;
 };
 
 }  // namespace multi_vehicle
