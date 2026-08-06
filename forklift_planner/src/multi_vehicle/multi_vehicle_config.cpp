@@ -34,6 +34,9 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
 
     nh.param(ns + "vehicle_count", c.vehicle_count, c.vehicle_count);
     nh.param(ns + "random_seed", c.random_seed, c.random_seed);
+    nh.param(ns + "reproducible_task_random",
+             c.reproducible_task_random,
+             c.reproducible_task_random);
     nh.param(ns + "nominal_speed", c.nominal_speed, c.nominal_speed);
     nh.param(ns + "max_speed", c.max_speed, c.max_speed);
     nh.param(ns + "max_accel", c.max_accel, c.max_accel);

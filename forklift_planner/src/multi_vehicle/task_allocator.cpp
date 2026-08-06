@@ -79,7 +79,10 @@ TaskAllocator::TaskAllocator(const MapParam& mp, const PlannerParam& pp,
       map_(map),
       generator_(generator),
       generator_a1_to_b_(mp, pp, PathGeneratorRouteMode::A1_TO_B),
-      generator_b_to_a1_(mp, pp, PathGeneratorRouteMode::B_TO_A1)
+      generator_b_to_a1_(mp, pp, PathGeneratorRouteMode::B_TO_A1),
+      task_rng_(cfg.reproducible_task_random
+                    ? static_cast<std::mt19937::result_type>(cfg.random_seed)
+                    : std::random_device{}())
 {
     const int n = static_cast<int>(map_.slots().size());
     target_visit_counts_.assign(n, 0);
@@ -89,6 +92,11 @@ TaskAllocator::TaskAllocator(const MapParam& mp, const PlannerParam& pp,
     outbound_cross_row_counts_.assign(n, 0);
     a1_to_b_leg_cache_.assign(n, DepotLegCache{});
     b_to_a1_leg_cache_.assign(n, DepotLegCache{});
+    ROS_INFO("[multi_patrol][TASK RNG] mode=%s seed=%s",
+             cfg_.reproducible_task_random ? "REPRODUCIBLE_PSEUDO" : "TRUE_RANDOM",
+             cfg_.reproducible_task_random
+                 ? std::to_string(cfg_.random_seed).c_str()
+                 : "random_device");
 }
 
 const char* TaskAllocator::rejectReasonName(TaskRejectReason reason) const {
@@ -1018,9 +1026,8 @@ int TaskAllocator::chooseNextTarget(const VehicleAgent& vehicle,
 
     if (candidates.empty()) return -1;
 
-    std::random_device rd;
     std::uniform_int_distribution<size_t> pick(0, candidates.size() - 1);
-    return candidates[pick(rd)];
+    return candidates[pick(task_rng_)];
 }
 
 void TaskAllocator::rememberTask(VehicleAgent& vehicle, int target) {
@@ -1339,9 +1346,8 @@ bool TaskAllocator::prepareDropoffLeg(
             candidates.push_back(candidate);
         }
         if (candidates.empty()) return -1;
-        std::random_device rd;
         std::uniform_int_distribution<size_t> pick(0, candidates.size() - 1);
-        return candidates[pick(rd)];
+        return candidates[pick(task_rng_)];
     };
 
     int target = chooseExitTarget(prefer_no_arc);

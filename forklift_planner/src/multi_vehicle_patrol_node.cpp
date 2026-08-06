@@ -647,12 +647,40 @@ private:
         return true;
     }
 
+    // Freeze the already-required A1->B leg before cloning the world for a
+    // rolling-horizon rollout. This is real-state task preparation, not a
+    // simulated assignment: prepareDropoffLeg() only fills the pending_* fields
+    // and leaves the currently executing B->A1 leg ACTIVE/TO_A1. Once the
+    // rollout reaches A1, its existing state-machine path consumes that frozen
+    // information after PICKUP_DWELL via activatePreparedDropoffLeg().
+    void prepareA1DropoffPreviewsForHorizon() {
+        if (!cfg_.use_a1_cycle || sim_mode_) return;
+
+        for (VehicleAgent& v : agents_) {
+            if (!targetEnabled(v.id) ||
+                v.mode != VehicleMode::ACTIVE ||
+                v.mission_phase != MissionPhase::TO_A1 ||
+                v.leg_target != LegTargetKind::A1 ||
+                v.track.empty() ||
+                v.pending_dropoff_valid) {
+                continue;
+            }
+
+            allocator_->prepareDropoffLeg(v, agents_);
+        }
+    }
+
     // 滚动时域发布:推演 rb_horizon_ 秒,把每车时间参数化轨迹发到 /traj_i(刷新=滚动)。
     // hold 车(整段不动)发单点轨迹(size=1)作静止标志 → 控制器 idle 不控制。
     // 滚动时域发布：重新推演并覆盖每辆车的短时轨迹。
     void publishHorizon() {
         std::vector<sandbox_msgs::Trajectory> trajs;
         std::vector<bool> hold;
+
+        // Give the cloned world only future tasks that have already been
+        // selected and stored in real state. The rollout itself remains unable
+        // to create a new B target while sim_mode_ is true.
+        prepareA1DropoffPreviewsForHorizon();
         
         // =======世界模型推演，传入（预测时长，预测得到每辆车未来轨迹，预测得到每辆车未来是否保持静止）=============
         if (cfg_.real_mode) {

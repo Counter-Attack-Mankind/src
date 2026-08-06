@@ -30,6 +30,9 @@ forklift_planner:
     # 多车基础配置
     vehicle_count: 8
     random_seed: 2026
+    # true: 固定伪随机序列，使用 random_seed，便于重复实验与横向比较
+    # false: 每次启动使用系统随机种子，任务目标序列会变化
+    reproducible_task_random: true
 
     # 预设起点/终点货位。车辆 i 使用 start_slots[i] -> target_slots[i]
     # 当前这组是 8 对互不冲突、较长距离的全程前进测试任务。

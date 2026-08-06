@@ -11,6 +11,9 @@ namespace multi_vehicle {
 struct MultiVehicleConfig {
     int vehicle_count = 8;
     int random_seed = 42;
+    // true: repeatable pseudo-random task sequence from random_seed;
+    // false: seed the task allocator from std::random_device at every launch.
+    bool reproducible_task_random = true;
 
     double nominal_speed = 0.20;
     double max_speed = 0.26;
