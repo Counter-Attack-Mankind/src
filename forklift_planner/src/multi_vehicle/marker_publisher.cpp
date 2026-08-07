@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
 #include <sstream>
 
 #include "forklift_planner/multi_vehicle/footprint.h"
@@ -63,62 +64,17 @@ MarkerPublisher::MarkerPublisher(ros::NodeHandle& nh, const MapParam& mp,
                                  const PlannerParam& pp,
                                  const std::vector<Slot>& slots,
                                  const MultiVehicleConfig& cfg,
-                                 const Slot& a1_pickup,
-                                 const A1LocalRegion& a1_local_region)
+                                 const Slot& a1_pickup)
     : mp_(mp), pp_(pp), slots_(slots), cfg_(cfg),
-      a1_pickup_(a1_pickup), a1_local_region_(a1_local_region) {
+      a1_pickup_(a1_pickup) {
     pub_ = nh.advertise<visualization_msgs::MarkerArray>(
         "/forklift_planner/markers", 10);
 }
 
-void MarkerPublisher::addA1DefinitionMarkers(
+void MarkerPublisher::addA1PickupDefinitionMarkers(
     visualization_msgs::MarkerArray& arr) const {
-    if (!cfg_.use_a1_cycle || !cfg_.show_a1_local_region) return;
+    if (!cfg_.use_a1_cycle) return;
     const ros::Time now = ros::Time::now();
-
-    if (a1_local_region_.valid) {
-        visualization_msgs::Marker region;
-        region.header.frame_id = pp_.frame_id;
-        region.header.stamp = now;
-        region.ns = "a1_local_region";
-        region.id = 0;
-        region.type = visualization_msgs::Marker::CUBE;
-        region.action = visualization_msgs::Marker::ADD;
-        region.pose.position.x =
-            0.5 * (a1_local_region_.min_x + a1_local_region_.max_x);
-        region.pose.position.y =
-            0.5 * (a1_local_region_.min_y + a1_local_region_.max_y);
-        region.pose.position.z = 0.011;
-        region.pose.orientation.w = 1.0;
-        region.scale.x = a1_local_region_.max_x - a1_local_region_.min_x;
-        region.scale.y = a1_local_region_.max_y - a1_local_region_.min_y;
-        region.scale.z = 0.006;
-        // Blue-green: fixed A1 geometry, distinct from orange predicted
-        // conflicts. This marker does not impose a traffic rule.
-        region.color = rgba(0.05f, 0.72f, 0.78f, 0.24f);
-        arr.markers.push_back(region);
-
-        visualization_msgs::Marker outline;
-        outline.header = region.header;
-        outline.ns = "a1_local_region";
-        outline.id = 1;
-        outline.type = visualization_msgs::Marker::LINE_STRIP;
-        outline.action = visualization_msgs::Marker::ADD;
-        outline.pose.orientation.w = 1.0;
-        outline.scale.x = 0.018;
-        outline.color = rgba(0.05f, 0.95f, 1.0f, 0.95f);
-        outline.points.push_back(pt3(a1_local_region_.min_x,
-                                     a1_local_region_.min_y, 0.035));
-        outline.points.push_back(pt3(a1_local_region_.max_x,
-                                     a1_local_region_.min_y, 0.035));
-        outline.points.push_back(pt3(a1_local_region_.max_x,
-                                     a1_local_region_.max_y, 0.035));
-        outline.points.push_back(pt3(a1_local_region_.min_x,
-                                     a1_local_region_.max_y, 0.035));
-        outline.points.push_back(pt3(a1_local_region_.min_x,
-                                     a1_local_region_.min_y, 0.035));
-        arr.markers.push_back(outline);
-    }
 
     // Complete parked vehicle body at the physical pickup pose. The path
     // endpoint itself remains a rear-axle reference and is intentionally not
@@ -356,22 +312,37 @@ void MarkerPublisher::addConflictMarkers(
     const std::vector<ConflictMarker>& conflicts) const {
     const char* same_ns = "conflict_same_direction";
     const char* mutual_ns = "conflict_crossing_or_opposing";
+    const char* actual_ns = "conflict_actual_overlap_center";
+    const char* conflict_label_ns = "conflict_explanation";
+    const char* following_relation_ns = "following_relation";
+    const char* following_label_ns = "following_explanation";
+    auto deleteMarker = [&](const char* marker_ns, int id) {
+        visualization_msgs::Marker m;
+        m.header.frame_id = pp_.frame_id;
+        m.header.stamp = ros::Time::now();
+        m.ns = marker_ns;
+        m.id = id;
+        m.action = visualization_msgs::Marker::DELETE;
+        arr.markers.push_back(m);
+    };
     auto deleteMarkers = [&](const char* marker_ns, int count) {
         for (int id = 0; id < count; ++id) {
-            visualization_msgs::Marker m;
-            m.header.frame_id = pp_.frame_id;
-            m.header.stamp = ros::Time::now();
-            m.ns = marker_ns;
-            m.id = id;
-            m.action = visualization_msgs::Marker::DELETE;
-            arr.markers.push_back(m);
+            deleteMarker(marker_ns, id);
         }
     };
 
     if (!cfg_.show_prediction_conflicts) {
         deleteMarkers(same_ns,
                       last_same_direction_conflict_marker_count_);
+        deleteMarkers(following_relation_ns,
+                      last_same_direction_conflict_marker_count_);
+        deleteMarkers(following_label_ns,
+                      last_same_direction_conflict_marker_count_);
         deleteMarkers(mutual_ns,
+                      last_crossing_opposing_conflict_marker_count_);
+        deleteMarkers(actual_ns,
+                      last_crossing_opposing_conflict_marker_count_);
+        deleteMarkers(conflict_label_ns,
                       last_crossing_opposing_conflict_marker_count_);
         last_same_direction_conflict_marker_count_ = 0;
         last_crossing_opposing_conflict_marker_count_ = 0;
@@ -383,29 +354,121 @@ void MarkerPublisher::addConflictMarkers(
     for (const ConflictMarker& c : conflicts) {
         const bool same_direction =
             c.kind == ConflictMarkerKind::SAME_DIRECTION;
+        const ros::Time now = ros::Time::now();
+        const int marker_id = same_direction ? same_id++ : mutual_id++;
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
-        m.header.stamp = ros::Time::now();
+        m.header.stamp = now;
         m.ns = same_direction ? same_ns : mutual_ns;
-        m.id = same_direction ? same_id++ : mutual_id++;
-        m.type = visualization_msgs::Marker::CUBE;
+        m.id = marker_id;
         m.action = visualization_msgs::Marker::ADD;
         m.pose.position.x = c.x;
         m.pose.position.y = c.y;
         m.pose.position.z = 0.018;
         m.pose.orientation.w = 1.0;
-        m.scale.x = c.scale_x;
-        m.scale.y = c.scale_y;
-        m.scale.z = 0.012;
         if (same_direction) {
-            // Light cyan: longitudinal following arbitration.
-            m.color = rgba(0.35f, 0.82f, 1.00f, 0.28f);
+            // An outline, not a filled collision patch: this is only the
+            // spatial range used to explain the following relationship.
+            m.type = visualization_msgs::Marker::LINE_STRIP;
+            m.pose.position.x = 0.0;
+            m.pose.position.y = 0.0;
+            m.scale.x = 0.012;
+            m.color = rgba(0.20f, 0.82f, 1.00f, 0.85f);
+            const double x0 = c.x - 0.5 * c.scale_x;
+            const double x1 = c.x + 0.5 * c.scale_x;
+            const double y0 = c.y - 0.5 * c.scale_y;
+            const double y1 = c.y + 0.5 * c.scale_y;
+            m.points.push_back(pt3(x0, y0, 0.035));
+            m.points.push_back(pt3(x1, y0, 0.035));
+            m.points.push_back(pt3(x1, y1, 0.035));
+            m.points.push_back(pt3(x0, y1, 0.035));
+            m.points.push_back(pt3(x0, y0, 0.035));
         } else {
-            // Light orange: crossing and opposing traffic share the same
-            // mutual-exclusion holder arbitration.
-            m.color = rgba(1.00f, 0.62f, 0.34f, 0.30f);
+            // Enlarged AABB retained as a search/explanation range. It is not
+            // the exact OBB overlap footprint.
+            m.type = visualization_msgs::Marker::CUBE;
+            m.scale.x = c.scale_x;
+            m.scale.y = c.scale_y;
+            m.scale.z = 0.012;
+            m.color = rgba(1.00f, 0.62f, 0.34f, 0.20f);
         }
         arr.markers.push_back(m);
+
+        if (same_direction) {
+            visualization_msgs::Marker relation;
+            relation.header = m.header;
+            relation.ns = following_relation_ns;
+            relation.id = marker_id;
+            relation.type = visualization_msgs::Marker::ARROW;
+            relation.action = visualization_msgs::Marker::ADD;
+            relation.pose.orientation.w = 1.0;
+            relation.scale.x = 0.015;
+            relation.scale.y = 0.040;
+            relation.scale.z = 0.055;
+            relation.color = rgba(0.10f, 0.90f, 1.00f, 1.0f);
+            relation.points.push_back(
+                pt3(c.follower_x, c.follower_y, 0.075));
+            relation.points.push_back(
+                pt3(c.leader_x, c.leader_y, 0.075));
+            arr.markers.push_back(relation);
+
+            visualization_msgs::Marker label;
+            label.header = m.header;
+            label.ns = following_label_ns;
+            label.id = marker_id;
+            label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+            label.action = visualization_msgs::Marker::ADD;
+            label.pose.position.x = 0.5 * (c.follower_x + c.leader_x);
+            label.pose.position.y = 0.5 * (c.follower_y + c.leader_y);
+            label.pose.position.z = 0.16;
+            label.pose.orientation.w = 1.0;
+            label.scale.z = 0.070;
+            label.color = rgba(0.10f, 0.90f, 1.00f, 1.0f);
+            std::ostringstream text;
+            text << std::fixed << std::setprecision(2)
+                 << "FOLLOW V" << c.follower_id << " -> V" << c.leader_id
+                 << " gap=" << c.following_gap << "m"
+                 << "\nrange outline (not collision)";
+            label.text = text.str();
+            arr.markers.push_back(label);
+        } else {
+            visualization_msgs::Marker actual;
+            actual.header = m.header;
+            actual.ns = actual_ns;
+            actual.id = marker_id;
+            actual.type = visualization_msgs::Marker::SPHERE;
+            actual.action = visualization_msgs::Marker::ADD;
+            actual.pose.position.x = c.conflict_x;
+            actual.pose.position.y = c.conflict_y;
+            actual.pose.position.z = 0.060;
+            actual.pose.orientation.w = 1.0;
+            actual.scale.x = 0.055;
+            actual.scale.y = 0.055;
+            actual.scale.z = 0.055;
+            actual.color = rgba(1.00f, 0.10f, 0.08f, 1.0f);
+            arr.markers.push_back(actual);
+
+            visualization_msgs::Marker label;
+            label.header = m.header;
+            label.ns = conflict_label_ns;
+            label.id = marker_id;
+            label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+            label.action = visualization_msgs::Marker::ADD;
+            label.pose.position.x = c.conflict_x;
+            label.pose.position.y = c.conflict_y;
+            label.pose.position.z = 0.16;
+            label.pose.orientation.w = 1.0;
+            label.scale.z = 0.070;
+            label.color = rgba(1.00f, 0.80f, 0.25f, 1.0f);
+            std::ostringstream text;
+            text << std::fixed << std::setprecision(2)
+                 << "control OBB overlap center V" << c.vehicle_a
+                 << "-V" << c.vehicle_b
+                 << " type=CROSSING/OPPOSING t=" << c.t << "s"
+                 << "\norange = search AABB";
+            label.text = text.str();
+            arr.markers.push_back(label);
+        }
     }
 
     for (int stale = same_id;
@@ -418,6 +481,11 @@ void MarkerPublisher::addConflictMarkers(
         m.action = visualization_msgs::Marker::DELETE;
         arr.markers.push_back(m);
     }
+    for (int stale = same_id;
+         stale < last_same_direction_conflict_marker_count_; ++stale) {
+        deleteMarker(following_relation_ns, stale);
+        deleteMarker(following_label_ns, stale);
+    }
     for (int stale = mutual_id;
          stale < last_crossing_opposing_conflict_marker_count_; ++stale) {
         visualization_msgs::Marker m;
@@ -427,6 +495,11 @@ void MarkerPublisher::addConflictMarkers(
         m.id = stale;
         m.action = visualization_msgs::Marker::DELETE;
         arr.markers.push_back(m);
+    }
+    for (int stale = mutual_id;
+         stale < last_crossing_opposing_conflict_marker_count_; ++stale) {
+        deleteMarker(actual_ns, stale);
+        deleteMarker(conflict_label_ns, stale);
     }
     last_same_direction_conflict_marker_count_ = same_id;
     last_crossing_opposing_conflict_marker_count_ = mutual_id;
@@ -484,7 +557,7 @@ void MarkerPublisher::publish(
     ++publish_seq_;
     visualization_msgs::MarkerArray arr;
     addVisitedSlotMarkers(arr, visited_slots);
-    addA1DefinitionMarkers(arr);
+    addA1PickupDefinitionMarkers(arr);
     addOriginAxes(arr);  // 地图原点+XY正方向(标定核对用)
     for (const VehicleAgent& v : vehicles) {
         addPathMarker(arr, v);

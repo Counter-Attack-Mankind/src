@@ -41,20 +41,6 @@ struct DepotLegCache {
     PathGenerationInfo info;
 };
 
-// Geometry-only description of A1's local maneuver area.  It is computed
-// from complete-body sweeps of the cached A1 legs and is not a traffic rule.
-struct A1LocalRegion {
-    bool valid = false;
-    double min_x = 0.0;
-    double max_x = 0.0;
-    double min_y = 0.0;
-    double max_y = 0.0;
-    double margin = 0.0;
-    int outgoing_paths = 0;
-    int outgoing_reverse_prefixes = 0;
-    int incoming_paths = 0;
-};
-
 class TaskAllocator {
 public:
     TaskAllocator(const MapParam& mp, const PlannerParam& pp,
@@ -100,10 +86,8 @@ public:
     bool hasValidOutbound(int slot) const;
     bool hasValidPickupLeg(int slot) const;
 
-    // Independent A1 facility definition and its path-derived local region.
-    // Accessing the region ensures the A1 path catalog has been prepared.
+    // Independent A1 facility definition.
     Slot a1PickupSlot() const;
-    const A1LocalRegion& a1LocalRegion() const;
 
     // 简单测试版:该库位是否至少有一个「全程前进(无 REVERSE 段=无尖点)」的可达目标。
     // 用于 initAgents 起点筛选,保证每车都能一把开进某个库位。
@@ -123,7 +107,6 @@ private:
     bool loadA1LegCacheFromFile() const;
     bool saveA1LegCacheToFile() const;
     void buildA1LegCacheFromGenerator() const;
-    void computeA1LocalRegion() const;
     Slot makeA1DepotSlot() const;
     RoughPath concatPaths(const RoughPath& first, const RoughPath& second) const;
     TaskRejectReason validatePath(const RoughPath& path,
@@ -174,7 +157,6 @@ private:
     mutable bool a1_leg_cache_ready_ = false;
     mutable std::vector<DepotLegCache> a1_to_b_leg_cache_;
     mutable std::vector<DepotLegCache> b_to_a1_leg_cache_;
-    mutable A1LocalRegion a1_local_region_;
 
     std::vector<TaskPlanCache> task_cache_;
     std::vector<int> target_visit_counts_;

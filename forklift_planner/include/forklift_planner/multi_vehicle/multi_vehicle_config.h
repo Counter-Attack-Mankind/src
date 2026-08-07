@@ -34,10 +34,6 @@ struct MultiVehicleConfig {
     double a1_pickup_theta = 1.5707963267948966;
     double a1_pre_dock_x = 1.250;
     double a1_pre_dock_y = 4.100;
-    // Padding around the complete-body swept envelope. At this stage the
-    // region is diagnostic/visual only and does not change traffic decisions.
-    double a1_local_region_margin = 0.02;
-    bool show_a1_local_region = true;
     double rolling_horizon = 10.0;          // future planner time 
     double rolling_refresh_period = 2.0;        //  refresh period
 

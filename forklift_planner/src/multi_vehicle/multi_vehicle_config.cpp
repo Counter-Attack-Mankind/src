@@ -58,10 +58,6 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
              c.a1_pre_dock_x);
     nh.param(ns + "a1_pre_dock_y", c.a1_pre_dock_y,
              c.a1_pre_dock_y);
-    nh.param(ns + "a1_local_region_margin", c.a1_local_region_margin,
-             c.a1_local_region_margin);
-    nh.param(ns + "show_a1_local_region", c.show_a1_local_region,
-             c.show_a1_local_region);
     nh.param(ns + "rolling_horizon", c.rolling_horizon, c.rolling_horizon);
     nh.param(ns + "rolling_refresh_period", c.rolling_refresh_period,
              c.rolling_refresh_period);
@@ -154,7 +150,6 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     c.dwell_time = std::max(0.0, c.dwell_time);
     c.pickup_dwell_time = std::max(0.0, c.pickup_dwell_time);
     c.unload_dwell_time = std::max(0.0, c.unload_dwell_time);
-    c.a1_local_region_margin = std::max(0.0, c.a1_local_region_margin);
     c.rolling_horizon = std::max(0.1, c.rolling_horizon);
     c.rolling_refresh_period = std::max(0.1, c.rolling_refresh_period);
     c.path_validation_step = std::max(0.005, c.path_validation_step);

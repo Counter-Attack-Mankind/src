@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <set>
@@ -22,6 +23,10 @@ enum class ConflictMarkerKind {
 };
 
 struct ConflictMarker {
+    // Center produced from OBB-overlap samples. x/y below are the center of
+    // the deliberately enlarged display/search AABB.
+    double conflict_x = 0.0;
+    double conflict_y = 0.0;
     double x = 0.0;
     double y = 0.0;
     double t = 0.0;
@@ -29,6 +34,13 @@ struct ConflictMarker {
     double scale_y = 0.08;
     int vehicle_a = -1;
     int vehicle_b = -1;
+    int follower_id = -1;
+    int leader_id = -1;
+    double following_gap = 0.0;
+    double follower_x = 0.0;
+    double follower_y = 0.0;
+    double leader_x = 0.0;
+    double leader_y = 0.0;
     ConflictMarkerKind kind = ConflictMarkerKind::CROSSING_OR_OPPOSING;
 };
 
@@ -50,16 +62,30 @@ public:
     };
 
     void setFutureA1Commitment(const FutureA1Commitment& commitment) {
+        if (commitment.owner_id != future_a1_admission_log_owner_id_ ||
+            commitment.owner_path_gen !=
+                future_a1_admission_log_owner_path_gen_) {
+            future_a1_admission_logged_.clear();
+            future_a1_admission_log_owner_id_ = commitment.owner_id;
+            future_a1_admission_log_owner_path_gen_ =
+                commitment.owner_path_gen;
+        }
         future_a1_commitment_ = commitment;
-        future_a1_admission_logged_.clear();
     }
     void clearFutureA1Commitment() {
         future_a1_commitment_ = FutureA1Commitment{};
-        future_a1_admission_logged_.clear();
     }
 
     void setCoordLogSink(const std::function<void(const std::string&)>& sink) {
         coord_log_sink_ = sink;
+    }
+    // Diagnostic metadata only. It never participates in a rule decision.
+    void setDebugLogContext(const std::string& source, uint64_t plan_id,
+                            int frame_id, int rollout_step) {
+        debug_log_source_ = source;
+        debug_log_plan_id_ = plan_id;
+        debug_log_frame_id_ = frame_id;
+        debug_log_rollout_step_ = rollout_step;
     }
 
     // Reservation for one visible spatiotemporal conflict event. Arc ranges
@@ -140,7 +166,10 @@ private:
                              const VehicleAgent& other,
                              const std::vector<ConflictZone>& zones,
                              ConflictMarkerKind kind,
-                             double first_conflict_t = 0.0);
+                             double first_conflict_t = 0.0,
+                             int follower_id = -1,
+                             int leader_id = -1,
+                             double following_gap = 0.0);
     double timeToReachS(const VehicleAgent& v, VehicleAction action,
                         double target_s) const;
     double predictedTravelDistance(const VehicleAgent& v,
@@ -168,6 +197,7 @@ private:
     // Phase 2.2:对 capacity=1 互斥资源(窄道/路口/货位口)按统一优先级发令牌,
     // winner 通过、其余在上游停止线让行;令牌持有到车身驶出才释放(§11)。
     void arbitrateResources(std::vector<VehicleAgent>& vehicles, double dt);
+    std::string debugLogPrefix() const;
 
     const MapParam& mp_;
     const MultiVehicleConfig& cfg_;
@@ -197,11 +227,17 @@ private:
 
     FutureA1Commitment future_a1_commitment_;
     std::set<std::pair<int, int>> future_a1_admission_logged_;
+    int future_a1_admission_log_owner_id_ = -1;
+    int future_a1_admission_log_owner_path_gen_ = -1;
 
     // Phase 2 资源模型:资源地图(只读)+ 资源令牌表(跨周期持久,§11.10)。
     const TrafficResourceMap* resmap_ = nullptr;
     ResourceTokenTable tokens_;
     std::function<void(const std::string&)> coord_log_sink_;
+    std::string debug_log_source_ = "REAL";
+    uint64_t debug_log_plan_id_ = 0;
+    int debug_log_frame_id_ = -1;
+    int debug_log_rollout_step_ = -1;
     double now_ = 0.0;  // 内部仿真时钟(每 decide 累加 dt),供令牌防抖/超时用
 };
 

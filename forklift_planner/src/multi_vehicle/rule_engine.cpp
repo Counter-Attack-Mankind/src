@@ -18,6 +18,15 @@ namespace multi_vehicle {
 RuleEngine::RuleEngine(const MapParam& mp, const MultiVehicleConfig& cfg)
     : mp_(mp), cfg_(cfg) {}
 
+std::string RuleEngine::debugLogPrefix() const {
+    std::ostringstream out;
+    out << "[SOURCE=" << debug_log_source_ << "]"
+        << " [plan=" << debug_log_plan_id_ << "]"
+        << " [frame=" << debug_log_frame_id_ << "]"
+        << " [rollout_step=" << debug_log_rollout_step_ << "]";
+    return out.str();
+}
+
 namespace {
 
 struct OverlapSample {
@@ -418,7 +427,8 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::findConflictZones(
 void RuleEngine::recordConflictZones(
     const VehicleAgent& self, const VehicleAgent& other,
     const std::vector<ConflictZone>& zones, ConflictMarkerKind kind,
-    double first_conflict_t) {
+    double first_conflict_t, int follower_id, int leader_id,
+    double following_gap) {
     constexpr double kDisplayStep = 0.025;
     const double pad =
         std::max(0.03, 0.5 * mp_.vehicle_width +
@@ -458,12 +468,25 @@ void RuleEngine::recordConflictZones(
         }
 
         ConflictMarker marker;
+        marker.conflict_x = z.x;
+        marker.conflict_y = z.y;
         marker.x = 0.5 * (x_min + x_max);
         marker.y = 0.5 * (y_min + y_max);
         marker.scale_x = std::max(0.06, x_max - x_min + 2.0 * pad);
         marker.scale_y = std::max(0.06, y_max - y_min + 2.0 * pad);
         marker.vehicle_a = self.id;
         marker.vehicle_b = other.id;
+        marker.follower_id = follower_id;
+        marker.leader_id = leader_id;
+        marker.following_gap = following_gap;
+        if (follower_id >= 0 && leader_id >= 0) {
+            const RoughWp follower_pose = self.track.poseAtS(self.path_s);
+            const RoughWp leader_pose = other.track.poseAtS(other.path_s);
+            marker.follower_x = follower_pose.x;
+            marker.follower_y = follower_pose.y;
+            marker.leader_x = leader_pose.x;
+            marker.leader_y = leader_pose.y;
+        }
         marker.kind = kind;
         marker.t = first_conflict_t;
         conflicts_.push_back(marker);
@@ -482,17 +505,19 @@ void RuleEngine::debugDumpConflict(const VehicleAgent& a,
     bool all_same = true;
     for (const ConflictZone& z : zones)
         if (!z.same_dir) { all_same = false; break; }
-    ROS_WARN("[CONFLICT] V%d(s=%.3f rem=%.3f act=%d blk=%d) vs "
+    ROS_WARN("%s [CONFLICT] V%d(s=%.3f rem=%.3f act=%d blk=%d) vs "
              "V%d(s=%.3f rem=%.3f act=%d blk=%d) | owner=V%d following=%d "
              "nzones=%zu all_same_dir=%d",
+             debugLogPrefix().c_str(),
              a.id, a.path_s, a.remainingS(), (int)a.action, a.blocker_id,
              b.id, b.path_s, b.remainingS(), (int)b.action, b.blocker_id,
              owner, (int)following, zones.size(), (int)all_same);
     for (size_t i = 0; i < zones.size(); ++i) {
         const ConflictZone& z = zones[i];
-        ROS_WARN("[CONFLICT]   zone%zu same_dir=%d | A[%.3f,%.3f] stopA=%.3f "
+        ROS_WARN("%s [CONFLICT]   zone%zu same_dir=%d | A[%.3f,%.3f] stopA=%.3f "
                  "committedA=%d | B[%.3f,%.3f] stopB=%.3f committedB=%d | @(%.2f,%.2f)",
-                 i, (int)z.same_dir, z.s_self_enter, z.s_self_exit,
+                 debugLogPrefix().c_str(), i, (int)z.same_dir,
+                 z.s_self_enter, z.s_self_exit,
                  z.s_self_enter - f, (int)(a.path_s > z.s_self_enter),
                  z.s_other_enter, z.s_other_exit, z.s_other_enter - f,
                  (int)(b.path_s > z.s_other_enter), z.x, z.y);
@@ -1070,13 +1095,15 @@ void RuleEngine::enforceFutureA1Admission(
                      << "[FUTURE_A1_ADMISSION] owner=V" << owner->id
                      << " blocked=V" << other.id
                      << " reason=actual_occupied_priority"
+                     << " early_stop=false"
                      << " conflict_zone=(" << selected.x << ","
                      << selected.y << ")"
                      << " other_s=" << other.path_s
                      << " interval=[" << selected.s_other_enter << ","
                      << selected.s_other_exit << "]";
                 if (coord_log_sink_) coord_log_sink_(line.str());
-                ROS_WARN("%s", line.str().c_str());
+                ROS_WARN("%s %s", debugLogPrefix().c_str(),
+                         line.str().c_str());
             }
             continue;
         }
@@ -1099,6 +1126,7 @@ void RuleEngine::enforceFutureA1Admission(
                  << "[FUTURE_A1_ADMISSION] owner=V" << owner->id
                  << " blocked=V" << other.id
                  << " reason=future_a1_exit_priority"
+                 << " early_stop=true"
                  << " conflict_zone=(" << selected.x << "," << selected.y
                  << ")"
                  << " other_s=" << other.path_s
@@ -1106,7 +1134,8 @@ void RuleEngine::enforceFutureA1Admission(
                  << " interval=[" << selected.s_other_enter << ","
                  << selected.s_other_exit << "]";
             if (coord_log_sink_) coord_log_sink_(line.str());
-            ROS_WARN("%s", line.str().c_str());
+            ROS_WARN("%s %s", debugLogPrefix().c_str(),
+                     line.str().c_str());
         }
     }
 }
@@ -1184,7 +1213,8 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
                 continue;
             }
             recordConflictZones(v, other, fzones,
-                                ConflictMarkerKind::SAME_DIRECTION);
+                                ConflictMarkerKind::SAME_DIRECTION, 0.0,
+                                v.id, other.id, gap);
             applyActionRequest(v, follow_action,
                                "following_V" + std::to_string(other.id),
                                other.id);

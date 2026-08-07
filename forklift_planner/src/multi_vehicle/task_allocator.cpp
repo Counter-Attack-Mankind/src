@@ -291,99 +291,6 @@ Slot TaskAllocator::a1PickupSlot() const {
     return makeA1DepotSlot();
 }
 
-const A1LocalRegion& TaskAllocator::a1LocalRegion() const {
-    ensureA1LegCache();
-    return a1_local_region_;
-}
-
-void TaskAllocator::computeA1LocalRegion() const {
-    A1LocalRegion region;
-    region.margin = cfg_.a1_local_region_margin;
-    double min_x = std::numeric_limits<double>::infinity();
-    double min_y = std::numeric_limits<double>::infinity();
-    double max_x = -std::numeric_limits<double>::infinity();
-    double max_y = -std::numeric_limits<double>::infinity();
-
-    auto includePose = [&](const RoughWp& pose) {
-        for (const FootprintPoint& corner :
-             footprintCorners(pose, mp_, region.margin)) {
-            min_x = std::min(min_x, corner.x);
-            min_y = std::min(min_y, corner.y);
-            max_x = std::max(max_x, corner.x);
-            max_y = std::max(max_y, corner.y);
-        }
-    };
-
-    // The physical pickup pose is specified by body center. Convert it to the
-    // rear-axle reference used by RoughPath before constructing its footprint.
-    const Slot a1 = makeA1DepotSlot();
-    RoughWp pickup_ref;
-    pickup_ref.x = a1.cx - mp_.rear_axle_to_center * std::cos(a1.dock_theta);
-    pickup_ref.y = a1.cy - mp_.rear_axle_to_center * std::sin(a1.dock_theta);
-    pickup_ref.theta = a1.dock_theta;
-    pickup_ref.type = WpType::REVERSE;
-    includePose(pickup_ref);
-
-    // For each A1->B path, include the complete-body sweep from the pickup
-    // pose through its first REVERSE->FORWARD cusp. This is precisely the
-    // local undocking/change-direction maneuver discussed for B28/B30; the
-    // remainder of the route is deliberately excluded.
-    for (const DepotLegCache& leg : a1_to_b_leg_cache_) {
-        if (!leg.ready || !leg.valid || leg.path.empty()) continue;
-        ++region.outgoing_paths;
-        const RoughPath& path = leg.path;
-        size_t end = 0;
-        if (path.front().type == WpType::REVERSE) {
-            while (end + 1 < path.size() &&
-                   path[end + 1].type == WpType::REVERSE) {
-                ++end;
-            }
-            ++region.outgoing_reverse_prefixes;
-        }
-        for (size_t k = 0; k <= end; ++k) includePose(path[k]);
-    }
-
-    if (!std::isfinite(min_x) || !std::isfinite(min_y) ||
-        !std::isfinite(max_x) || !std::isfinite(max_y)) {
-        a1_local_region_ = region;
-        ROS_ERROR("[multi_patrol][A1] failed to build local region");
-        return;
-    }
-
-    // B->A1 paths all terminate at the independently configured pickup pose.
-    // Count them as an ingress consistency check, but do not expand the local
-    // box with their preceding corridor segments: doing so turns a local A1
-    // maneuver region into most of the top corridor.
-    for (const DepotLegCache& leg : b_to_a1_leg_cache_) {
-        if (!leg.ready || !leg.valid || leg.path.empty()) continue;
-        ++region.incoming_paths;
-    }
-
-    region.valid = true;
-    // The physical map boundary is already an impenetrable wall. Clip the
-    // diagnostic AABB to it rather than drawing the small safety padding
-    // outside the mapped field (A1 sits directly against the top boundary).
-    region.min_x = std::max(0.0, min_x);
-    region.min_y = std::max(0.0, min_y);
-    region.max_x = std::min(mp_.field_width, max_x);
-    region.max_y = std::min(mp_.field_height, max_y);
-    a1_local_region_ = region;
-
-    ROS_WARN("[multi_patrol][A1 definition] pickup_body_center=(%.3f,%.3f) "
-             "theta=%.1fdeg pre_dock=(%.3f,%.3f) rear_axle=(%.3f,%.3f) "
-             "dwell=%.2fs",
-             a1.cx, a1.cy, a1.dock_theta * 180.0 / kPi,
-             a1.pre_dock_x, a1.pre_dock_y,
-             pickup_ref.x, pickup_ref.y, cfg_.pickup_dwell_time);
-    ROS_WARN("[multi_patrol][A1 local region] geometry-only AABB "
-             "x=[%.3f,%.3f] y=[%.3f,%.3f] size=(%.3f,%.3f) margin=%.3f "
-             "A1->B=%d reverse-prefix=%d B->A1=%d; traffic enforcement=OFF",
-             region.min_x, region.max_x, region.min_y, region.max_y,
-             region.max_x - region.min_x, region.max_y - region.min_y,
-             region.margin, region.outgoing_paths,
-             region.outgoing_reverse_prefixes, region.incoming_paths);
-}
-
 RoughPath TaskAllocator::concatPaths(const RoughPath& first,
                                      const RoughPath& second) const {
     RoughPath out = first;
@@ -625,13 +532,11 @@ void TaskAllocator::ensureA1LegCache() const {
 
     if (loadA1LegCacheFromFile()) {
         a1_leg_cache_ready_ = true;
-        computeA1LocalRegion();
         return;
     }
 
     buildA1LegCacheFromGenerator();
     a1_leg_cache_ready_ = true;
-    computeA1LocalRegion();
     if (cfg_.save_a1_cycle_catalog) {
         saveA1LegCacheToFile();
     }

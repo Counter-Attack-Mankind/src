@@ -96,6 +96,7 @@ public:
         };
         allocator_->setCoordLogSink(coord_log_sink);
         rule_engine_->setCoordLogSink(coord_log_sink);
+        setCoordLogContext("REAL", 0, -1, -1);
         rule_engine_->setResourceMap(resource_map_.get());
         // A方案:仿真也画每车完整轨迹。real 模式 setupRealIO 会再 advertise(同topic,无害)。
         horizon_marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>(
@@ -105,12 +106,8 @@ public:
             allocator_->buildCache();
         }
         const Slot a1_pickup = allocator_->a1PickupSlot();
-        forklift_planner::multi_vehicle::A1LocalRegion a1_region;
-        if (cfg_.use_a1_cycle) {
-            a1_region = allocator_->a1LocalRegion();
-        }
         marker_pub_ = std::make_unique<forklift_planner::multi_vehicle::MarkerPublisher>(
-            nh_, mp_, pp_, map_->slots(), cfg_, a1_pickup, a1_region);
+            nh_, mp_, pp_, map_->slots(), cfg_, a1_pickup);
         initAgents();
         visited_slots_.assign(map_->slots().size(), false);
         one_shot_done_.assign(agents_.size(), false);
@@ -213,9 +210,55 @@ private:
     }
 
     void coordLog(const std::string& line) {
-        if (!coord_log_) return;
-        coord_log_ << line << "\n";
+        coordLogWithContext(line, coord_log_source_, coord_log_plan_id_,
+                            coord_log_frame_id_, coord_log_rollout_step_);
+    }
+
+    std::string contextualLog(const std::string& line,
+                              const std::string& source,
+                              uint64_t plan_id, int frame_id,
+                              int rollout_step) const {
+        char prefix[160];
+        std::snprintf(prefix, sizeof(prefix),
+                      "[SOURCE=%s] [plan=%llu] [frame=%d] "
+                      "[rollout_step=%d] ",
+                      source.c_str(),
+                      static_cast<unsigned long long>(plan_id), frame_id,
+                      rollout_step);
+        return std::string(prefix) + line;
+    }
+
+    void coordLogWithContext(const std::string& line,
+                             const std::string& source,
+                             uint64_t plan_id, int frame_id,
+                             int rollout_step) {
+        if (!coord_log_ || coord_log_suppressed_) return;
+        coord_log_ << contextualLog(line, source, plan_id, frame_id,
+                                    rollout_step)
+                   << "\n";
         coord_log_.flush();
+    }
+
+    void setCoordLogContext(const std::string& source, uint64_t plan_id,
+                            int frame_id, int rollout_step) {
+        coord_log_source_ = source;
+        coord_log_plan_id_ = plan_id;
+        coord_log_frame_id_ = frame_id;
+        coord_log_rollout_step_ = rollout_step;
+        if (rule_engine_) {
+            rule_engine_->setDebugLogContext(source, plan_id, frame_id,
+                                             rollout_step);
+        }
+    }
+
+    std::string readableSimTime(double seconds) const {
+        const double nonnegative = std::max(0.0, seconds);
+        const int minutes = static_cast<int>(nonnegative / 60.0);
+        const double remainder = nonnegative - 60.0 * minutes;
+        char text[80];
+        std::snprintf(text, sizeof(text), "%.1f(%dmin %.1fs)",
+                      nonnegative, minutes, remainder);
+        return text;
     }
 
     bool targetEnabled(int id) const {
@@ -466,12 +509,19 @@ private:
         constexpr double kWait = 10.0;  // 全停闭环持续此秒数 = 真死锁
         const std::vector<VehicleAgent> sa = agents_;
         const std::vector<bool> sv = visited_slots_;
+        const std::string previous_log_source = coord_log_source_;
+        const uint64_t previous_log_plan = coord_log_plan_id_;
+        const int previous_log_frame = coord_log_frame_id_;
+        const int previous_rollout_step = coord_log_rollout_step_;
+        const uint64_t rollout_plan_id = ++rollout_log_id_;
+        setCoordLogContext("ROLLOUT", rollout_plan_id, 0, 0);
         const auto sr = rule_engine_->snapshot();
         const auto sl = allocator_->snapshot();
         const bool prev = sim_mode_;
         sim_mode_ = true;
         bool dead = false;
         for (int s = 0; s < H && !dead; ++s) {
+            setCoordLogContext("ROLLOUT", rollout_plan_id, s, s + 1);
             updateDwellAndTasks(dt);
             rule_engine_->decide(agents_, dt);
             advanceVehicles(dt);
@@ -479,9 +529,13 @@ private:
         }
         agents_ = sa;
         visited_slots_ = sv;
+        coord_log_suppressed_ = true;
         rule_engine_->restore(sr);
         allocator_->restore(sl);
+        coord_log_suppressed_ = false;
         sim_mode_ = prev;
+        setCoordLogContext(previous_log_source, previous_log_plan,
+                           previous_log_frame, previous_rollout_step);
         return dead;
     }
 
@@ -504,6 +558,13 @@ private:
         const size_t n = agents_.size();
         out.assign(n, sandbox_msgs::Trajectory{});
         hold.assign(n, true);
+        const std::string previous_log_source = coord_log_source_;
+        const uint64_t previous_log_plan = coord_log_plan_id_;
+        const int previous_log_frame = coord_log_frame_id_;
+        const int previous_rollout_step = coord_log_rollout_step_;
+        const uint64_t rollout_plan_id =
+            plan_frames != nullptr ? sim_plan_id_ + 1 : ++rollout_log_id_;
+        setCoordLogContext("ROLLOUT", rollout_plan_id, 0, 0);
         //初始化轨迹，所有离散点中的目标点按序排列，并且坐标系设为世界坐标系
         for (size_t i = 0; i < n; ++i) { out[i].target = (int)i; out[i].header.frame_id = "world"; }
 
@@ -550,6 +611,7 @@ private:
 
         //开始向未来预测H步长，H = 预测时间/dt
         for (int s = 1; s <= H; ++s) {
+            setCoordLogContext("ROLLOUT", rollout_plan_id, s - 1, s);
             // The simulation executor calls updateDwellAndTasks() before it
             // asks for a new plan. Its first planned control therefore starts
             // from that already-updated task state; later frames advance the
@@ -591,30 +653,19 @@ private:
                 plan_frames->push_back(std::move(frame));
             }
             advanceVehicles(dt);
-            for (const VehicleAgent& v : agents_) {
-                char line[320];
-                std::snprintf(
-                    line, sizeof(line),
-                    "[ROLLOUT] t=%.2f V%d mode=%s phase=%s leg=%s "
-                    "s=%.3f/%.3f pending_dropoff=%d dropoff_slot=%d "
-                    "path_gen=%d",
-                    static_cast<double>(s) * dt, v.id, modeName(v.mode),
-                    missionPhaseName(v.mission_phase),
-                    legTargetName(v.leg_target), v.path_s,
-                    v.track.empty() ? 0.0 : v.track.length(),
-                    v.pending_dropoff_valid ? 1 : 0,
-                    v.pending_dropoff_slot, v.path_gen);
-                coordLog(line);
-            }
             record(s);
         }
 
         //将沙盒预测造成所有的改动恢复
         agents_ = sa;
         visited_slots_ = sv;
+        coord_log_suppressed_ = true;
         rule_engine_->restore(sr);
         allocator_->restore(sl);
+        coord_log_suppressed_ = false;
         sim_mode_ = prev;
+        setCoordLogContext(previous_log_source, previous_log_plan,
+                           previous_log_frame, previous_rollout_step);
     }
 
     // Predict A1 service arrival from each vehicle's current B->A1 leg in
@@ -749,6 +800,75 @@ private:
         return retained;
     }
 
+    std::string futureA1ReleaseReason(
+        const forklift_planner::multi_vehicle::RuleEngine::
+            FutureA1Commitment& previous) const {
+        const VehicleAgent* owner = agentById_c(previous.owner_id);
+        if (owner == nullptr) return "owner_missing";
+        if (owner->mission_phase == MissionPhase::TO_B) {
+            return "handoff_to_a1_departure_priority";
+        }
+        if (owner->path_gen != previous.owner_path_gen) return "path_changed";
+        if (!owner->pending_dropoff_valid ||
+            owner->pending_dropoff_track.empty()) {
+            return "dropoff_preview_invalid";
+        }
+        return "owner_no_longer_to_a1_or_pickup_dwell";
+    }
+
+    void logFutureA1Transition(
+        const forklift_planner::multi_vehicle::RuleEngine::
+            FutureA1Commitment& previous,
+        const forklift_planner::multi_vehicle::RuleEngine::
+            FutureA1Commitment& current) {
+        const bool same_owner =
+            previous.valid() && current.valid() &&
+            previous.owner_id == current.owner_id &&
+            previous.owner_path_gen == current.owner_path_gen;
+        if (same_owner || (!previous.valid() && !current.valid())) return;
+
+        std::string event;
+        if (!previous.valid()) {
+            event = "create_owner";
+        } else if (!current.valid()) {
+            event = "release_owner";
+        } else {
+            event = "change_owner";
+        }
+
+        char line[512];
+        if (current.valid()) {
+            const std::string old_owner = previous.valid()
+                ? "V" + std::to_string(previous.owner_id)
+                : "none";
+            const std::string change_reason = previous.valid()
+                ? futureA1ReleaseReason(previous)
+                : "initial_selection";
+            std::snprintf(
+                line, sizeof(line),
+                "[FUTURE_A1] time=%s event=%s old_owner=%s owner=V%d "
+                "arrival_time=%.2f to_b_time=%.2f path_gen=%d "
+                "change_reason=%s",
+                readableSimTime(sim_time_).c_str(), event.c_str(),
+                old_owner.c_str(),
+                current.owner_id, current.predicted_a1_arrival_time,
+                current.predicted_to_b_time, current.owner_path_gen,
+                change_reason.c_str());
+        } else {
+            const std::string reason = futureA1ReleaseReason(previous);
+            std::snprintf(
+                line, sizeof(line),
+                "[FUTURE_A1] time=%s event=release_owner owner=V%d "
+                "path_gen=%d release_reason=%s",
+                readableSimTime(sim_time_).c_str(), previous.owner_id,
+                previous.owner_path_gen, reason.c_str());
+        }
+        const std::string console_line = contextualLog(
+            line, "ROLLOUT", sim_plan_id_, -1, -1);
+        ROS_WARN("%s", console_line.c_str());
+        coordLogWithContext(line, "ROLLOUT", sim_plan_id_, -1, -1);
+    }
+
     void buildSimulationHorizonPlan(
         std::vector<sandbox_msgs::Trajectory>& trajs,
         std::vector<bool>& hold) {
@@ -757,6 +877,7 @@ private:
         // behaviorally identical.
         prepareA1DropoffPreviewsForHorizon();
 
+        const auto previous_commitment = future_a1_commitment_;
         auto commitment = retainFutureA1Owner();
         if (!commitment.valid()) {
             commitment = selectFutureA1Owner(predictA1Arrivals());
@@ -776,20 +897,7 @@ private:
         sim_plan_valid_ = !sim_plan_frames_.empty();
         sim_plan_start_time_ = sim_time_;
         ++sim_plan_id_;
-        if (commitment.valid()) {
-            char line[240];
-            std::snprintf(
-                line, sizeof(line),
-                "[FUTURE_A1] owner=V%d arrival_t=%.2f to_b_t=%.2f "
-                "path_gen=%d plan=%llu",
-                commitment.owner_id,
-                commitment.predicted_a1_arrival_time,
-                commitment.predicted_to_b_time,
-                commitment.owner_path_gen,
-                static_cast<unsigned long long>(sim_plan_id_));
-            ROS_WARN("%s", line);
-            coordLog(line);
-        }
+        logFutureA1Transition(previous_commitment, commitment);
         ROS_INFO("[sim_plan] built plan=%llu start=%.2f horizon=%.2f "
                  "frames=%zu commit_frames=%d",
                  static_cast<unsigned long long>(sim_plan_id_),
@@ -838,6 +946,8 @@ private:
 
     bool executeSimulationPlanSample() {
         if (simulationPlanNeedsRefresh()) return false;
+        setCoordLogContext("REAL", sim_plan_id_,
+                           static_cast<int>(sim_plan_cursor_), -1);
         const SimPlanFrame& frame = sim_plan_frames_[sim_plan_cursor_];
         rule_engine_->restore(frame.rule_state);
         for (size_t i = 0; i < agents_.size(); ++i) {
@@ -1710,20 +1820,24 @@ private:
             const double length = v.track.empty() ? 0.0 : v.track.length();
             const double rem = v.track.empty() ? 0.0 : v.remainingS();
             char buf[512];
+            const std::string readable_time = readableSimTime(sim_time_);
             std::snprintf(
                 buf, sizeof(buf),
-                "[multi_patrol][state] tick=%llu sim_t=%.2f V%d "
+                "[multi_patrol][state] tick=%llu sim_t=%s V%d "
                 "mode=%s phase=%s action=%s reason=%s "
                 "blocker=%d task=%d slot=%d->%d s=%.3f/%.3f rem=%.3f "
                 "speed=%.3f wait=%.2f dwell=%.2f",
-                static_cast<unsigned long long>(tick_count_), sim_time_,
+                static_cast<unsigned long long>(tick_count_),
+                readable_time.c_str(),
                 v.id, modeName(v.mode), missionPhaseName(v.mission_phase),
                 actionName(v.action),
                 v.reason.empty() ? "-" : v.reason.c_str(), v.blocker_id,
                 v.task_count, v.current_slot, v.target_slot, v.path_s,
                 length, rem, v.current_speed, v.wait_time,
                 v.dwell_remaining);
-            ROS_INFO("%s", buf);
+            const std::string console_line = contextualLog(
+                buf, "REAL", coord_log_plan_id_, coord_log_frame_id_, -1);
+            ROS_INFO("%s", console_line.c_str());
             coordLog(buf);
 
             last_logged_mode_[i] = v.mode;
@@ -1889,7 +2003,10 @@ private:
                                       : owner.target_slot,
                         other.id, dwell_before_motion, hit->t, hit->s,
                         static_cast<int>(other.mission_phase), other.path_s);
-                    ROS_WARN("%s", line);
+                    const std::string console_line = contextualLog(
+                        line, "REAL", coord_log_plan_id_,
+                        coord_log_frame_id_, -1);
+                    ROS_WARN("%s", console_line.c_str());
                     coordLog(line);
                 }
             }
@@ -1902,7 +2019,9 @@ private:
                 line, sizeof(line),
                 "[multi_patrol][A1 EXIT INTRUSION CLEAR] owner=V%d blocker=V%d",
                 old.first, old.second);
-            ROS_WARN("%s", line);
+            const std::string console_line = contextualLog(
+                line, "REAL", coord_log_plan_id_, coord_log_frame_id_, -1);
+            ROS_WARN("%s", console_line.c_str());
             coordLog(line);
         }
         active_a1_exit_intrusions_.swap(current);
@@ -1912,6 +2031,7 @@ private:
         const double dt = 1.0 / pp_.update_rate;        //控制周期与仿真系统推移周期一致
         ++tick_count_;          //记录系统运行了多少隔周期
         sim_time_ += dt;        //仿真时间增加一个固定时间步长
+        setCoordLogContext("REAL", sim_plan_id_, coord_log_frame_id_, -1);
 
 
         // 1. 实车模式---未摆放好姿态模式
@@ -2477,6 +2597,12 @@ private:
     int target_only_ = -1;  // realbridge debug: -1 = all vehicles, otherwise control only this id
     std::string coord_log_file_;
     std::ofstream coord_log_;
+    std::string coord_log_source_ = "REAL";
+    uint64_t coord_log_plan_id_ = 0;
+    int coord_log_frame_id_ = -1;
+    int coord_log_rollout_step_ = -1;
+    bool coord_log_suppressed_ = false;
+    uint64_t rollout_log_id_ = 0;
 
     // ── 实车模式(real_mode)I/O ──────────────────────────────────────────────
     ros::Subscriber object_sub_;                       // /object 动捕位姿(mm)
@@ -2701,7 +2827,9 @@ public:
     // 持久 onset 文件:把关键现场同时写到 /tmp/forklift_onset.log(永不随 rosout 滚掉,我随时能读)。
     // 长测排错专用——只在出问题那一刻写,故文件小、不刷屏。
     void onsetLog(const std::string& s) {
-        ROS_ERROR("%s", s.c_str());
+        const std::string console_line = contextualLog(
+            s, "REAL", coord_log_plan_id_, coord_log_frame_id_, -1);
+        ROS_ERROR("%s", console_line.c_str());
         coordLog(s);
         std::ofstream f("/tmp/forklift_onset.log", std::ios::app);
         if (f) f << s << "\n";

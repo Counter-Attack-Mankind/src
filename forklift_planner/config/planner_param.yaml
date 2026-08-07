@@ -64,7 +64,6 @@ forklift_planner:
     a1_pickup_theta: 1.5707963267948966
     a1_pre_dock_x: 1.250
     a1_pre_dock_y: 4.100
-    a1_local_region_margin: 0.02
     rolling_horizon: 15.0         # s，每次生成未来多长时间的轨迹
     rolling_refresh_period: 2.0   # s，每隔多久重新计算并覆盖发布轨迹
 
@@ -132,4 +131,3 @@ forklift_planner:
     # 可视化
     show_paths: true
     show_prediction_conflicts: true
-    show_a1_local_region: true
