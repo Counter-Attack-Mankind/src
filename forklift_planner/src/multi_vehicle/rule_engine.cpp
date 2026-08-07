@@ -904,6 +904,132 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
     }
 }
 
+void RuleEngine::enforceFutureA1Admission(
+    std::vector<VehicleAgent>& vehicles, double dt) {
+    if (!future_a1_commitment_.valid()) return;
+
+    VehicleAgent* owner = nullptr;
+    for (VehicleAgent& v : vehicles) {
+        if (v.id == future_a1_commitment_.owner_id) {
+            owner = &v;
+            break;
+        }
+    }
+    if (owner == nullptr || owner->path_gen !=
+                                future_a1_commitment_.owner_path_gen ||
+        !owner->pending_dropoff_valid ||
+        owner->pending_dropoff_track.empty() ||
+        (owner->mission_phase != MissionPhase::TO_A1 &&
+         owner->mission_phase != MissionPhase::PICKUP_DWELL)) {
+        return;
+    }
+
+    // Compare the already-prepared A1->B exit against each other vehicle's
+    // current TO_A1 path. The synthetic generation is exactly the generation
+    // activatePreparedDropoffLeg() will assign to this frozen exit track.
+    VehicleAgent exit_preview = *owner;
+    exit_preview.track = owner->pending_dropoff_track;
+    exit_preview.path_s = 0.0;
+    exit_preview.path_gen = owner->path_gen + 1;
+    exit_preview.mode = VehicleMode::ACTIVE;
+    exit_preview.mission_phase = MissionPhase::TO_B;
+
+    const double protected_until = owner->a1_departure_priority_until_s;
+    if (protected_until <= 1e-9) return;
+    constexpr double kStopBuffer = 0.01;
+
+    for (VehicleAgent& other : vehicles) {
+        if (other.id == owner->id || !other.active() ||
+            other.mission_phase != MissionPhase::TO_A1 ||
+            other.track.empty()) {
+            continue;
+        }
+
+        const bool preview_is_lo = exit_preview.id < other.id;
+        const VehicleAgent& lo = preview_is_lo ? exit_preview : other;
+        const VehicleAgent& hi = preview_is_lo ? other : exit_preview;
+        const std::pair<int, int> key{lo.id, hi.id};
+        ConflictCacheEntry& cache = future_a1_conflict_cache_[key];
+        if (cache.gen_lo != lo.path_gen || cache.gen_hi != hi.path_gen) {
+            cache.blocks = computeConflictZonesFull(lo, hi);
+            cache.gen_lo = lo.path_gen;
+            cache.gen_hi = hi.path_gen;
+        }
+
+        bool already_inside = false;
+        bool have_entry = false;
+        ConflictZone selected;
+        double earliest_other_enter = std::numeric_limits<double>::infinity();
+        for (const ConflictZone& canonical : cache.blocks) {
+            ConflictZone zone = canonical;
+            if (!preview_is_lo) {
+                std::swap(zone.s_self_enter, zone.s_other_enter);
+                std::swap(zone.s_self_exit, zone.s_other_exit);
+            }
+            if (zone.s_self_enter >= protected_until - 1e-9) continue;
+            if (other.path_s > zone.s_other_exit + 1e-9) continue;
+            if (other.path_s > zone.s_other_enter + 1e-9 &&
+                other.path_s <= zone.s_other_exit + 1e-9) {
+                already_inside = true;
+                selected = zone;
+                break;
+            }
+            if (zone.s_other_enter < earliest_other_enter) {
+                earliest_other_enter = zone.s_other_enter;
+                selected = zone;
+                have_entry = true;
+            }
+        }
+
+        const std::pair<int, int> log_key{owner->id, other.id};
+        if (already_inside) {
+            if (future_a1_admission_logged_.insert(log_key).second) {
+                std::ostringstream line;
+                line << std::fixed << std::setprecision(3)
+                     << "[FUTURE_A1_ADMISSION] owner=V" << owner->id
+                     << " blocked=V" << other.id
+                     << " reason=actual_occupied_priority"
+                     << " conflict_zone=(" << selected.x << ","
+                     << selected.y << ")"
+                     << " other_s=" << other.path_s
+                     << " interval=[" << selected.s_other_enter << ","
+                     << selected.s_other_exit << "]";
+                if (coord_log_sink_) coord_log_sink_(line.str());
+                ROS_WARN("%s", line.str().c_str());
+            }
+            continue;
+        }
+        if (!have_entry) continue;
+
+        const double stop_s =
+            std::max(0.0, selected.s_other_enter - kStopBuffer);
+        const double distance = stop_s - other.path_s;
+        const double speed = std::max(0.0, other.current_speed);
+        const double stopping_distance =
+            speed * speed / (2.0 * std::max(1e-6, cfg_.max_decel)) +
+            speed * dt;
+        if (distance > stopping_distance + 1e-9) continue;
+
+        applyActionRequest(other, VehicleAction::STOP,
+                           "future_a1_exit_priority", owner->id);
+        if (future_a1_admission_logged_.insert(log_key).second) {
+            std::ostringstream line;
+            line << std::fixed << std::setprecision(3)
+                 << "[FUTURE_A1_ADMISSION] owner=V" << owner->id
+                 << " blocked=V" << other.id
+                 << " reason=future_a1_exit_priority"
+                 << " conflict_zone=(" << selected.x << "," << selected.y
+                 << ")"
+                 << " other_s=" << other.path_s
+                 << " stop_s=" << stop_s
+                 << " interval=[" << selected.s_other_enter << ","
+                 << selected.s_other_exit << "]";
+            if (coord_log_sink_) coord_log_sink_(line.str());
+            ROS_WARN("%s", line.str().c_str());
+        }
+    }
+}
+
 void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
     // 本周期重新认定"真·同向同车道跟车对",供 resolvePairwiseConflicts 决定是否跳过。
     // 这是跟车判据的唯一事实源 → 杜绝两层判据不一致的缝隙。
@@ -1493,6 +1619,7 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
         ? prediction_horizon_override
         : cfg_.prediction_horizon;
     resolvePairwiseConflicts(vehicles, dt, pairwise_horizon);
+    enforceFutureA1Admission(vehicles, dt);
     resolveTargetSlotOccupancy(vehicles);  // slot-mouth queueing (spec 6/7)
     enforceForwardClearance(vehicles);     // 普适前向净空兜底:堵分类接缝→防十字楔死
     applyRequestedActions(vehicles, dt);

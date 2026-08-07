@@ -36,6 +36,28 @@ class RuleEngine {
 public:
     RuleEngine(const MapParam& mp, const MultiVehicleConfig& cfg);
 
+    struct FutureA1Commitment {
+        int owner_id = -1;
+        int owner_path_gen = -1;
+        double predicted_a1_arrival_time = -1.0;
+        double predicted_to_b_time = -1.0;
+
+        bool valid() const {
+            return owner_id >= 0 && owner_path_gen >= 0 &&
+                   predicted_a1_arrival_time >= 0.0 &&
+                   predicted_to_b_time >= predicted_a1_arrival_time;
+        }
+    };
+
+    void setFutureA1Commitment(const FutureA1Commitment& commitment) {
+        future_a1_commitment_ = commitment;
+        future_a1_admission_logged_.clear();
+    }
+    void clearFutureA1Commitment() {
+        future_a1_commitment_ = FutureA1Commitment{};
+        future_a1_admission_logged_.clear();
+    }
+
     void setCoordLogSink(const std::function<void(const std::string&)>& sink) {
         coord_log_sink_ = sink;
     }
@@ -128,6 +150,8 @@ private:
                             const std::string& reason, int blocker_id = -1);
     void resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles, double dt,
                                   double prediction_horizon);
+    void enforceFutureA1Admission(std::vector<VehicleAgent>& vehicles,
+                                  double dt);
     void resolveFollowing(std::vector<VehicleAgent>& vehicles);
     // 普适前向净空护栏:任何车若沿自身固定路径在自己刹车距离内会撞上另一辆车的当前
     // 车身,提前 STOP(留余量、干净对停)。堵死 following/crossing 分类接缝处「两套都
@@ -168,6 +192,11 @@ private:
         std::vector<ConflictZone> blocks;  // canonical: s_self_*=lo, s_other_*=hi
     };
     mutable std::map<std::pair<int, int>, ConflictCacheEntry> conflict_cache_;
+    mutable std::map<std::pair<int, int>, ConflictCacheEntry>
+        future_a1_conflict_cache_;
+
+    FutureA1Commitment future_a1_commitment_;
+    std::set<std::pair<int, int>> future_a1_admission_logged_;
 
     // Phase 2 资源模型:资源地图(只读)+ 资源令牌表(跨周期持久,§11.10)。
     const TrafficResourceMap* resmap_ = nullptr;
