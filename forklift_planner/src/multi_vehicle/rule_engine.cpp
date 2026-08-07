@@ -691,6 +691,69 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         return z;
     };
 
+    auto futureA1OwnerForPair = [&](const VehicleAgent& a,
+                                    const VehicleAgent& b) {
+        if (!future_a1_commitment_.valid() ||
+            a.mission_phase != MissionPhase::TO_A1 ||
+            b.mission_phase != MissionPhase::TO_A1) {
+            return -1;
+        }
+        const VehicleAgent* owner = nullptr;
+        const VehicleAgent* other = nullptr;
+        if (a.id == future_a1_commitment_.owner_id &&
+            a.path_gen == future_a1_commitment_.owner_path_gen) {
+            owner = &a;
+            other = &b;
+        } else if (b.id == future_a1_commitment_.owner_id &&
+                   b.path_gen == future_a1_commitment_.owner_path_gen) {
+            owner = &b;
+            other = &a;
+        }
+        if (owner == nullptr || !owner->pending_dropoff_valid ||
+            owner->pending_dropoff_track.empty() ||
+            owner->a1_departure_priority_until_s <= 1e-9) {
+            return -1;
+        }
+
+        VehicleAgent exit_preview = *owner;
+        exit_preview.track = owner->pending_dropoff_track;
+        exit_preview.path_s = 0.0;
+        exit_preview.path_gen = owner->path_gen + 1;
+        exit_preview.mode = VehicleMode::ACTIVE;
+        exit_preview.mission_phase = MissionPhase::TO_B;
+
+        const bool preview_is_lo = exit_preview.id < other->id;
+        const VehicleAgent& lo = preview_is_lo ? exit_preview : *other;
+        const VehicleAgent& hi = preview_is_lo ? *other : exit_preview;
+        const std::pair<int, int> cache_key{lo.id, hi.id};
+        ConflictCacheEntry& cache = future_a1_conflict_cache_[cache_key];
+        if (cache.gen_lo != lo.path_gen || cache.gen_hi != hi.path_gen) {
+            cache.blocks = computeConflictZonesFull(lo, hi);
+            cache.gen_lo = lo.path_gen;
+            cache.gen_hi = hi.path_gen;
+        }
+
+        bool eligible = false;
+        for (const ConflictZone& zone : cache.blocks) {
+            const double exit_enter = preview_is_lo
+                ? zone.s_self_enter : zone.s_other_enter;
+            const double other_enter = preview_is_lo
+                ? zone.s_other_enter : zone.s_self_enter;
+            const double other_exit = preview_is_lo
+                ? zone.s_other_exit : zone.s_self_exit;
+            if (exit_enter >= owner->a1_departure_priority_until_s - 1e-9 ||
+                other->path_s > other_exit + 1e-9) {
+                continue;
+            }
+            if (other->path_s > other_enter + 1e-9 &&
+                other->path_s <= other_exit + 1e-9) {
+                return -1;  // Actual occupancy remains stronger.
+            }
+            eligible = true;
+        }
+        return eligible ? owner->id : -1;
+    };
+
     for (size_t i = 0; i < vehicles.size(); ++i) {
         VehicleAgent& a = vehicles[i];
         if (!a.active() || predictions[i].empty()) continue;
@@ -729,6 +792,21 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 ConflictReservation& r = reservation_it->second;
                 VehicleAgent& lo = a_is_lo ? a : b;
                 VehicleAgent& hi = a_is_lo ? b : a;
+
+                // A horizon-scoped Future A1 owner may replace only a soft
+                // forecast holder. Keep the reservation itself and never
+                // override a vehicle already physically inside this event.
+                const bool lo_inside =
+                    insideInterval(lo, r.enter_lo, r.exit_lo);
+                const bool hi_inside =
+                    insideInterval(hi, r.enter_hi, r.exit_hi);
+                const int future_owner = futureA1OwnerForPair(a, b);
+                if (!lo_inside && !hi_inside && future_owner >= 0 &&
+                    r.owner_id != future_owner) {
+                    r.owner_id = future_owner;
+                    logConflictReservation(coord_log_sink_, key, "update", r);
+                }
+
                 VehicleAgent& owner = r.owner_id == lo.id ? lo : hi;
                 VehicleAgent& waiter = r.owner_id == lo.id ? hi : lo;
                 const double owner_enter = r.owner_id == lo.id
@@ -836,13 +914,16 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     holder = priorityWinner(a, b);
                 }
             } else {
+                const int future_owner = futureA1OwnerForPair(a, b);
                 const bool a_a1_departure =
                     a.a1_departure_committed &&
                     a.path_s < a.a1_departure_priority_until_s - 1e-9;
                 const bool b_a1_departure =
                     b.a1_departure_committed &&
                     b.path_s < b.a1_departure_priority_until_s - 1e-9;
-                if (a_a1_departure != b_a1_departure) {
+                if (future_owner >= 0) {
+                    holder = future_owner;
+                } else if (a_a1_departure != b_a1_departure) {
                     // Normal A1 case: neither vehicle has entered this event,
                     // so the prepared pickup departure owns only this visible
                     // spatiotemporal conflict. An already-inside vehicle is

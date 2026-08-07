@@ -184,15 +184,15 @@ private:
         forklift_planner::multi_vehicle::RuleEngine::SimSnapshot rule_state;
     };
 
-    struct A1RolloutPrediction {
+    struct A1ArrivalPrediction {
         int vehicle_id = -1;
         int path_gen = -1;
         double arrival_time = -1.0;
         double to_b_time = -1.0;
     };
 
-    struct A1RolloutSummary {
-        std::map<int, A1RolloutPrediction> candidates;
+    struct A1ArrivalSummary {
+        std::map<int, A1ArrivalPrediction> candidates;
     };
 
     void initCoordLog() {
@@ -495,8 +495,7 @@ private:
     void rollWorldModel(double horizon, std::vector<sandbox_msgs::Trajectory>& out,
                         std::vector<bool>& hold,
                         std::vector<SimPlanFrame>* plan_frames = nullptr,
-                        bool first_step_task_state_is_current = false,
-                        A1RolloutSummary* a1_summary = nullptr) {
+                        bool first_step_task_state_is_current = false) {
 
         const double dt = 1.0 / pp_.update_rate;            //系统每触发一次，就向前推进dt时间
         const int H = std::max(1, (int)std::lround(horizon / dt));      //四舍五入决定仿真步数，但至少模拟1步
@@ -515,45 +514,6 @@ private:
         const auto sl = allocator_->snapshot();         //保存任务分配器状态
         const bool prev = sim_mode_;                    //保存现在模式（仿真或是实际）
         sim_mode_ = true;       //切换到仿真模式，因为现在属于提前规划，必须视为仿真
-
-        if (a1_summary != nullptr) {
-            a1_summary->candidates.clear();
-            for (const VehicleAgent& v : agents_) {
-                const bool approaching =
-                    v.active() && v.mission_phase == MissionPhase::TO_A1;
-                const bool picking =
-                    v.mode == VehicleMode::DWELL &&
-                    v.mission_phase == MissionPhase::PICKUP_DWELL;
-                if ((!approaching && !picking) ||
-                    !v.pending_dropoff_valid ||
-                    v.pending_dropoff_track.empty()) {
-                    continue;
-                }
-                A1RolloutPrediction prediction;
-                prediction.vehicle_id = v.id;
-                prediction.path_gen = v.path_gen;
-                if (picking) prediction.arrival_time = 0.0;
-                a1_summary->candidates[v.id] = prediction;
-            }
-        }
-
-        auto observeA1Transitions = [&](double predicted_time) {
-            if (a1_summary == nullptr) return;
-            for (const VehicleAgent& v : agents_) {
-                auto it = a1_summary->candidates.find(v.id);
-                if (it == a1_summary->candidates.end()) continue;
-                A1RolloutPrediction& prediction = it->second;
-                if (prediction.arrival_time < 0.0 &&
-                    v.mission_phase == MissionPhase::PICKUP_DWELL) {
-                    prediction.arrival_time = predicted_time;
-                }
-                if (prediction.arrival_time >= 0.0 &&
-                    prediction.to_b_time < 0.0 &&
-                    v.mission_phase == MissionPhase::TO_B) {
-                    prediction.to_b_time = predicted_time;
-                }
-            }
-        };
 
         //=========（创建匿名函数recored，用来记录当前车辆状态，并每拍给每辆车生成一个TrajPoint）========
         auto record = [&](int s) {
@@ -631,7 +591,6 @@ private:
                 plan_frames->push_back(std::move(frame));
             }
             advanceVehicles(dt);
-            observeA1Transitions(static_cast<double>(s) * dt);
             for (const VehicleAgent& v : agents_) {
                 char line[320];
                 std::snprintf(
@@ -658,19 +617,67 @@ private:
         sim_mode_ = prev;
     }
 
+    // Predict A1 service arrival from each vehicle's current B->A1 leg in
+    // isolation. Coordination actions are intentionally excluded here: the
+    // owner must be chosen before ordinary pairwise rules can stop a candidate.
+    A1ArrivalSummary predictA1Arrivals() const {
+        A1ArrivalSummary summary;
+        const double dt = 1.0 / pp_.update_rate;
+
+        for (const VehicleAgent& v : agents_) {
+            if (!targetEnabled(v.id) || !v.active() ||
+                v.mission_phase != MissionPhase::TO_A1 ||
+                v.leg_target != LegTargetKind::A1 || v.track.empty()) {
+                continue;
+            }
+
+            VehicleAgent preview = v;
+            double arrival_time = -1.0;
+            if (preview.path_s >= preview.track.length() - 1e-9) {
+                arrival_time = 0.0;
+            } else {
+                int step = 0;
+                while (preview.path_s < preview.track.length() - 1e-9) {
+                    ++step;
+                    const double desired = std::min(
+                        rule_engine_->speedForAction(VehicleAction::NOMINAL),
+                        curvatureSpeed(preview));
+                    if (!std::isfinite(desired) || desired <= 1e-9) break;
+                    preview.current_speed = limitedSpeed(
+                        preview.current_speed, desired, dt);
+                    const double old_s = preview.path_s;
+                    preview.path_s = std::min(
+                        preview.track.length(),
+                        preview.path_s + preview.current_speed * dt);
+                    if (preview.path_s <= old_s + 1e-12) break;
+                    arrival_time = static_cast<double>(step) * dt;
+                }
+                if (preview.path_s < preview.track.length() - 1e-9) {
+                    arrival_time = -1.0;
+                }
+            }
+            if (arrival_time < 0.0) continue;
+
+            A1ArrivalPrediction prediction;
+            prediction.vehicle_id = v.id;
+            prediction.path_gen = v.path_gen;
+            prediction.arrival_time = arrival_time;
+            prediction.to_b_time = arrival_time + cfg_.pickup_dwell_time;
+            summary.candidates[v.id] = prediction;
+        }
+        return summary;
+    }
+
     forklift_planner::multi_vehicle::RuleEngine::FutureA1Commitment
-    selectFutureA1Owner(const A1RolloutSummary& summary) const {
+    selectFutureA1Owner(const A1ArrivalSummary& summary) const {
         using Commitment = forklift_planner::multi_vehicle::RuleEngine::
             FutureA1Commitment;
         const double tie_window = std::max(0.02, cfg_.prediction_step);
-        const A1RolloutPrediction* best = nullptr;
+        const A1ArrivalPrediction* best = nullptr;
 
         for (const auto& item : summary.candidates) {
-            const A1RolloutPrediction& candidate = item.second;
-            if (candidate.arrival_time < 0.0 ||
-                candidate.to_b_time < candidate.arrival_time) {
-                continue;
-            }
+            const A1ArrivalPrediction& candidate = item.second;
+            if (candidate.arrival_time < 0.0) continue;
             if (best == nullptr) {
                 best = &candidate;
                 continue;
@@ -706,6 +713,42 @@ private:
         return commitment;
     }
 
+    forklift_planner::multi_vehicle::RuleEngine::FutureA1Commitment
+    retainFutureA1Owner() const {
+        using Commitment = forklift_planner::multi_vehicle::RuleEngine::
+            FutureA1Commitment;
+        if (!future_a1_commitment_.valid()) return Commitment{};
+
+        const VehicleAgent* owner =
+            agentById_c(future_a1_commitment_.owner_id);
+        if (owner == nullptr ||
+            owner->path_gen != future_a1_commitment_.owner_path_gen ||
+            !owner->pending_dropoff_valid ||
+            owner->pending_dropoff_track.empty()) {
+            return Commitment{};
+        }
+
+        Commitment retained = future_a1_commitment_;
+        if (owner->active() &&
+            owner->mission_phase == MissionPhase::TO_A1 &&
+            owner->leg_target == LegTargetKind::A1 &&
+            !owner->track.empty()) {
+            const A1ArrivalSummary owner_prediction = predictA1Arrivals();
+            const auto it = owner_prediction.candidates.find(owner->id);
+            if (it == owner_prediction.candidates.end()) return Commitment{};
+            retained.predicted_a1_arrival_time = it->second.arrival_time;
+            retained.predicted_to_b_time = it->second.to_b_time;
+            return retained;
+        }
+        if (owner->mode != VehicleMode::DWELL ||
+            owner->mission_phase != MissionPhase::PICKUP_DWELL) {
+            return Commitment{};
+        }
+        retained.predicted_a1_arrival_time = 0.0;
+        retained.predicted_to_b_time = std::max(0.0, owner->dwell_remaining);
+        return retained;
+    }
+
     void buildSimulationHorizonPlan(
         std::vector<sandbox_msgs::Trajectory>& trajs,
         std::vector<bool>& hold) {
@@ -714,27 +757,19 @@ private:
         // behaviorally identical.
         prepareA1DropoffPreviewsForHorizon();
 
-        std::vector<SimPlanFrame> preview_frames;
-        std::vector<sandbox_msgs::Trajectory> preview_trajs;
-        std::vector<bool> preview_hold;
-        A1RolloutSummary preview_summary;
-        rule_engine_->clearFutureA1Commitment();
-        rollWorldModel(rb_horizon_, preview_trajs, preview_hold, &preview_frames,
-                       /*first_step_task_state_is_current=*/true,
-                       &preview_summary);
+        auto commitment = retainFutureA1Owner();
+        if (!commitment.valid()) {
+            commitment = selectFutureA1Owner(predictA1Arrivals());
+        }
 
-        const auto commitment = selectFutureA1Owner(preview_summary);
-        std::vector<SimPlanFrame> frames;
+        rule_engine_->clearFutureA1Commitment();
         if (commitment.valid()) {
             rule_engine_->setFutureA1Commitment(commitment);
-            rollWorldModel(rb_horizon_, trajs, hold, &frames,
-                           /*first_step_task_state_is_current=*/true);
-            rule_engine_->clearFutureA1Commitment();
-        } else {
-            trajs = std::move(preview_trajs);
-            hold = std::move(preview_hold);
-            frames = std::move(preview_frames);
         }
+        std::vector<SimPlanFrame> frames;
+        rollWorldModel(rb_horizon_, trajs, hold, &frames,
+                       /*first_step_task_state_is_current=*/true);
+        rule_engine_->clearFutureA1Commitment();
         future_a1_commitment_ = commitment;
         sim_plan_frames_ = std::move(frames);
         sim_plan_cursor_ = 0;
