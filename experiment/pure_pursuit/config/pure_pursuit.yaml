@@ -25,4 +25,3 @@ v_max : 0.26
 
 # Debug CSV logs for tuning PP gains.
 debug_log_enable : fasle
-debug_log_dir : /tmp/forklift_pp_logs

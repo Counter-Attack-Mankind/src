@@ -1,4 +1,5 @@
 #include <ros/ros.h>
+#include <ros/package.h>
 #include <tf/tf.h>
 #include <std_msgs/Empty.h>
 #include <std_msgs/Int32.h>
@@ -258,6 +259,9 @@ public:
              final_stable_cycles_required_, terminal_lookahead_extension_,
              terminal_slowdown_distance_, terminal_max_speed_);
 
+    const std::string planner_package = ros::package::getPath("forklift_planner");
+    debug_log_dir_ = planner_package.empty()
+        ? "forklift_planner/logs" : planner_package + "/logs";
     debug_log_enable_ = node_handle_.param("debug_log_enable", debug_log_enable_);
     node_handle_.param<std::string>("debug_log_dir", debug_log_dir_, debug_log_dir_);
     if(debug_log_enable_) {
@@ -307,7 +311,7 @@ private:
   int final_stable_cycles_ = 0;
   int car_index_ = 0, lookahead_index_ = 0;
   bool debug_log_enable_ = true;
-  std::string debug_log_dir_ = "/tmp/forklift_pp_logs";
+  std::string debug_log_dir_;
   int debug_log_seq_ = 0;
   std::ofstream open_loop_log_, closed_loop_log_;
 

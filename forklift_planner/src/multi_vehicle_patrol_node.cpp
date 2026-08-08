@@ -1,4 +1,5 @@
 #include <ros/ros.h>
+#include <ros/package.h>
 
 #include <algorithm>
 #include <array>
@@ -7,6 +8,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <fstream>
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <deque>
@@ -60,8 +62,18 @@ public:
             param_nh);
         nh_.param("target_only", target_only_, -1);
         nh_.param("one_shot", one_shot_, one_shot_);
+        const std::string planner_package =
+            ros::package::getPath("forklift_planner");
+        const std::string default_log_dir = planner_package.empty()
+            ? "forklift_planner/logs" : planner_package + "/logs";
+        nh_.param<std::string>("debug_log_dir", debug_log_dir_,
+                               default_log_dir);
         nh_.param<std::string>("coord_log_file", coord_log_file_,
-                               "logs/multi_vehicle_coordination.log");
+                               debug_log_dir_ +
+                                   "/multi_vehicle_coordination.log");
+        onset_log_file_ = debug_log_dir_ + "/forklift_onset.log";
+        realbridge_positions_file_ =
+            debug_log_dir_ + "/realbridge_positions.txt";
         initCoordLog();
         rb_horizon_ = cfg_.rolling_horizon;
         rb_horizon_refresh_period_ = cfg_.rolling_refresh_period;
@@ -193,6 +205,23 @@ private:
     };
 
     void initCoordLog() {
+        std::error_code error;
+        std::filesystem::create_directories(debug_log_dir_, error);
+        if (error) {
+            ROS_WARN("[multi_patrol] failed to create debug log directory %s: %s",
+                     debug_log_dir_.c_str(), error.message().c_str());
+            return;
+        }
+        const std::filesystem::path log_path(coord_log_file_);
+        if (log_path.has_parent_path()) {
+            std::filesystem::create_directories(log_path.parent_path(), error);
+        }
+        if (error) {
+            ROS_WARN("[multi_patrol] failed to create log directory %s: %s",
+                     log_path.parent_path().string().c_str(),
+                     error.message().c_str());
+            return;
+        }
         coord_log_.open(coord_log_file_, std::ios::out | std::ios::trunc);
         if (!coord_log_) {
             ROS_WARN("[multi_patrol] failed to open coordination log: %s",
@@ -253,11 +282,12 @@ private:
 
     std::string readableSimTime(double seconds) const {
         const double nonnegative = std::max(0.0, seconds);
-        const int minutes = static_cast<int>(nonnegative / 60.0);
-        const double remainder = nonnegative - 60.0 * minutes;
+        const long long tenths =
+            static_cast<long long>(std::llround(nonnegative * 10.0));
+        const long long minutes = tenths / 600;
+        const double remainder = static_cast<double>(tenths % 600) / 10.0;
         char text[80];
-        std::snprintf(text, sizeof(text), "%.1f(%dmin %.1fs)",
-                      nonnegative, minutes, remainder);
+        std::snprintf(text, sizeof(text), "%lldmin%.1fs", minutes, remainder);
         return text;
     }
 
@@ -825,15 +855,17 @@ private:
             previous.valid() && current.valid() &&
             previous.owner_id == current.owner_id &&
             previous.owner_path_gen == current.owner_path_gen;
-        if (same_owner || (!previous.valid() && !current.valid())) return;
+        if (!previous.valid() && !current.valid()) return;
 
         std::string event;
-        if (!previous.valid()) {
-            event = "create_owner";
+        if (same_owner) {
+            event = "HOLD";
+        } else if (!previous.valid()) {
+            event = "CREATE";
         } else if (!current.valid()) {
-            event = "release_owner";
+            event = "RELEASE";
         } else {
-            event = "change_owner";
+            event = "CHANGE";
         }
 
         char line[512];
@@ -841,13 +873,14 @@ private:
             const std::string old_owner = previous.valid()
                 ? "V" + std::to_string(previous.owner_id)
                 : "none";
-            const std::string change_reason = previous.valid()
-                ? futureA1ReleaseReason(previous)
-                : "initial_selection";
+            const std::string change_reason = same_owner
+                ? "retained"
+                : (previous.valid() ? futureA1ReleaseReason(previous)
+                                    : "initial_selection");
             std::snprintf(
                 line, sizeof(line),
-                "[FUTURE_A1] time=%s event=%s old_owner=%s owner=V%d "
-                "arrival_time=%.2f to_b_time=%.2f path_gen=%d "
+                "[FUTURE_A1] time=%s event=%s old=%s owner=V%d "
+                "arrival=%.2fs to_b=%.2fs path_gen=%d "
                 "change_reason=%s",
                 readableSimTime(sim_time_).c_str(), event.c_str(),
                 old_owner.c_str(),
@@ -858,7 +891,7 @@ private:
             const std::string reason = futureA1ReleaseReason(previous);
             std::snprintf(
                 line, sizeof(line),
-                "[FUTURE_A1] time=%s event=release_owner owner=V%d "
+                "[FUTURE_A1] time=%s event=RELEASE owner=V%d "
                 "path_gen=%d release_reason=%s",
                 readableSimTime(sim_time_).c_str(), previous.owner_id,
                 previous.owner_path_gen, reason.c_str());
@@ -2233,7 +2266,7 @@ private:
             "/forklift_planner/markers", 10);   // 推演轨迹可视化(同topic不同ns,RViz直接显示)
         // 方案一:打印每辆车应摆放的真实坐标(track 起点)。
         ROS_WARN("==== 实车摆位(请把每辆车按编号摆到下列位置, 单位 m, yaw 弧度)====");
-        std::ofstream ofs("/tmp/realbridge_positions.txt");
+        std::ofstream ofs(realbridge_positions_file_);
         ofs << "# 实车摆位(按编号)。id slot x y yaw,单位 m/rad。\n";
         for (const VehicleAgent& v : agents_) {
             if (v.track.empty()) { ROS_WARN("  车 %d: (无路径)", v.id); continue; }
@@ -2595,7 +2628,10 @@ private:
     std::vector<VehicleAgent> agents_;
     std::vector<bool> visited_slots_;
     int target_only_ = -1;  // realbridge debug: -1 = all vehicles, otherwise control only this id
+    std::string debug_log_dir_;
     std::string coord_log_file_;
+    std::string onset_log_file_;
+    std::string realbridge_positions_file_;
     std::ofstream coord_log_;
     std::string coord_log_source_ = "REAL";
     uint64_t coord_log_plan_id_ = 0;
@@ -2824,20 +2860,20 @@ public:
         ROS_ERROR("[CLUSTER-DUMP] ===== 簇 dump 结束 =====");
     }
 
-    // 持久 onset 文件:把关键现场同时写到 /tmp/forklift_onset.log(永不随 rosout 滚掉,我随时能读)。
+    // 持久 onset 文件:把关键现场同时写到 forklift_planner/logs。
     // 长测排错专用——只在出问题那一刻写,故文件小、不刷屏。
     void onsetLog(const std::string& s) {
         const std::string console_line = contextualLog(
             s, "REAL", coord_log_plan_id_, coord_log_frame_id_, -1);
         ROS_ERROR("%s", console_line.c_str());
         coordLog(s);
-        std::ofstream f("/tmp/forklift_onset.log", std::ios::app);
+        std::ofstream f(onset_log_file_, std::ios::app);
         if (f) f << s << "\n";
     }
     // 把碰撞/楔死前的全队历史(含 gen=path_gen:刚被 recovery 重规划过则 gen 跳变=churn 撞)
     // 写进持久文件,供事后根因。
     void onsetDumpHist(const std::string& header, const std::deque<std::string>& hist) {
-        std::ofstream f("/tmp/forklift_onset.log", std::ios::app);
+        std::ofstream f(onset_log_file_, std::ios::app);
         if (!f) return;
         f << "\n========== " << header << " ==========\n";
         coordLog("========== " + header + " ==========");
@@ -2884,7 +2920,7 @@ public:
     // dump 全队历史+碰撞对几何,并对其后 kPost 拍逐拍详打;结尾 dump 永久楔死现场。
     bool runBatch(unsigned long long ticks) {
         const double dt = 1.0 / pp_.update_rate;
-        std::ofstream("/tmp/forklift_onset.log", std::ios::trunc);  // 每次运行清空持久现场文件
+        std::ofstream(onset_log_file_, std::ios::trunc);
         const unsigned long long progress = ticks / 10 ? ticks / 10 : 1;
         constexpr size_t kHist = 80;    // 碰撞前回看的拍数
         constexpr unsigned long long kPost = 150;  // 碰撞后逐拍详打的拍数

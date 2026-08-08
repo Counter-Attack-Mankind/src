@@ -71,7 +71,7 @@ MarkerPublisher::MarkerPublisher(ros::NodeHandle& nh, const MapParam& mp,
         "/forklift_planner/markers", 10);
 }
 
-void MarkerPublisher::addA1PickupDefinitionMarkers(
+void MarkerPublisher::addA1DiagnosticMarkers(
     visualization_msgs::MarkerArray& arr) const {
     if (!cfg_.use_a1_cycle) return;
     const ros::Time now = ros::Time::now();
@@ -82,7 +82,7 @@ void MarkerPublisher::addA1PickupDefinitionMarkers(
     visualization_msgs::Marker pickup;
     pickup.header.frame_id = pp_.frame_id;
     pickup.header.stamp = now;
-    pickup.ns = "a1_pickup_definition";
+    pickup.ns = "a1_diagnostic_region";
     pickup.id = 0;
     pickup.type = visualization_msgs::Marker::CUBE;
     pickup.action = visualization_msgs::Marker::ADD;
@@ -99,7 +99,7 @@ void MarkerPublisher::addA1PickupDefinitionMarkers(
 
     visualization_msgs::Marker direction;
     direction.header = pickup.header;
-    direction.ns = "a1_pickup_definition";
+    direction.ns = "a1_diagnostic_region";
     direction.id = 1;
     direction.type = visualization_msgs::Marker::ARROW;
     direction.action = visualization_msgs::Marker::ADD;
@@ -116,7 +116,7 @@ void MarkerPublisher::addA1PickupDefinitionMarkers(
 
     visualization_msgs::Marker pre_dock;
     pre_dock.header = pickup.header;
-    pre_dock.ns = "a1_pickup_definition";
+    pre_dock.ns = "a1_diagnostic_region";
     pre_dock.id = 2;
     pre_dock.type = visualization_msgs::Marker::SPHERE;
     pre_dock.action = visualization_msgs::Marker::ADD;
@@ -132,7 +132,7 @@ void MarkerPublisher::addA1PickupDefinitionMarkers(
 
     visualization_msgs::Marker label;
     label.header = pickup.header;
-    label.ns = "a1_pickup_definition";
+    label.ns = "a1_diagnostic_region";
     label.id = 3;
     label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
     label.action = visualization_msgs::Marker::ADD;
@@ -142,7 +142,7 @@ void MarkerPublisher::addA1PickupDefinitionMarkers(
     label.pose.orientation.w = 1.0;
     label.scale.z = 0.075;
     label.color = rgba(0.20f, 1.00f, 0.30f, 1.0f);
-    label.text = "A1 PICKUP (5s)";
+    label.text = "A1 diagnostic region\npickup footprint + pre-dock";
     arr.markers.push_back(label);
 }
 
@@ -312,7 +312,7 @@ void MarkerPublisher::addConflictMarkers(
     const std::vector<ConflictMarker>& conflicts) const {
     const char* same_ns = "conflict_same_direction";
     const char* mutual_ns = "conflict_crossing_or_opposing";
-    const char* actual_ns = "conflict_actual_overlap_center";
+    const char* actual_ns = "conflict_timed_obb_overlap";
     const char* conflict_label_ns = "conflict_explanation";
     const char* following_relation_ns = "following_relation";
     const char* following_label_ns = "following_explanation";
@@ -356,6 +356,12 @@ void MarkerPublisher::addConflictMarkers(
             c.kind == ConflictMarkerKind::SAME_DIRECTION;
         const ros::Time now = ros::Time::now();
         const int marker_id = same_direction ? same_id++ : mutual_id++;
+        if (same_direction) {
+            deleteMarker(same_ns, marker_id);
+        } else if (c.timed_overlaps.empty()) {
+            deleteMarker(mutual_ns, marker_id);
+            deleteMarker(actual_ns, marker_id);
+        }
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
         m.header.stamp = now;
@@ -366,14 +372,14 @@ void MarkerPublisher::addConflictMarkers(
         m.pose.position.y = c.y;
         m.pose.position.z = 0.018;
         m.pose.orientation.w = 1.0;
-        if (same_direction) {
-            // An outline, not a filled collision patch: this is only the
-            // spatial range used to explain the following relationship.
+        if (!same_direction && !c.timed_overlaps.empty()) {
+            // Orange is only the axis-aligned bounding outline of the sampled
+            // time-synchronised OBB intersections rendered below.
             m.type = visualization_msgs::Marker::LINE_STRIP;
             m.pose.position.x = 0.0;
             m.pose.position.y = 0.0;
             m.scale.x = 0.012;
-            m.color = rgba(0.20f, 0.82f, 1.00f, 0.85f);
+            m.color = rgba(1.00f, 0.62f, 0.18f, 0.95f);
             const double x0 = c.x - 0.5 * c.scale_x;
             const double x1 = c.x + 0.5 * c.scale_x;
             const double y0 = c.y - 0.5 * c.scale_y;
@@ -383,16 +389,8 @@ void MarkerPublisher::addConflictMarkers(
             m.points.push_back(pt3(x1, y1, 0.035));
             m.points.push_back(pt3(x0, y1, 0.035));
             m.points.push_back(pt3(x0, y0, 0.035));
-        } else {
-            // Enlarged AABB retained as a search/explanation range. It is not
-            // the exact OBB overlap footprint.
-            m.type = visualization_msgs::Marker::CUBE;
-            m.scale.x = c.scale_x;
-            m.scale.y = c.scale_y;
-            m.scale.z = 0.012;
-            m.color = rgba(1.00f, 0.62f, 0.34f, 0.20f);
+            arr.markers.push_back(m);
         }
-        arr.markers.push_back(m);
 
         if (same_direction) {
             visualization_msgs::Marker relation;
@@ -428,7 +426,7 @@ void MarkerPublisher::addConflictMarkers(
             text << std::fixed << std::setprecision(2)
                  << "FOLLOW V" << c.follower_id << " -> V" << c.leader_id
                  << " gap=" << c.following_gap << "m"
-                 << "\nrange outline (not collision)";
+                 << " action=" << actionName(c.following_action);
             label.text = text.str();
             arr.markers.push_back(label);
         } else {
@@ -436,17 +434,26 @@ void MarkerPublisher::addConflictMarkers(
             actual.header = m.header;
             actual.ns = actual_ns;
             actual.id = marker_id;
-            actual.type = visualization_msgs::Marker::SPHERE;
+            actual.type = visualization_msgs::Marker::TRIANGLE_LIST;
             actual.action = visualization_msgs::Marker::ADD;
-            actual.pose.position.x = c.conflict_x;
-            actual.pose.position.y = c.conflict_y;
-            actual.pose.position.z = 0.060;
             actual.pose.orientation.w = 1.0;
-            actual.scale.x = 0.055;
-            actual.scale.y = 0.055;
-            actual.scale.z = 0.055;
-            actual.color = rgba(1.00f, 0.10f, 0.08f, 1.0f);
-            arr.markers.push_back(actual);
+            actual.scale.x = 1.0;
+            actual.scale.y = 1.0;
+            actual.scale.z = 1.0;
+            actual.color = rgba(1.00f, 0.10f, 0.08f, 0.34f);
+            for (const ConflictMarker::TimedOverlap& overlap :
+                 c.timed_overlaps) {
+                if (overlap.polygon.size() < 3) continue;
+                for (size_t p = 1; p + 1 < overlap.polygon.size(); ++p) {
+                    actual.points.push_back(pt3(overlap.polygon[0].x,
+                                                overlap.polygon[0].y, 0.042));
+                    actual.points.push_back(pt3(overlap.polygon[p].x,
+                                                overlap.polygon[p].y, 0.042));
+                    actual.points.push_back(pt3(overlap.polygon[p + 1].x,
+                                                overlap.polygon[p + 1].y, 0.042));
+                }
+            }
+            if (!actual.points.empty()) arr.markers.push_back(actual);
 
             visualization_msgs::Marker label;
             label.header = m.header;
@@ -454,18 +461,24 @@ void MarkerPublisher::addConflictMarkers(
             label.id = marker_id;
             label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
             label.action = visualization_msgs::Marker::ADD;
-            label.pose.position.x = c.conflict_x;
-            label.pose.position.y = c.conflict_y;
+            label.pose.position.x = c.x;
+            label.pose.position.y = c.y;
             label.pose.position.z = 0.16;
             label.pose.orientation.w = 1.0;
             label.scale.z = 0.070;
             label.color = rgba(1.00f, 0.80f, 0.25f, 1.0f);
             std::ostringstream text;
             text << std::fixed << std::setprecision(2)
-                 << "control OBB overlap center V" << c.vehicle_a
-                 << "-V" << c.vehicle_b
-                 << " type=CROSSING/OPPOSING t=" << c.t << "s"
-                 << "\norange = search AABB";
+                 << "V" << c.vehicle_a << "-V" << c.vehicle_b
+                 << " type=CROSSING/OPPOSING"
+                 << " holder="
+                 << (c.holder_id >= 0 ? "V" + std::to_string(c.holder_id)
+                                      : "none")
+                 << " waiter="
+                 << (c.waiter_id >= 0 ? "V" + std::to_string(c.waiter_id)
+                                      : "both")
+                 << " first_t=" << c.t << "s"
+                 << "\nred=timed OBB overlap; orange=overlap AABB";
             label.text = text.str();
             arr.markers.push_back(label);
         }
@@ -557,7 +570,7 @@ void MarkerPublisher::publish(
     ++publish_seq_;
     visualization_msgs::MarkerArray arr;
     addVisitedSlotMarkers(arr, visited_slots);
-    addA1PickupDefinitionMarkers(arr);
+    addA1DiagnosticMarkers(arr);
     addOriginAxes(arr);  // 地图原点+XY正方向(标定核对用)
     for (const VehicleAgent& v : vehicles) {
         addPathMarker(arr, v);

@@ -11,6 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   nav_msgs
   roscpp
+  roslib
   sandbox_msgs
 )
 
@@ -26,7 +27,7 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES pure_pursuit
-#  CATKIN_DEPENDS geometry_msgs nav_msgs roscpp
+#  CATKIN_DEPENDS geometry_msgs nav_msgs roscpp roslib
 #  DEPENDS system_lib
 )
 

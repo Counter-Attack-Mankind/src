@@ -6,6 +6,7 @@ add_compile_options(-O2)
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
+  roslib
   visualization_msgs
   geometry_msgs
   std_msgs
@@ -14,7 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 catkin_package(
-  CATKIN_DEPENDS roscpp visualization_msgs geometry_msgs std_msgs forklift_map sandbox_msgs
+  CATKIN_DEPENDS roscpp roslib visualization_msgs geometry_msgs std_msgs forklift_map sandbox_msgs
 )
 
 include_directories(

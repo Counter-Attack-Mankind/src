@@ -52,7 +52,7 @@
 
   <!-- ⑥ 协调:用 sim 同一个节点开 real_mode(一份代码两个模式),位置取 /object、
           发 /traj_i + /coord_speed_i,协调/DWELL/预测错峰与仿真逐字节一致。
-          启动后终端打印每辆车应摆放的真实坐标(也写 /tmp/realbridge_positions.txt)。 -->
+          启动后终端打印每辆车应摆放的真实坐标(也写 forklift_planner/logs/realbridge_positions.txt)。 -->
   <param name="/forklift_planner/multi_vehicle/real_mode" value="true"/>
   <param name="/forklift_planner/multi_vehicle/real_pose_timeout" value="$(arg pose_timeout)"/>
   <param name="/forklift_planner/multi_vehicle/real_arrive_tol" value="$(arg arrive_tol)"/>

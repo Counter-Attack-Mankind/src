@@ -44,7 +44,7 @@ private:
                                const std::vector<bool>& visited_slots) const;
     void addConflictMarkers(visualization_msgs::MarkerArray& arr,
                             const std::vector<ConflictMarker>& conflicts) const;
-    void addA1PickupDefinitionMarkers(
+    void addA1DiagnosticMarkers(
         visualization_msgs::MarkerArray& arr) const;
 
     ros::Publisher pub_;

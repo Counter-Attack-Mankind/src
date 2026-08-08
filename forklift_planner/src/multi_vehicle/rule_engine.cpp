@@ -1,6 +1,7 @@
 #include "forklift_planner/multi_vehicle/rule_engine.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -18,6 +19,13 @@ namespace multi_vehicle {
 RuleEngine::RuleEngine(const MapParam& mp, const MultiVehicleConfig& cfg)
     : mp_(mp), cfg_(cfg) {}
 
+bool RuleEngine::shouldLogA1Decision(const VehicleAgent& vehicle,
+                                     int blocker_id) {
+    return a1_decision_logs_.insert(std::make_tuple(
+        vehicle.id, blocker_id, static_cast<int>(vehicle.mission_phase),
+        static_cast<int>(vehicle.requested_action))).second;
+}
+
 std::string RuleEngine::debugLogPrefix() const {
     std::ostringstream out;
     out << "[SOURCE=" << debug_log_source_ << "]"
@@ -28,6 +36,77 @@ std::string RuleEngine::debugLogPrefix() const {
 }
 
 namespace {
+
+std::array<ConflictMarker::Point, 4> obbCorners(const OBB& body) {
+    const double c = std::cos(body.theta);
+    const double s = std::sin(body.theta);
+    const double fx = c * body.half_l;
+    const double fy = s * body.half_l;
+    const double lx = -s * body.half_w;
+    const double ly = c * body.half_w;
+    return {{{body.x + fx + lx, body.y + fy + ly},
+             {body.x - fx + lx, body.y - fy + ly},
+             {body.x - fx - lx, body.y - fy - ly},
+             {body.x + fx - lx, body.y + fy - ly}}};
+}
+
+std::vector<ConflictMarker::Point> intersectObbs(const OBB& a, const OBB& b) {
+    const auto a_corners = obbCorners(a);
+    const auto b_corners = obbCorners(b);
+    std::vector<ConflictMarker::Point> polygon(a_corners.begin(),
+                                               a_corners.end());
+    constexpr double kEps = 1e-9;
+    for (size_t edge = 0; edge < b_corners.size() && !polygon.empty(); ++edge) {
+        const ConflictMarker::Point p0 = b_corners[edge];
+        const ConflictMarker::Point p1 = b_corners[(edge + 1) % b_corners.size()];
+        const double ex = p1.x - p0.x;
+        const double ey = p1.y - p0.y;
+        auto signedSide = [&](const ConflictMarker::Point& p) {
+            return ex * (p.y - p0.y) - ey * (p.x - p0.x);
+        };
+        auto intersection = [&](const ConflictMarker::Point& from,
+                                const ConflictMarker::Point& to) {
+            const double from_side = signedSide(from);
+            const double to_side = signedSide(to);
+            const double denom = from_side - to_side;
+            const double ratio = std::abs(denom) <= kEps
+                ? 0.0 : from_side / denom;
+            return ConflictMarker::Point{
+                from.x + ratio * (to.x - from.x),
+                from.y + ratio * (to.y - from.y)};
+        };
+
+        std::vector<ConflictMarker::Point> clipped;
+        clipped.reserve(polygon.size() + 1);
+        ConflictMarker::Point previous = polygon.back();
+        bool previous_inside = signedSide(previous) >= -kEps;
+        for (const ConflictMarker::Point& current : polygon) {
+            const bool current_inside = signedSide(current) >= -kEps;
+            if (current_inside != previous_inside) {
+                clipped.push_back(intersection(previous, current));
+            }
+            if (current_inside) clipped.push_back(current);
+            previous = current;
+            previous_inside = current_inside;
+        }
+        polygon = std::move(clipped);
+    }
+    return polygon;
+}
+
+std::vector<ConflictMarker::TimedOverlap> decimateTimedOverlaps(
+    const std::vector<ConflictMarker::TimedOverlap>& input) {
+    constexpr size_t kMaxDisplayedSamples = 32;
+    if (input.size() <= kMaxDisplayedSamples) return input;
+    std::vector<ConflictMarker::TimedOverlap> output;
+    output.reserve(kMaxDisplayedSamples);
+    for (size_t i = 0; i < kMaxDisplayedSamples; ++i) {
+        const size_t index = i * (input.size() - 1) /
+                             (kMaxDisplayedSamples - 1);
+        output.push_back(input[index]);
+    }
+    return output;
+}
 
 struct OverlapSample {
     double s_self = 0.0;
@@ -55,9 +134,12 @@ void logConflictReservation(
     if (!sink) return;
     std::ostringstream line;
     line << std::fixed << std::setprecision(3)
-         << "[CONFLICT_RESERVATION] pair=V" << key.first
-         << "-V" << key.second << " op=" << op
-         << " owner=V" << reservation.owner_id
+         << "[CONFLICT_RESERVATION] component=PAIRWISE pair=V" << key.first
+         << "-V" << key.second << " event=" << op
+         << " holder=V" << reservation.owner_id
+         << " waiter=V"
+         << (reservation.owner_id == key.first ? key.second : key.first)
+         << " conflict_type=CROSSING/OPPOSING"
          << " t=" << reservation.first_conflict_t
          << " zone=(" << reservation.x << "," << reservation.y << ")";
     sink(line.str());
@@ -428,9 +510,11 @@ void RuleEngine::recordConflictZones(
     const VehicleAgent& self, const VehicleAgent& other,
     const std::vector<ConflictZone>& zones, ConflictMarkerKind kind,
     double first_conflict_t, int follower_id, int leader_id,
-    double following_gap) {
+    double following_gap, VehicleAction following_action,
+    int holder_id, int waiter_id,
+    const std::vector<ConflictMarker::TimedOverlap>& timed_overlaps) {
     constexpr double kDisplayStep = 0.025;
-    const double pad =
+    const double following_pad =
         std::max(0.03, 0.5 * mp_.vehicle_width +
                            0.5 * cfg_.conflict_margin);
 
@@ -460,25 +544,40 @@ void RuleEngine::recordConflictZones(
             y_max = std::max(y_max, p.y);
         };
 
-        includePathSpan(self, z.s_self_enter, z.s_self_exit);
-        includePathSpan(other, z.s_other_enter, z.s_other_exit);
+        if (!timed_overlaps.empty()) {
+            for (const ConflictMarker::TimedOverlap& overlap : timed_overlaps) {
+                for (const ConflictMarker::Point& p : overlap.polygon) {
+                    x_min = std::min(x_min, p.x);
+                    y_min = std::min(y_min, p.y);
+                    x_max = std::max(x_max, p.x);
+                    y_max = std::max(y_max, p.y);
+                }
+            }
+        } else if (kind == ConflictMarkerKind::SAME_DIRECTION) {
+            includePathSpan(self, z.s_self_enter, z.s_self_exit);
+            includePathSpan(other, z.s_other_enter, z.s_other_exit);
+        }
         if (!std::isfinite(x_min) || !std::isfinite(y_min) ||
             !std::isfinite(x_max) || !std::isfinite(y_max)) {
             continue;
         }
 
         ConflictMarker marker;
-        marker.conflict_x = z.x;
-        marker.conflict_y = z.y;
         marker.x = 0.5 * (x_min + x_max);
         marker.y = 0.5 * (y_min + y_max);
-        marker.scale_x = std::max(0.06, x_max - x_min + 2.0 * pad);
-        marker.scale_y = std::max(0.06, y_max - y_min + 2.0 * pad);
+        const double pad = kind == ConflictMarkerKind::SAME_DIRECTION
+            ? following_pad : 0.0;
+        marker.scale_x = std::max(0.01, x_max - x_min + 2.0 * pad);
+        marker.scale_y = std::max(0.01, y_max - y_min + 2.0 * pad);
         marker.vehicle_a = self.id;
         marker.vehicle_b = other.id;
         marker.follower_id = follower_id;
         marker.leader_id = leader_id;
+        marker.holder_id = holder_id;
+        marker.waiter_id = waiter_id;
         marker.following_gap = following_gap;
+        marker.following_action = following_action;
+        marker.timed_overlaps = timed_overlaps;
         if (follower_id >= 0 && leader_id >= 0) {
             const RoughWp follower_pose = self.track.poseAtS(self.path_s);
             const RoughWp leader_pose = other.track.poseAtS(other.path_s);
@@ -559,6 +658,7 @@ void RuleEngine::applyActionRequest(VehicleAgent& v, VehicleAction action,
 void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                                           double dt,
                                           double prediction_horizon) {
+    pairwise_managed_pairs_.clear();
     // Complete routes are used only as a geometric lookup table. Conflict
     // existence is decided on one shared finite time grid: compare the two
     // inflated complete-body OBBs predicted at the same time t in [0, T].
@@ -573,6 +673,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         size_t zone_index = 0;
         double first_t = 0.0;
         double last_t = 0.0;
+        std::vector<ConflictMarker::TimedOverlap> overlaps;
     };
 
     const double horizon =
@@ -789,16 +890,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             const std::pair<int, int> key{std::min(a.id, b.id),
                                           std::max(a.id, b.id)};
             const bool a_is_lo = a.id == key.first;
-            if (following_pairs_.count(key)) {
-                const auto old = conflict_reservations_.find(key);
-                if (old != conflict_reservations_.end()) {
-                    logConflictReservation(coord_log_sink_, key, "delete",
-                                           old->second);
-                    conflict_reservations_.erase(old);
-                }
-                continue;
-            }
-
             const std::vector<ConflictZone> zones = findConflictZones(a, b);
             if (zones.empty()) {
                 const auto old = conflict_reservations_.find(key);
@@ -847,6 +938,31 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     logConflictReservation(coord_log_sink_, key, "delete", r);
                     conflict_reservations_.erase(reservation_it);
                 } else {
+                    std::vector<ConflictMarker::TimedOverlap>
+                        reserved_overlaps;
+                    bool overlap_started = false;
+                    const size_t reserved_count = std::min(
+                        predictions[i].size(), predictions[j].size());
+                    for (size_t k = 0; k < reserved_count; ++k) {
+                        const bool hit = overlaps(predictions[i][k].body,
+                                                  predictions[j][k].body);
+                        if (!hit) {
+                            if (overlap_started) break;
+                            continue;
+                        }
+                        overlap_started = true;
+                        auto polygon = intersectObbs(predictions[i][k].body,
+                                                     predictions[j][k].body);
+                        if (polygon.size() >= 3) {
+                            reserved_overlaps.push_back(
+                                ConflictMarker::TimedOverlap{
+                                    predictions[i][k].t,
+                                    std::move(polygon)});
+                        }
+                    }
+                    reserved_overlaps =
+                        decimateTimedOverlaps(reserved_overlaps);
+                    pairwise_managed_pairs_.insert(key);
                     const bool owner_inside =
                         insideInterval(owner, owner_enter, owner_exit);
                     const bool waiter_inside =
@@ -859,22 +975,28 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         brakeBefore(owner, owner_enter, waiter.id);
                         if (owner.reason ==
                             "time_brake_V" + std::to_string(waiter.id)) {
-                            logA1Decision(coord_log_sink_, cfg_, owner, &waiter,
-                                          waiter.id);
+                            if (shouldLogA1Decision(owner, waiter.id)) {
+                                logA1Decision(coord_log_sink_, cfg_, owner,
+                                              &waiter, waiter.id);
+                            }
                         }
                     } else {
                         brakeBefore(waiter, waiter_enter, owner.id);
                         if (waiter.reason ==
                             "time_brake_V" + std::to_string(owner.id)) {
-                            logA1Decision(coord_log_sink_, cfg_, waiter, &owner,
-                                          owner.id);
+                            if (shouldLogA1Decision(waiter, owner.id)) {
+                                logA1Decision(coord_log_sink_, cfg_, waiter,
+                                              &owner, owner.id);
+                            }
                         }
                     }
                     const ConflictZone rz = reservationZone(r, a_is_lo);
                     recordConflictZones(
                         a, b, std::vector<ConflictZone>{rz},
                         ConflictMarkerKind::CROSSING_OR_OPPOSING,
-                        r.first_conflict_t);
+                        r.first_conflict_t, -1, -1, 0.0,
+                        VehicleAction::NOMINAL, r.owner_id, waiter.id,
+                        reserved_overlaps);
                     continue;
                 }
             }
@@ -915,8 +1037,16 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     }
                 }
                 event.last_t = predictions[i][k].t;
+                auto polygon = intersectObbs(predictions[i][k].body,
+                                             predictions[j][k].body);
+                if (polygon.size() >= 3) {
+                    event.overlaps.push_back(ConflictMarker::TimedOverlap{
+                        predictions[i][k].t, std::move(polygon)});
+                }
             }
             if (!event.valid) continue;
+
+            pairwise_managed_pairs_.insert(key);
 
             const ConflictZone& zone = zones[event.zone_index];
             const bool a_inside =
@@ -966,17 +1096,47 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 }
             }
 
+            const std::tuple<int, int, int> conflict_log_key{
+                key.first, key.second, holder};
+            if (coord_log_sink_ &&
+                pairwise_conflict_logs_.insert(conflict_log_key).second) {
+                std::ostringstream line;
+                line << std::fixed << std::setprecision(3)
+                     << "[PAIRWISE_CONFLICT] component=PAIRWISE pair=V"
+                     << key.first << "-V" << key.second
+                     << " holder="
+                     << (holder >= 0 ? "V" + std::to_string(holder) : "none")
+                     << " waiter=";
+                if (holder == a.id) {
+                    line << "V" << b.id;
+                } else if (holder == b.id) {
+                    line << "V" << a.id;
+                } else {
+                    line << "both";
+                }
+                line << " conflict_type=CROSSING/OPPOSING"
+                     << " first_t=" << event.first_t;
+                coord_log_sink_(line.str());
+            }
+
             recordConflictZones(
                 a, b, std::vector<ConflictZone>{zone},
-                ConflictMarkerKind::CROSSING_OR_OPPOSING, event.first_t);
+                ConflictMarkerKind::CROSSING_OR_OPPOSING, event.first_t,
+                -1, -1, 0.0, VehicleAction::NOMINAL, holder,
+                holder == a.id ? b.id : (holder == b.id ? a.id : -1),
+                decimateTimedOverlaps(event.overlaps));
             if (holder < 0) {
                 brakeBefore(a, zone.s_self_enter, b.id);
                 brakeBefore(b, zone.s_other_enter, a.id);
                 if (a.reason == "time_brake_V" + std::to_string(b.id)) {
-                    logA1Decision(coord_log_sink_, cfg_, a, &b, b.id);
+                    if (shouldLogA1Decision(a, b.id)) {
+                        logA1Decision(coord_log_sink_, cfg_, a, &b, b.id);
+                    }
                 }
                 if (b.reason == "time_brake_V" + std::to_string(a.id)) {
-                    logA1Decision(coord_log_sink_, cfg_, b, &a, a.id);
+                    if (shouldLogA1Decision(b, a.id)) {
+                        logA1Decision(coord_log_sink_, cfg_, b, &a, a.id);
+                    }
                 }
                 continue;
             }
@@ -998,12 +1158,16 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             if (holder == a.id) {
                 brakeBefore(b, zone.s_other_enter, a.id);
                 if (b.reason == "time_brake_V" + std::to_string(a.id)) {
-                    logA1Decision(coord_log_sink_, cfg_, b, &a, a.id);
+                    if (shouldLogA1Decision(b, a.id)) {
+                        logA1Decision(coord_log_sink_, cfg_, b, &a, a.id);
+                    }
                 }
             } else {
                 brakeBefore(a, zone.s_self_enter, b.id);
                 if (a.reason == "time_brake_V" + std::to_string(b.id)) {
-                    logA1Decision(coord_log_sink_, cfg_, a, &b, b.id);
+                    if (shouldLogA1Decision(a, b.id)) {
+                        logA1Decision(coord_log_sink_, cfg_, a, &b, b.id);
+                    }
                 }
             }
         }
@@ -1141,9 +1305,11 @@ void RuleEngine::enforceFutureA1Admission(
 }
 
 void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
-    // 本周期重新认定"真·同向同车道跟车对",供 resolvePairwiseConflicts 决定是否跳过。
-    // 这是跟车判据的唯一事实源 → 杜绝两层判据不一致的缝隙。
+    // 跟车只识别唯一的纵向 leader/follower 并产生低优先级建议。
+    // 它不再跳过 timed OBB、不删除 reservation、不参与 holder 选择。
     following_pairs_.clear();
+    following_suggestions_.clear();
+    std::set<std::pair<int, int>> ambiguous_following_pairs;
     auto motionHeading = [](const VehicleAgent& v) {
         constexpr double kPi = 3.14159265358979323846;
         double heading = v.track.poseAtS(v.path_s).theta;
@@ -1170,11 +1336,16 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
         for (const VehicleAgent& other : vehicles) {
             if (other.id == v.id || !other.active()) continue;
             const RoughWp pose_o = other.track.poseAtS(other.path_s);
-            // 同向跟车判定用「静态冲突块的对角方向 same_dir」而非当前瞬时朝向——后者在
-            // 交叉/汇入处会瞬时对齐,把真正交叉的两车误判成跟车;而 pairwise 据此(following_pairs_)
-            // 跳过 → 该对无任何交叉门控 → 让行方在 action_hold 回弹下蹭过停止线、撞上停着的车
-            // (实测 V1↔V5)。块 same_dir 是纯几何静态量,稳定不闪。要求两车确有共享冲突块且
-            // 每块都同向,才算同车道跟车;否则(交叉/对向/无重叠)一律交原子门门控。
+            const double heading_o = motionHeading(other);
+            const double current_dir_dot =
+                std::cos(heading_v) * std::cos(heading_o) +
+                std::sin(heading_v) * std::sin(heading_o);
+            // Static zone direction is not sufficient near curves/cusps.
+            // Require the current physical motion directions (REVERSE already
+            // converted by motionHeading) to agree as well.
+            if (current_dir_dot <= 0.70) continue;
+            // 静态冲突块方向仅作为附加几何条件；当前真实运动方向已在上方
+            // 独立校验，避免块中点方向与当前局部方向不一致。
             const std::vector<ConflictZone> fzones = findConflictZones(v, other);
             if (fzones.empty()) continue;
             bool all_same_dir = true;
@@ -1193,11 +1364,20 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
                                          dy * std::cos(heading_v));
             if (lat > mp_.vehicle_width) continue;
 
-            // 确认 v 真在同车道跟随 other(同向、other 在正前方、横向≤一个车宽)。登记此对
-            // 为跟车对——即使下面因间距大而暂不刹车,也要登记,使 pairwise 一致地跳过它
-            // (否则大间距跟车对会被 pairwise 当交叉、两车都 committed→双刹楔死)。
-            following_pairs_.insert({std::min(v.id, other.id),
-                                     std::max(v.id, other.id)});
+            // 确认 v 在同向局部车道上跟随 other。此集合只用于诊断，
+            // resolvePairwiseConflicts 仍会完整执行。
+            const std::pair<int, int> key{std::min(v.id, other.id),
+                                          std::max(v.id, other.id)};
+            if (ambiguous_following_pairs.count(key) != 0) continue;
+            if (following_pairs_.count(key) != 0) {
+                // Both directed scans claimed to be the follower. Cancel the
+                // relation and leave this pair to timed OBB arbitration.
+                following_pairs_.erase(key);
+                following_suggestions_.erase(key);
+                ambiguous_following_pairs.insert(key);
+                continue;
+            }
+            following_pairs_.insert(key);
 
             const double dist = std::hypot(dx, dy);
             const double gap = dist - mp_.vehicle_length;
@@ -1214,10 +1394,45 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
             }
             recordConflictZones(v, other, fzones,
                                 ConflictMarkerKind::SAME_DIRECTION, 0.0,
-                                v.id, other.id, gap);
-            applyActionRequest(v, follow_action,
-                               "following_V" + std::to_string(other.id),
-                               other.id);
+                                v.id, other.id, gap, follow_action);
+            following_suggestions_[key] = FollowingSuggestion{
+                v.id, other.id, follow_action, gap};
+        }
+    }
+}
+
+void RuleEngine::applyFollowingSuggestions(
+    std::vector<VehicleAgent>& vehicles) {
+    for (const auto& previous : previous_following_followers_) {
+        if (pairwise_managed_pairs_.count(previous.first) == 0) continue;
+        for (VehicleAgent& v : vehicles) {
+            if (v.id != previous.second || !v.active()) continue;
+            if (v.requested_action == VehicleAction::NOMINAL) {
+                // Pairwise selected this former follower as the unblocked
+                // side. Do not let the old low-priority following action_hold
+                // negate that holder decision. Motion still ramps through the
+                // normal acceleration limit in the vehicle advance step.
+                v.action = VehicleAction::NOMINAL;
+                v.action_hold_remaining = 0.0;
+            }
+            break;
+        }
+    }
+
+    for (const auto& item : following_suggestions_) {
+        if (pairwise_managed_pairs_.count(item.first) != 0) continue;
+        const FollowingSuggestion& suggestion = item.second;
+        for (VehicleAgent& v : vehicles) {
+            if (v.id != suggestion.follower_id || !v.active()) continue;
+            // Any earlier arbitration/safety request wins, regardless of
+            // action severity. The normal merge is restrictive-only and
+            // cannot otherwise express a low-priority STOP suggestion.
+            if (v.requested_action != VehicleAction::NOMINAL) break;
+            applyActionRequest(
+                v, suggestion.action,
+                "following_V" + std::to_string(suggestion.leader_id),
+                suggestion.leader_id);
+            break;
         }
     }
 }
@@ -1279,7 +1494,9 @@ void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles) {
                         break;
                     }
                 }
-                logA1Decision(coord_log_sink_, cfg_, v, blocker, block_id);
+                if (shouldLogA1Decision(v, block_id)) {
+                    logA1Decision(coord_log_sink_, cfg_, v, blocker, block_id);
+                }
             }
         }
     }
@@ -1708,6 +1925,17 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
     resolveDeadlock(vehicles, dt);   // Phase4:用上周期等待边检测环、选破环车(reset 前)
     refreshResourceSpans(vehicles);  // Phase 2:刷新每车路径的资源占用缓存
 
+    previous_following_followers_.clear();
+    for (const VehicleAgent& v : vehicles) {
+        if (v.blocker_id < 0) continue;
+        const std::string expected =
+            "following_V" + std::to_string(v.blocker_id);
+        if (v.reason != expected) continue;
+        const std::pair<int, int> key{std::min(v.id, v.blocker_id),
+                                      std::max(v.id, v.blocker_id)};
+        previous_following_followers_[key] = v.id;
+    }
+
     for (VehicleAgent& v : vehicles) {
         v.blocker_id = -1;
         if (v.mode != VehicleMode::ACTIVE) {
@@ -1733,6 +1961,7 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
     enforceFutureA1Admission(vehicles, dt);
     resolveTargetSlotOccupancy(vehicles);  // slot-mouth queueing (spec 6/7)
     enforceForwardClearance(vehicles);     // 普适前向净空兜底:堵分类接缝→防十字楔死
+    applyFollowingSuggestions(vehicles);   // lowest-priority longitudinal hint
     applyRequestedActions(vehicles, dt);
     if (cfg_.enable_cycle_break) breakDeadlockCycles(vehicles);  // spec 16
 

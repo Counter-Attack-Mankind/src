@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -23,10 +24,18 @@ enum class ConflictMarkerKind {
 };
 
 struct ConflictMarker {
-    // Center produced from OBB-overlap samples. x/y below are the center of
-    // the deliberately enlarged display/search AABB.
-    double conflict_x = 0.0;
-    double conflict_y = 0.0;
+    struct Point {
+        double x = 0.0;
+        double y = 0.0;
+    };
+    struct TimedOverlap {
+        double t = 0.0;
+        std::vector<Point> polygon;
+    };
+
+    // x/y and scale_x/scale_y are only the AABB around the sampled,
+    // time-synchronised OBB intersection polygons. This geometry is
+    // diagnostic output and never participates in arbitration.
     double x = 0.0;
     double y = 0.0;
     double t = 0.0;
@@ -36,11 +45,15 @@ struct ConflictMarker {
     int vehicle_b = -1;
     int follower_id = -1;
     int leader_id = -1;
+    int holder_id = -1;
+    int waiter_id = -1;
     double following_gap = 0.0;
+    VehicleAction following_action = VehicleAction::NOMINAL;
     double follower_x = 0.0;
     double follower_y = 0.0;
     double leader_x = 0.0;
     double leader_y = 0.0;
+    std::vector<TimedOverlap> timed_overlaps;
     ConflictMarkerKind kind = ConflictMarkerKind::CROSSING_OR_OPPOSING;
 };
 
@@ -82,6 +95,10 @@ public:
     // Diagnostic metadata only. It never participates in a rule decision.
     void setDebugLogContext(const std::string& source, uint64_t plan_id,
                             int frame_id, int rollout_step) {
+        if (source != debug_log_source_ || plan_id != debug_log_plan_id_) {
+            pairwise_conflict_logs_.clear();
+            a1_decision_logs_.clear();
+        }
         debug_log_source_ = source;
         debug_log_plan_id_ = plan_id;
         debug_log_frame_id_ = frame_id;
@@ -149,6 +166,17 @@ private:
         bool same_dir = false;
     };
 
+    // One-cycle longitudinal hint. It is intentionally separate from
+    // VehicleAgent::requested_action because following is not an arbitration
+    // authority: pairwise reservations/priority and all later safety rules
+    // must be able to decide first.
+    struct FollowingSuggestion {
+        int follower_id = -1;
+        int leader_id = -1;
+        VehicleAction action = VehicleAction::NOMINAL;
+        double gap = 0.0;
+    };
+
     // 当前位置下、属于 (self,other) 的有效冲突块:取缓存的静态 C_ij(见
     // conflictBlocksCanonical),按 self/other 朝向取用,并裁掉任一方已完全清出的块、
     // 把入口夹到各自车尾起点——与历史"逐拍沿剩余路径扫描"的产物在同一离散精度下等价。
@@ -169,7 +197,13 @@ private:
                              double first_conflict_t = 0.0,
                              int follower_id = -1,
                              int leader_id = -1,
-                             double following_gap = 0.0);
+                             double following_gap = 0.0,
+                             VehicleAction following_action =
+                                 VehicleAction::NOMINAL,
+                             int holder_id = -1,
+                             int waiter_id = -1,
+                             const std::vector<ConflictMarker::TimedOverlap>&
+                                 timed_overlaps = {});
     double timeToReachS(const VehicleAgent& v, VehicleAction action,
                         double target_s) const;
     double predictedTravelDistance(const VehicleAgent& v,
@@ -182,6 +216,7 @@ private:
     void enforceFutureA1Admission(std::vector<VehicleAgent>& vehicles,
                                   double dt);
     void resolveFollowing(std::vector<VehicleAgent>& vehicles);
+    void applyFollowingSuggestions(std::vector<VehicleAgent>& vehicles);
     // 普适前向净空护栏:任何车若沿自身固定路径在自己刹车距离内会撞上另一辆车的当前
     // 车身,提前 STOP(留余量、干净对停)。堵死 following/crossing 分类接缝处「两套都
     // 没刹→NOMINAL 直撞停着的车→十字楔死」的漏洞。破环车豁免。比硬护栏早刹留余量。
@@ -202,16 +237,26 @@ private:
     const MapParam& mp_;
     const MultiVehicleConfig& cfg_;
     std::vector<ConflictMarker> conflicts_;
+    // Diagnostic de-duplication only: one pair/holder event per plan context.
+    std::set<std::tuple<int, int, int>> pairwise_conflict_logs_;
+    std::set<std::tuple<int, int, int, int>> a1_decision_logs_;
+    bool shouldLogA1Decision(const VehicleAgent& vehicle, int blocker_id);
 
     // 未来时域内最早可见的局部冲突事件预约。它只锁定本次事件对应的弧长区间，
     // 不再把同一车对完整路径上的所有几何交叉合并为一个大资源。
     std::map<std::pair<int, int>, ConflictReservation> conflict_reservations_;
 
-    // 真·同向同车道跟车对(由 resolveFollowing 每周期重算认定;key={min,max} id)。
-    // 唯一事实源:resolvePairwiseConflicts 仅当某对在此集合内才跳过(交 resolveFollowing
-    // 管纵向跟距),否则一律由原子门门控。保证「被跳过 ⟺ 被 following 接管」,杜绝两层
-    // 判据不一致留下的缝隙(V1↔V4 / V0↔V7 / V1↔V5 头对头/汇入对撞的根因)。
+    // 每周期重算的唯一有向跟车对，仅作诊断/纵向建议依据。
+    // pairwise timed OBB、reservation 和 holder 仲裁不再使用它作跳过条件。
     std::set<std::pair<int, int>> following_pairs_;
+    std::map<std::pair<int, int>, FollowingSuggestion> following_suggestions_;
+    // Directed following actions applied in the preceding decision, captured
+    // before VehicleAgent::reason is reset. Used only to release a stale
+    // following action_hold when pairwise now grants that follower passage.
+    std::map<std::pair<int, int>, int> previous_following_followers_;
+    // Pairs for which reservation/OBB arbitration supplied the result in this
+    // decision. A following hint must not be applied to those pairs.
+    std::set<std::pair<int, int>> pairwise_managed_pairs_;
 
     // 静态冲突集 C_ij 缓存(协调图第一步)。key={lo.id,hi.id};块以 self=lo 朝向存储。
     // gen_lo/gen_hi 记录算定时两车的 path_gen;任一方 path_gen 变(换了固定路径)即失效
