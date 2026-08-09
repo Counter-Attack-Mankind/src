@@ -80,6 +80,13 @@ add_executable(path_debug
 add_dependencies(path_debug ${catkin_EXPORTED_TARGETS})
 target_link_libraries(path_debug ${catkin_LIBRARIES})
 
+if(CATKIN_ENABLE_TESTING)
+  add_executable(future_a1_policy_test
+    test/future_a1_policy_test.cpp
+  )
+  add_test(NAME future_a1_policy_test COMMAND future_a1_policy_test)
+endif()
+
 install(TARGETS planner_node two_vehicle_sim_node multi_vehicle_patrol_node
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

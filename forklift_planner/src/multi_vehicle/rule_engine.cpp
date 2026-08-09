@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "forklift_planner/multi_vehicle/footprint.h"
+#include "forklift_planner/multi_vehicle/future_a1_policy.h"
 
 namespace forklift_planner {
 namespace multi_vehicle {
@@ -877,7 +878,33 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             }
             eligible = true;
         }
-        return eligible ? owner->id : -1;
+        if (!eligible) return -1;
+
+        // The other vehicle may be outside the prepared exit conflict but
+        // already physically committed to a conflict on the owner's current
+        // TO_A1 leg. Actual occupancy must remain stronger than the future
+        // commitment in that case as well.
+        const bool owner_is_lo = owner->id < other->id;
+        const VehicleAgent& ordinary_lo = owner_is_lo ? *owner : *other;
+        const VehicleAgent& ordinary_hi = owner_is_lo ? *other : *owner;
+        const auto& ordinary_blocks =
+            conflictBlocksCanonical(ordinary_lo, ordinary_hi);
+        for (const ConflictZone& canonical : ordinary_blocks) {
+            const double owner_exit = owner_is_lo
+                ? canonical.s_self_exit : canonical.s_other_exit;
+            const double other_enter = owner_is_lo
+                ? canonical.s_other_enter : canonical.s_self_enter;
+            const double other_exit = owner_is_lo
+                ? canonical.s_other_exit : canonical.s_self_exit;
+            if (owner->path_s > owner_exit + 1e-9 ||
+                other->path_s > other_exit + 1e-9) {
+                continue;
+            }
+            if (other->path_s > other_enter + 1e-9) {
+                return -1;
+            }
+        }
+        return owner->id;
     };
 
     for (size_t i = 0; i < vehicles.size(); ++i) {
@@ -1226,10 +1253,9 @@ void RuleEngine::enforceFutureA1Admission(
             cache.gen_hi = hi.path_gen;
         }
 
-        bool already_inside = false;
-        bool have_entry = false;
-        ConflictZone selected;
-        double earliest_other_enter = std::numeric_limits<double>::infinity();
+        bool future_already_inside = false;
+        std::optional<double> future_exit_enter_s;
+        ConflictZone future_selected;
         for (const ConflictZone& canonical : cache.blocks) {
             ConflictZone zone = canonical;
             if (!preview_is_lo) {
@@ -1240,16 +1266,81 @@ void RuleEngine::enforceFutureA1Admission(
             if (other.path_s > zone.s_other_exit + 1e-9) continue;
             if (other.path_s > zone.s_other_enter + 1e-9 &&
                 other.path_s <= zone.s_other_exit + 1e-9) {
-                already_inside = true;
-                selected = zone;
+                future_already_inside = true;
+                future_exit_enter_s = zone.s_other_enter;
+                future_selected = zone;
                 break;
             }
-            if (zone.s_other_enter < earliest_other_enter) {
-                earliest_other_enter = zone.s_other_enter;
-                selected = zone;
-                have_entry = true;
+            if (!future_exit_enter_s ||
+                zone.s_other_enter < *future_exit_enter_s) {
+                future_exit_enter_s = zone.s_other_enter;
+                future_selected = zone;
             }
         }
+
+        // Admission must also keep the non-owner upstream of any still-relevant
+        // conflict on the owner's current TO_A1 leg. These are the same static
+        // OBB conflict intervals used by ordinary pairwise arbitration.
+        bool ordinary_already_inside = false;
+        std::optional<double> ordinary_enter_s;
+        ConflictZone ordinary_selected;
+        const bool owner_is_lo = owner->id < other.id;
+        const VehicleAgent& ordinary_lo = owner_is_lo ? *owner : other;
+        const VehicleAgent& ordinary_hi = owner_is_lo ? other : *owner;
+        const auto& ordinary_blocks =
+            conflictBlocksCanonical(ordinary_lo, ordinary_hi);
+        for (const ConflictZone& canonical : ordinary_blocks) {
+            ConflictZone zone = canonical;
+            if (!owner_is_lo) {
+                std::swap(zone.s_self_enter, zone.s_other_enter);
+                std::swap(zone.s_self_exit, zone.s_other_exit);
+            }
+            // Ignore conflict blocks already cleared by either participant.
+            if (owner->path_s > zone.s_self_exit + 1e-9 ||
+                other.path_s > zone.s_other_exit + 1e-9) {
+                continue;
+            }
+            if (other.path_s > zone.s_other_enter + 1e-9) {
+                ordinary_already_inside = true;
+                ordinary_enter_s = zone.s_other_enter;
+                ordinary_selected = zone;
+                break;
+            }
+            if (!ordinary_enter_s ||
+                zone.s_other_enter < *ordinary_enter_s) {
+                ordinary_enter_s = zone.s_other_enter;
+                ordinary_selected = zone;
+            }
+        }
+
+        // A future exit conflict is what makes this pair subject to Future A1
+        // admission. Ordinary geometry only moves its stop line upstream.
+        if (!future_exit_enter_s) continue;
+
+        const bool already_inside =
+            future_already_inside || ordinary_already_inside;
+        const std::optional<double> selected_stop_boundary_s =
+            futureA1StopBoundary(future_exit_enter_s, ordinary_enter_s);
+        const std::optional<double> selected_stop_s =
+            futureA1StopS(future_exit_enter_s, ordinary_enter_s, kStopBuffer);
+        const bool ordinary_selected_boundary =
+            ordinary_enter_s && selected_stop_boundary_s &&
+            std::abs(*ordinary_enter_s - *selected_stop_boundary_s) <= 1e-9;
+        const ConflictZone& selected = ordinary_selected_boundary
+            ? ordinary_selected : future_selected;
+
+        auto appendAdmissionGeometry = [&](std::ostringstream& line) {
+            line << " future_exit_enter_s=" << *future_exit_enter_s
+                 << " ordinary_enter_s=";
+            if (ordinary_enter_s) line << *ordinary_enter_s;
+            else line << "none";
+            line << " selected_stop_boundary_s="
+                 << *selected_stop_boundary_s
+                 << " stop_s=" << *selected_stop_s
+                 << " other_s=" << other.path_s
+                 << " already_inside="
+                 << (already_inside ? "true" : "false");
+        };
 
         const std::pair<int, int> log_key{owner->id, other.id};
         if (already_inside) {
@@ -1260,21 +1351,17 @@ void RuleEngine::enforceFutureA1Admission(
                      << " blocked=V" << other.id
                      << " reason=actual_occupied_priority"
                      << " early_stop=false"
+                     << " holder=V" << other.id
                      << " conflict_zone=(" << selected.x << ","
-                     << selected.y << ")"
-                     << " other_s=" << other.path_s
-                     << " interval=[" << selected.s_other_enter << ","
-                     << selected.s_other_exit << "]";
+                     << selected.y << ")";
+                appendAdmissionGeometry(line);
                 if (coord_log_sink_) coord_log_sink_(line.str());
                 ROS_WARN("%s %s", debugLogPrefix().c_str(),
                          line.str().c_str());
             }
             continue;
         }
-        if (!have_entry) continue;
-
-        const double stop_s =
-            std::max(0.0, selected.s_other_enter - kStopBuffer);
+        const double stop_s = *selected_stop_s;
         const double distance = stop_s - other.path_s;
         const double speed = std::max(0.0, other.current_speed);
         const double stopping_distance =
@@ -1291,12 +1378,10 @@ void RuleEngine::enforceFutureA1Admission(
                  << " blocked=V" << other.id
                  << " reason=future_a1_exit_priority"
                  << " early_stop=true"
+                 << " holder=V" << owner->id
                  << " conflict_zone=(" << selected.x << "," << selected.y
-                 << ")"
-                 << " other_s=" << other.path_s
-                 << " stop_s=" << stop_s
-                 << " interval=[" << selected.s_other_enter << ","
-                 << selected.s_other_exit << "]";
+                 << ")";
+            appendAdmissionGeometry(line);
             if (coord_log_sink_) coord_log_sink_(line.str());
             ROS_WARN("%s %s", debugLogPrefix().c_str(),
                      line.str().c_str());

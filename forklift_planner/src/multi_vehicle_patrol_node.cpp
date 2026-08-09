@@ -9,13 +9,16 @@
 #include <cstdint>
 #include <fstream>
 #include <filesystem>
+#include <iomanip>
 #include <limits>
 #include <memory>
 #include <deque>
 #include <map>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <set>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -24,6 +27,7 @@
 #include "forklift_map/forklift_map.h"
 #include "forklift_map/map_param.h"
 #include "forklift_planner/multi_vehicle/footprint.h"
+#include "forklift_planner/multi_vehicle/future_a1_policy.h"
 #include "forklift_planner/multi_vehicle/marker_publisher.h"
 #include "forklift_planner/multi_vehicle/multi_vehicle_config.h"
 #include "forklift_planner/multi_vehicle/rule_engine.h"
@@ -202,6 +206,7 @@ private:
 
     struct A1ArrivalSummary {
         std::map<int, A1ArrivalPrediction> candidates;
+        std::map<int, std::string> excluded;
     };
 
     void initCoordLog() {
@@ -701,9 +706,11 @@ private:
     // Predict A1 service arrival from each vehicle's current B->A1 leg in
     // isolation. Coordination actions are intentionally excluded here: the
     // owner must be chosen before ordinary pairwise rules can stop a candidate.
-    A1ArrivalSummary predictA1Arrivals() const {
+    A1ArrivalSummary predictA1Arrivals(double horizon) const {
         A1ArrivalSummary summary;
         const double dt = 1.0 / pp_.update_rate;
+        const int max_steps = std::max(
+            0, static_cast<int>(std::ceil(std::max(0.0, horizon) / dt)));
 
         for (const VehicleAgent& v : agents_) {
             if (!targetEnabled(v.id) || !v.active() ||
@@ -717,9 +724,10 @@ private:
             if (preview.path_s >= preview.track.length() - 1e-9) {
                 arrival_time = 0.0;
             } else {
-                int step = 0;
-                while (preview.path_s < preview.track.length() - 1e-9) {
-                    ++step;
+                for (int step = 1;
+                     step <= max_steps &&
+                     preview.path_s < preview.track.length() - 1e-9;
+                     ++step) {
                     const double desired = std::min(
                         rule_engine_->speedForAction(VehicleAction::NOMINAL),
                         curvatureSpeed(preview));
@@ -731,13 +739,16 @@ private:
                         preview.track.length(),
                         preview.path_s + preview.current_speed * dt);
                     if (preview.path_s <= old_s + 1e-12) break;
-                    arrival_time = static_cast<double>(step) * dt;
-                }
-                if (preview.path_s < preview.track.length() - 1e-9) {
-                    arrival_time = -1.0;
+                    if (preview.path_s >= preview.track.length() - 1e-9) {
+                        arrival_time = static_cast<double>(step) * dt;
+                    }
                 }
             }
-            if (arrival_time < 0.0) continue;
+            if (!forklift_planner::multi_vehicle::
+                    futureA1ArrivalWithinHorizon(arrival_time, horizon)) {
+                summary.excluded[v.id] = "horizon_exceeded";
+                continue;
+            }
 
             A1ArrivalPrediction prediction;
             prediction.vehicle_id = v.id;
@@ -754,48 +765,36 @@ private:
         using Commitment = forklift_planner::multi_vehicle::RuleEngine::
             FutureA1Commitment;
         const double tie_window = std::max(0.02, cfg_.prediction_step);
-        const A1ArrivalPrediction* best = nullptr;
-
+        std::vector<forklift_planner::multi_vehicle::FutureA1RankedCandidate>
+            ranked;
+        ranked.reserve(summary.candidates.size());
         for (const auto& item : summary.candidates) {
             const A1ArrivalPrediction& candidate = item.second;
-            if (candidate.arrival_time < 0.0) continue;
-            if (best == nullptr) {
-                best = &candidate;
-                continue;
-            }
-            if (candidate.arrival_time < best->arrival_time - tie_window) {
-                best = &candidate;
-                continue;
-            }
-            if (candidate.arrival_time > best->arrival_time + tie_window) {
-                continue;
-            }
-            const VehicleAgent* candidate_agent =
-                agentById_c(candidate.vehicle_id);
-            const VehicleAgent* best_agent = agentById_c(best->vehicle_id);
-            if (candidate_agent != nullptr && best_agent != nullptr) {
-                const int priority = rule_engine_->unifiedPriority(
-                    *candidate_agent, *best_agent);
-                if (priority == candidate.vehicle_id) {
-                    best = &candidate;
-                    continue;
-                }
-                if (priority == best->vehicle_id) continue;
-            }
-            if (candidate.vehicle_id < best->vehicle_id) best = &candidate;
+            ranked.push_back({candidate.vehicle_id, candidate.arrival_time});
         }
 
+        const int best_id =
+            forklift_planner::multi_vehicle::selectFutureA1Candidate(
+                ranked, tie_window, [this](int lhs, int rhs) {
+                    const VehicleAgent* lhs_agent = agentById_c(lhs);
+                    const VehicleAgent* rhs_agent = agentById_c(rhs);
+                    if (lhs_agent == nullptr || rhs_agent == nullptr) return -1;
+                    return rule_engine_->unifiedPriority(*lhs_agent,
+                                                         *rhs_agent);
+                });
+
         Commitment commitment;
-        if (best == nullptr) return commitment;
-        commitment.owner_id = best->vehicle_id;
-        commitment.owner_path_gen = best->path_gen;
-        commitment.predicted_a1_arrival_time = best->arrival_time;
-        commitment.predicted_to_b_time = best->to_b_time;
+        const auto best = summary.candidates.find(best_id);
+        if (best == summary.candidates.end()) return commitment;
+        commitment.owner_id = best->second.vehicle_id;
+        commitment.owner_path_gen = best->second.path_gen;
+        commitment.predicted_a1_arrival_time = best->second.arrival_time;
+        commitment.predicted_to_b_time = best->second.to_b_time;
         return commitment;
     }
 
     forklift_planner::multi_vehicle::RuleEngine::FutureA1Commitment
-    retainFutureA1Owner() const {
+    retainLockedFutureA1Owner() const {
         using Commitment = forklift_planner::multi_vehicle::RuleEngine::
             FutureA1Commitment;
         if (!future_a1_commitment_.valid()) return Commitment{};
@@ -809,54 +808,56 @@ private:
             return Commitment{};
         }
 
-        Commitment retained = future_a1_commitment_;
-        if (owner->active() &&
-            owner->mission_phase == MissionPhase::TO_A1 &&
-            owner->leg_target == LegTargetKind::A1 &&
-            !owner->track.empty()) {
-            const A1ArrivalSummary owner_prediction = predictA1Arrivals();
-            const auto it = owner_prediction.candidates.find(owner->id);
-            if (it == owner_prediction.candidates.end()) return Commitment{};
-            retained.predicted_a1_arrival_time = it->second.arrival_time;
-            retained.predicted_to_b_time = it->second.to_b_time;
-            return retained;
-        }
         if (owner->mode != VehicleMode::DWELL ||
             owner->mission_phase != MissionPhase::PICKUP_DWELL) {
             return Commitment{};
         }
+        Commitment retained = future_a1_commitment_;
         retained.predicted_a1_arrival_time = 0.0;
         retained.predicted_to_b_time = std::max(0.0, owner->dwell_remaining);
         return retained;
     }
 
-    std::string futureA1ReleaseReason(
+    std::string futureA1ChangeReason(
         const forklift_planner::multi_vehicle::RuleEngine::
-            FutureA1Commitment& previous) const {
-        const VehicleAgent* owner = agentById_c(previous.owner_id);
-        if (owner == nullptr) return "owner_missing";
-        if (owner->mission_phase == MissionPhase::TO_B) {
-            return "handoff_to_a1_departure_priority";
-        }
-        if (owner->path_gen != previous.owner_path_gen) return "path_changed";
-        if (!owner->pending_dropoff_valid ||
-            owner->pending_dropoff_track.empty()) {
-            return "dropoff_preview_invalid";
-        }
-        return "owner_no_longer_to_a1_or_pickup_dwell";
+            FutureA1Commitment& previous,
+        const forklift_planner::multi_vehicle::RuleEngine::
+            FutureA1Commitment& current,
+        const A1ArrivalSummary& summary,
+        bool owner_locked) const {
+        const VehicleAgent* old_owner = agentById_c(previous.owner_id);
+        const bool departure_handoff =
+            old_owner != nullptr &&
+            old_owner->mission_phase == MissionPhase::TO_B;
+        const bool previous_owner_valid =
+            old_owner != nullptr &&
+            old_owner->path_gen == previous.owner_path_gen &&
+            old_owner->pending_dropoff_valid &&
+            !old_owner->pending_dropoff_track.empty() &&
+            (old_owner->mission_phase == MissionPhase::TO_A1 ||
+             old_owner->mission_phase == MissionPhase::PICKUP_DWELL);
+        const auto excluded = summary.excluded.find(previous.owner_id);
+        const bool horizon_exceeded =
+            excluded != summary.excluded.end() &&
+            excluded->second == "horizon_exceeded";
+        return forklift_planner::multi_vehicle::futureA1TransitionReason(
+            previous.valid(), previous.owner_id,
+            current.valid(), current.owner_id,
+            owner_locked, previous_owner_valid, horizon_exceeded,
+            departure_handoff);
     }
 
     void logFutureA1Transition(
         const forklift_planner::multi_vehicle::RuleEngine::
             FutureA1Commitment& previous,
         const forklift_planner::multi_vehicle::RuleEngine::
-            FutureA1Commitment& current) {
+            FutureA1Commitment& current,
+        const A1ArrivalSummary& summary,
+        const std::string& change_reason) {
         const bool same_owner =
             previous.valid() && current.valid() &&
             previous.owner_id == current.owner_id &&
             previous.owner_path_gen == current.owner_path_gen;
-        if (!previous.valid() && !current.valid()) return;
-
         std::string event;
         if (same_owner) {
             event = "HOLD";
@@ -864,37 +865,68 @@ private:
             event = "CREATE";
         } else if (!current.valid()) {
             event = "RELEASE";
-        } else {
+        } else if (previous.valid()) {
             event = "CHANGE";
+        } else {
+            event = "HOLD";
         }
 
-        char line[512];
+        std::ostringstream candidates;
+        candidates << "[";
+        bool first = true;
+        for (const auto& item : summary.candidates) {
+            if (!first) candidates << ",";
+            first = false;
+            candidates << "V" << item.first << ":" << std::fixed
+                       << std::setprecision(2) << item.second.arrival_time
+                       << "s";
+        }
+        candidates << "]";
+        std::ostringstream excluded;
+        excluded << "[";
+        first = true;
+        for (const auto& item : summary.excluded) {
+            if (!first) excluded << ",";
+            first = false;
+            excluded << "V" << item.first << ":" << item.second;
+        }
+        excluded << "]";
+
+        char line[1024];
         if (current.valid()) {
             const std::string old_owner = previous.valid()
                 ? "V" + std::to_string(previous.owner_id)
                 : "none";
-            const std::string change_reason = same_owner
-                ? "retained"
-                : (previous.valid() ? futureA1ReleaseReason(previous)
-                                    : "initial_selection");
             std::snprintf(
                 line, sizeof(line),
                 "[FUTURE_A1] time=%s event=%s old=%s owner=V%d "
                 "arrival=%.2fs to_b=%.2fs path_gen=%d "
-                "change_reason=%s",
+                "horizon=%.2fs candidates=%s excluded=%s change_reason=%s",
                 readableSimTime(sim_time_).c_str(), event.c_str(),
                 old_owner.c_str(),
                 current.owner_id, current.predicted_a1_arrival_time,
                 current.predicted_to_b_time, current.owner_path_gen,
+                rb_horizon_, candidates.str().c_str(),
+                excluded.str().c_str(),
                 change_reason.c_str());
-        } else {
-            const std::string reason = futureA1ReleaseReason(previous);
+        } else if (previous.valid()) {
             std::snprintf(
                 line, sizeof(line),
                 "[FUTURE_A1] time=%s event=RELEASE owner=V%d "
-                "path_gen=%d release_reason=%s",
+                "path_gen=%d horizon=%.2fs candidates=%s excluded=%s "
+                "change_reason=%s",
                 readableSimTime(sim_time_).c_str(), previous.owner_id,
-                previous.owner_path_gen, reason.c_str());
+                previous.owner_path_gen, rb_horizon_,
+                candidates.str().c_str(), excluded.str().c_str(),
+                change_reason.c_str());
+        } else {
+            std::snprintf(
+                line, sizeof(line),
+                "[FUTURE_A1] time=%s event=HOLD old=none owner=none "
+                "horizon=%.2fs candidates=%s excluded=%s change_reason=%s",
+                readableSimTime(sim_time_).c_str(), rb_horizon_,
+                candidates.str().c_str(), excluded.str().c_str(),
+                change_reason.c_str());
         }
         const std::string console_line = contextualLog(
             line, "ROLLOUT", sim_plan_id_, -1, -1);
@@ -911,10 +943,12 @@ private:
         prepareA1DropoffPreviewsForHorizon();
 
         const auto previous_commitment = future_a1_commitment_;
-        auto commitment = retainFutureA1Owner();
-        if (!commitment.valid()) {
-            commitment = selectFutureA1Owner(predictA1Arrivals());
-        }
+        const A1ArrivalSummary arrivals = predictA1Arrivals(rb_horizon_);
+        auto commitment = retainLockedFutureA1Owner();
+        const bool owner_locked = commitment.valid();
+        if (!owner_locked) commitment = selectFutureA1Owner(arrivals);
+        const std::string change_reason = futureA1ChangeReason(
+            previous_commitment, commitment, arrivals, owner_locked);
 
         rule_engine_->clearFutureA1Commitment();
         if (commitment.valid()) {
@@ -930,7 +964,8 @@ private:
         sim_plan_valid_ = !sim_plan_frames_.empty();
         sim_plan_start_time_ = sim_time_;
         ++sim_plan_id_;
-        logFutureA1Transition(previous_commitment, commitment);
+        logFutureA1Transition(previous_commitment, commitment, arrivals,
+                              change_reason);
         ROS_INFO("[sim_plan] built plan=%llu start=%.2f horizon=%.2f "
                  "frames=%zu commit_frames=%d",
                  static_cast<unsigned long long>(sim_plan_id_),
