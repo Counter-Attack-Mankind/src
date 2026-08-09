@@ -96,7 +96,7 @@ forklift_planner:
     enable_stall_release: false       # 旧版停滞释放策略，默认关闭
     enable_deadlock_reverse: false    # 旧版倒车破死锁策略，默认关闭
     enable_cycle_break: false         # 旧版环路打破策略，默认关闭
-    enable_deadlock_recovery: true    # 死锁恢复：从当前位置重规划到空货位脱困
+    enable_deadlock_recovery: false   # 正式仿真/回归禁用旧重规划恢复，暴露协调本身的死锁
 
     # 目标货位/泊车队列窗口
     target_request_distance: 0.45
