@@ -309,13 +309,18 @@ void MarkerPublisher::addVisitedSlotMarkers(
 
 void MarkerPublisher::addConflictMarkers(
     visualization_msgs::MarkerArray& arr,
-    const std::vector<ConflictMarker>& conflicts) const {
+    const std::vector<ConflictMarker>& conflicts,
+    const std::vector<ConflictMarker>& resource_markers) const {
     const char* same_ns = "conflict_same_direction";
     const char* mutual_ns = "conflict_crossing_or_opposing";
     const char* actual_ns = "conflict_timed_obb_overlap";
     const char* conflict_label_ns = "conflict_explanation";
     const char* following_relation_ns = "following_relation";
     const char* following_label_ns = "following_explanation";
+    const char* potential_zone_ns = "potential_conflict_zone_overlap";
+    const char* potential_zone_label_ns = "potential_conflict_zone_explanation";
+    const char* reservation_ns = "conflict_reservation_overlap";
+    const char* reservation_label_ns = "conflict_reservation_explanation";
     auto deleteMarker = [&](const char* marker_ns, int id) {
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
@@ -344,14 +349,118 @@ void MarkerPublisher::addConflictMarkers(
                       last_crossing_opposing_conflict_marker_count_);
         deleteMarkers(conflict_label_ns,
                       last_crossing_opposing_conflict_marker_count_);
+        deleteMarkers(potential_zone_ns,
+                      last_potential_conflict_zone_marker_count_);
+        deleteMarkers(potential_zone_label_ns,
+                      last_potential_conflict_zone_marker_count_);
+        deleteMarkers(reservation_ns,
+                      last_conflict_reservation_marker_count_);
+        deleteMarkers(reservation_label_ns,
+                      last_conflict_reservation_marker_count_);
         last_same_direction_conflict_marker_count_ = 0;
         last_crossing_opposing_conflict_marker_count_ = 0;
+        last_potential_conflict_zone_marker_count_ = 0;
+        last_conflict_reservation_marker_count_ = 0;
         return;
     }
 
     int same_id = 0;
     int mutual_id = 0;
-    for (const ConflictMarker& c : conflicts) {
+    int potential_zone_id = 0;
+    int reservation_id = 0;
+
+    auto addSpatialResource = [&](const ConflictMarker& c, int marker_id,
+                                  bool reservation) {
+        const ros::Time now = ros::Time::now();
+        const char* geometry_ns = reservation ? reservation_ns
+                                              : potential_zone_ns;
+        const char* label_ns = reservation ? reservation_label_ns
+                                           : potential_zone_label_ns;
+        visualization_msgs::Marker geometry;
+        geometry.header.frame_id = pp_.frame_id;
+        geometry.header.stamp = now;
+        geometry.ns = geometry_ns;
+        geometry.id = marker_id;
+        geometry.type = visualization_msgs::Marker::TRIANGLE_LIST;
+        geometry.action = visualization_msgs::Marker::ADD;
+        geometry.pose.orientation.w = 1.0;
+        geometry.scale.x = 1.0;
+        geometry.scale.y = 1.0;
+        geometry.scale.z = 1.0;
+        geometry.color = reservation
+            ? rgba(1.00f, 0.70f, 0.05f, 0.34f)
+            : rgba(0.05f, 0.55f, 1.00f, 0.20f);
+        const double z = reservation ? 0.052 : 0.026;
+        for (const auto& polygon : c.spatial_overlap_polygons) {
+            if (polygon.size() < 3) continue;
+            for (size_t p = 1; p + 1 < polygon.size(); ++p) {
+                geometry.points.push_back(
+                    pt3(polygon[0].x, polygon[0].y, z));
+                geometry.points.push_back(
+                    pt3(polygon[p].x, polygon[p].y, z));
+                geometry.points.push_back(
+                    pt3(polygon[p + 1].x, polygon[p + 1].y, z));
+            }
+        }
+        if (!geometry.points.empty()) {
+            arr.markers.push_back(geometry);
+        } else {
+            deleteMarker(geometry_ns, marker_id);
+        }
+
+        visualization_msgs::Marker label;
+        label.header = geometry.header;
+        label.ns = label_ns;
+        label.id = marker_id;
+        label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+        label.action = visualization_msgs::Marker::ADD;
+        label.pose.position.x = c.x;
+        label.pose.position.y = c.y;
+        label.pose.position.z = reservation ? 0.23 : 0.19;
+        label.pose.orientation.w = 1.0;
+        label.scale.z = 0.055;
+        label.color = reservation
+            ? rgba(1.00f, 0.82f, 0.18f, 1.0f)
+            : rgba(0.20f, 0.78f, 1.00f, 1.0f);
+        std::ostringstream text;
+        text << std::fixed << std::setprecision(3);
+        if (reservation) {
+            text << "RESERVATION V" << c.vehicle_a << "-V" << c.vehicle_b
+                 << " zone=";
+            if (c.zone_index >= 0) text << c.zone_index;
+            else text << "unknown";
+            text << " holder=V" << c.holder_id
+                 << " waiter=V" << c.waiter_id;
+        } else {
+            text << "CONFLICT ZONE V" << c.vehicle_a << "-V"
+                 << c.vehicle_b << " zone=" << c.zone_index;
+        }
+        text << "\nV" << c.vehicle_a << " s=[" << c.s_a_enter << ","
+             << c.s_a_exit << "] V" << c.vehicle_b << " s=["
+             << c.s_b_enter << "," << c.s_b_exit << "]";
+        label.text = text.str();
+        arr.markers.push_back(label);
+    };
+
+    std::vector<const ConflictMarker*> all_markers;
+    all_markers.reserve(conflicts.size() + resource_markers.size());
+    for (const ConflictMarker& marker : conflicts) {
+        all_markers.push_back(&marker);
+    }
+    for (const ConflictMarker& marker : resource_markers) {
+        all_markers.push_back(&marker);
+    }
+
+    for (const ConflictMarker* marker_ptr : all_markers) {
+        const ConflictMarker& c = *marker_ptr;
+        if (c.kind == ConflictMarkerKind::POTENTIAL_CONFLICT_ZONE) {
+            addSpatialResource(c, potential_zone_id++, false);
+            continue;
+        }
+        if (c.kind == ConflictMarkerKind::CONFLICT_RESERVATION) {
+            addSpatialResource(c, reservation_id++, true);
+            continue;
+        }
         const bool same_direction =
             c.kind == ConflictMarkerKind::SAME_DIRECTION;
         const ros::Time now = ros::Time::now();
@@ -469,7 +578,7 @@ void MarkerPublisher::addConflictMarkers(
             label.color = rgba(1.00f, 0.80f, 0.25f, 1.0f);
             std::ostringstream text;
             text << std::fixed << std::setprecision(2)
-                 << "V" << c.vehicle_a << "-V" << c.vehicle_b
+                 << "TIMED OVERLAP V" << c.vehicle_a << "-V" << c.vehicle_b
                  << " type=CROSSING/OPPOSING"
                  << " holder="
                  << (c.holder_id >= 0 ? "V" + std::to_string(c.holder_id)
@@ -514,8 +623,20 @@ void MarkerPublisher::addConflictMarkers(
         deleteMarker(actual_ns, stale);
         deleteMarker(conflict_label_ns, stale);
     }
+    for (int stale = potential_zone_id;
+         stale < last_potential_conflict_zone_marker_count_; ++stale) {
+        deleteMarker(potential_zone_ns, stale);
+        deleteMarker(potential_zone_label_ns, stale);
+    }
+    for (int stale = reservation_id;
+         stale < last_conflict_reservation_marker_count_; ++stale) {
+        deleteMarker(reservation_ns, stale);
+        deleteMarker(reservation_label_ns, stale);
+    }
     last_same_direction_conflict_marker_count_ = same_id;
     last_crossing_opposing_conflict_marker_count_ = mutual_id;
+    last_potential_conflict_zone_marker_count_ = potential_zone_id;
+    last_conflict_reservation_marker_count_ = reservation_id;
 }
 
 void MarkerPublisher::addOriginAxes(visualization_msgs::MarkerArray& arr) const {
@@ -566,7 +687,8 @@ void MarkerPublisher::addOriginAxes(visualization_msgs::MarkerArray& arr) const 
 void MarkerPublisher::publish(
     const std::vector<VehicleAgent>& vehicles,
     const std::vector<bool>& visited_slots,
-    const std::vector<ConflictMarker>& conflicts) const {
+    const std::vector<ConflictMarker>& conflicts,
+    const std::vector<ConflictMarker>& resource_markers) const {
     ++publish_seq_;
     visualization_msgs::MarkerArray arr;
     addVisitedSlotMarkers(arr, visited_slots);
@@ -579,7 +701,7 @@ void MarkerPublisher::publish(
         addArrowMarker(arr, v);
         addLabelMarker(arr, v);
     }
-    addConflictMarkers(arr, conflicts);
+    addConflictMarkers(arr, conflicts, resource_markers);
     pub_.publish(arr);
 }
 

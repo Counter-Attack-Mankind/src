@@ -2105,7 +2105,12 @@ private:
         // 1. 实车模式---未摆放好姿态模式
         if (cfg_.real_mode) {
             if (!rb_started_) {
-                marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());   //发布车辆、地图
+                marker_pub_->publish(
+                    agents_, visited_slots_, rule_engine_->conflicts(),
+                    marker_pub_->hasSubscribers()
+                        ? rule_engine_->conflictResourceMarkers(agents_)
+                        : std::vector<forklift_planner::multi_vehicle::
+                              ConflictMarker>{});   //发布车辆、地图
                 publishRealTrailMarkers();  //发布真实车身尾迹
                 logPlacementStatus();       //打印摆车状态
                 return;
@@ -2124,7 +2129,12 @@ private:
                 }
                 realAdvance(dt);        //根据真实车身位置重新定位
                 logAgentStatus();
-                marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());
+                marker_pub_->publish(
+                    agents_, visited_slots_, rule_engine_->conflicts(),
+                    marker_pub_->hasSubscribers()
+                        ? rule_engine_->conflictResourceMarkers(agents_)
+                        : std::vector<forklift_planner::multi_vehicle::
+                              ConflictMarker>{});
                 publishRealTrailMarkers();
                 return;
             }
@@ -2140,7 +2150,12 @@ private:
                 force_horizon_refresh_ = false;
             }
             publishRealOutputs(dt);
-            marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());
+            marker_pub_->publish(
+                agents_, visited_slots_, rule_engine_->conflicts(),
+                marker_pub_->hasSubscribers()
+                    ? rule_engine_->conflictResourceMarkers(agents_)
+                    : std::vector<forklift_planner::multi_vehicle::
+                          ConflictMarker>{});
             publishRealTrailMarkers();
             return;
         }
@@ -2185,14 +2200,14 @@ private:
             if (!one_shot_published_) one_shot_published_ = publishFullTrajectories();
         }
 
-
-        //5. 仿真模式-----滚动时域规划完成 0.1*20=2s
-        // 滚动模式的轨迹已经在本拍执行前、计划创建时发布。这里不再进行
-        // 第二次沙盒推演，否则显示与实际执行会来自不同计划。
-
         logAgentStatus();
         logStuckDiagnostics();
-        marker_pub_->publish(agents_, visited_slots_, rule_engine_->conflicts());
+        marker_pub_->publish(
+            agents_, visited_slots_, rule_engine_->conflicts(),
+            marker_pub_->hasSubscribers()
+                ? rule_engine_->conflictResourceMarkers(agents_)
+                : std::vector<forklift_planner::multi_vehicle::
+                      ConflictMarker>{});
     }
     
     //===========================================================================

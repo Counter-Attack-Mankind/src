@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "forklift_map/map_param.h"
+#include "forklift_planner/multi_vehicle/future_a1_policy.h"
 #include "forklift_planner/multi_vehicle/multi_vehicle_config.h"
 #include "forklift_planner/multi_vehicle/traffic_resource.h"
 #include "forklift_planner/multi_vehicle/traffic_resource_map.h"
@@ -21,6 +22,8 @@ namespace multi_vehicle {
 enum class ConflictMarkerKind {
     SAME_DIRECTION,
     CROSSING_OR_OPPOSING,
+    POTENTIAL_CONFLICT_ZONE,
+    CONFLICT_RESERVATION,
 };
 
 struct ConflictMarker {
@@ -33,9 +36,10 @@ struct ConflictMarker {
         std::vector<Point> polygon;
     };
 
-    // x/y and scale_x/scale_y are only the AABB around the sampled,
-    // time-synchronised OBB intersection polygons. This geometry is
-    // diagnostic output and never participates in arbitration.
+    // For CROSSING_OR_OPPOSING, x/y and scale_x/scale_y are the AABB around
+    // sampled, time-synchronised OBB intersections. For the two resource-only
+    // marker kinds they are a label anchor and diagnostic bounds. None of
+    // these display fields participates in arbitration.
     double x = 0.0;
     double y = 0.0;
     double t = 0.0;
@@ -54,6 +58,16 @@ struct ConflictMarker {
     double leader_x = 0.0;
     double leader_y = 0.0;
     std::vector<TimedOverlap> timed_overlaps;
+    // Static, time-independent OBB intersections reconstructed from one
+    // ConflictZone/reservation arc-length rectangle. Kept separate from
+    // timed_overlaps so RViz cannot confuse potential/locked resources with
+    // a time-synchronised predicted collision.
+    std::vector<std::vector<Point>> spatial_overlap_polygons;
+    int zone_index = -1;
+    double s_a_enter = 0.0;
+    double s_a_exit = 0.0;
+    double s_b_enter = 0.0;
+    double s_b_exit = 0.0;
     ConflictMarkerKind kind = ConflictMarkerKind::CROSSING_OR_OPPOSING;
 };
 
@@ -120,6 +134,29 @@ public:
         double first_conflict_t = 0.0;
     };
 
+    // Multi-zone A1 departure handoff. Unlike ConflictReservation, this
+    // protects one transitive conflict cluster rather than one timed event.
+    // A staged entry is produced from Future A1 geometry with the exact
+    // generation that activatePreparedDropoffLeg() will assign; it becomes
+    // active only after that owner actually enters TO_B.
+    struct DepartureClusterCommitment {
+        int owner_id = -1;
+        int owner_path_gen = -1;
+        int other_id = -1;
+        int other_path_gen = -1;
+        std::vector<size_t> seed_indices;
+        std::vector<size_t> cluster_indices;
+        std::vector<FutureA1ConflictInterval> intervals;
+        double waiter_stop_boundary_s = 0.0;
+        double waiter_stop_s = 0.0;
+        double owner_release_exit_s = 0.0;
+        double other_release_exit_s = 0.0;
+        bool active = false;
+        bool handed_off_from_future = false;
+        bool handoff_already_inside = false;
+        bool hold_logged = false;
+    };
+
     // 接入资源地图(Phase 2:资源仲裁需要它把路径映射到资源占用)。
     void setResourceMap(const TrafficResourceMap* m) { resmap_ = m; }
 
@@ -133,6 +170,8 @@ public:
     // 前瞻仿真用:快照/恢复跨周期持久状态,使「克隆-空跑」忠实复现真实协调(确定性⇒预测准)。
     struct SimSnapshot {
         std::map<std::pair<int, int>, ConflictReservation> reservations;
+        std::map<std::pair<int, int>, DepartureClusterCommitment>
+            departure_clusters;
         std::set<std::pair<int, int>> following_pairs;
         ResourceTokenTable tokens;
         // conflicts_ is frame output, but sandbox rollout calls decide() and
@@ -144,6 +183,11 @@ public:
     SimSnapshot snapshot() const;
     void restore(const SimSnapshot& s);
     const std::vector<ConflictMarker>& conflicts() const { return conflicts_; }
+    // RViz-only resource diagnostics. This reads the current static conflict
+    // cache and reservation table; it never creates, updates or releases a
+    // reservation and is intentionally outside decide().
+    std::vector<ConflictMarker> conflictResourceMarkers(
+        const std::vector<VehicleAgent>& vehicles) const;
 
     int priorityWinner(const VehicleAgent& a, const VehicleAgent& b) const;
 
@@ -165,6 +209,19 @@ private:
         // 块中点测两路径行进朝向算定 → 稳定不随当前位姿闪烁(对称,与 self/other 朝向无关)。
         bool same_dir = false;
     };
+
+    struct FutureA1ZoneSelection {
+        std::vector<ConflictZone> normalized_zones;
+        std::vector<size_t> seed_indices;
+        std::vector<size_t> protected_indices;
+        int upstream_index = -1;
+        bool other_already_inside = false;
+    };
+
+    FutureA1ZoneSelection selectFutureA1ProtectedZones(
+        const std::vector<ConflictZone>& canonical_zones,
+        bool preview_is_lo, double protected_until,
+        double other_path_s) const;
 
     // One-cycle longitudinal hint. It is intentionally separate from
     // VehicleAgent::requested_action because following is not an arbitration
@@ -215,6 +272,12 @@ private:
                                   double prediction_horizon);
     void enforceFutureA1Admission(std::vector<VehicleAgent>& vehicles,
                                   double dt);
+    void refreshDepartureClusterCommitments(
+        std::vector<VehicleAgent>& vehicles);
+    void enforceDepartureClusterCommitments(
+        std::vector<VehicleAgent>& vehicles, double dt);
+    int departureClusterOwnerForPair(const VehicleAgent& a,
+                                     const VehicleAgent& b) const;
     void resolveFollowing(std::vector<VehicleAgent>& vehicles);
     void applyFollowingSuggestions(std::vector<VehicleAgent>& vehicles);
     // 普适前向净空护栏:任何车若沿自身固定路径在自己刹车距离内会撞上另一辆车的当前
@@ -245,6 +308,8 @@ private:
     // 未来时域内最早可见的局部冲突事件预约。它只锁定本次事件对应的弧长区间，
     // 不再把同一车对完整路径上的所有几何交叉合并为一个大资源。
     std::map<std::pair<int, int>, ConflictReservation> conflict_reservations_;
+    std::map<std::pair<int, int>, DepartureClusterCommitment>
+        departure_cluster_commitments_;
 
     // 每周期重算的唯一有向跟车对，仅作诊断/纵向建议依据。
     // pairwise timed OBB、reservation 和 holder 仲裁不再使用它作跳过条件。
@@ -265,6 +330,10 @@ private:
         int gen_lo = -1;
         int gen_hi = -1;
         std::vector<ConflictZone> blocks;  // canonical: s_self_*=lo, s_other_*=hi
+        // Lazily reconstructed RViz geometry, aligned one-to-one with blocks.
+        // It is diagnostic-only and has no role in conflict decisions.
+        std::vector<std::vector<std::vector<ConflictMarker::Point>>>
+            display_overlap_polygons;
     };
     mutable std::map<std::pair<int, int>, ConflictCacheEntry> conflict_cache_;
     mutable std::map<std::pair<int, int>, ConflictCacheEntry>

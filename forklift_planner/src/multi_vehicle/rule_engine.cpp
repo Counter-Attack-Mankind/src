@@ -156,6 +156,56 @@ bool sameReservation(const RuleEngine::ConflictReservation& a,
            a.first_conflict_t == b.first_conflict_t;
 }
 
+bool sameDepartureCluster(
+    const RuleEngine::DepartureClusterCommitment& a,
+    const RuleEngine::DepartureClusterCommitment& b) {
+    return a.owner_id == b.owner_id &&
+           a.owner_path_gen == b.owner_path_gen &&
+           a.other_id == b.other_id &&
+           a.other_path_gen == b.other_path_gen &&
+           a.seed_indices == b.seed_indices &&
+           a.cluster_indices == b.cluster_indices &&
+           a.waiter_stop_boundary_s == b.waiter_stop_boundary_s &&
+           a.waiter_stop_s == b.waiter_stop_s &&
+           a.owner_release_exit_s == b.owner_release_exit_s &&
+           a.other_release_exit_s == b.other_release_exit_s &&
+           a.active == b.active &&
+           a.handed_off_from_future == b.handed_off_from_future &&
+           a.handoff_already_inside == b.handoff_already_inside;
+}
+
+void logDepartureCluster(
+    const std::function<void(const std::string&)>& sink,
+    const char* event, const char* reason,
+    const RuleEngine::DepartureClusterCommitment& commitment,
+    double owner_s, double other_s) {
+    if (!sink) return;
+    std::ostringstream line;
+    line << std::fixed << std::setprecision(3)
+         << "[DEPARTURE_CLUSTER] event=" << event
+         << " reason=" << reason
+         << " owner=V" << commitment.owner_id
+         << " owner_gen=" << commitment.owner_path_gen
+         << " other=V" << commitment.other_id
+         << " other_gen=" << commitment.other_path_gen
+         << " zones=[";
+    for (size_t i = 0; i < commitment.cluster_indices.size(); ++i) {
+        if (i > 0) line << ",";
+        line << commitment.cluster_indices[i];
+    }
+    line << "] waiter_stop_boundary_s="
+         << commitment.waiter_stop_boundary_s
+         << " stop_s=" << commitment.waiter_stop_s
+         << " owner_release_exit_s=" << commitment.owner_release_exit_s
+         << " owner_s=" << owner_s
+         << " other_s=" << other_s
+         << " future_handoff="
+         << (commitment.handed_off_from_future ? "true" : "false")
+         << " already_inside="
+         << (commitment.handoff_already_inside ? "true" : "false");
+    sink(line.str());
+}
+
 void logA1Decision(const std::function<void(const std::string&)>& sink,
                    const MultiVehicleConfig& cfg, const VehicleAgent& vehicle,
                    const VehicleAgent* blocker, int blocker_id) {
@@ -180,8 +230,8 @@ void logA1Decision(const std::function<void(const std::string&)>& sink,
 }  // namespace
 
 RuleEngine::SimSnapshot RuleEngine::snapshot() const {
-    return SimSnapshot{conflict_reservations_, following_pairs_, tokens_,
-                       conflicts_, now_};
+    return SimSnapshot{conflict_reservations_, departure_cluster_commitments_,
+                       following_pairs_, tokens_, conflicts_, now_};
 }
 
 void RuleEngine::restore(const SimSnapshot& s) {
@@ -201,7 +251,30 @@ void RuleEngine::restore(const SimSnapshot& s) {
                                    incoming.second);
         }
     }
+    for (const auto& current : departure_cluster_commitments_) {
+        const auto incoming = s.departure_clusters.find(current.first);
+        if (current.second.active &&
+            (incoming == s.departure_clusters.end() ||
+             !incoming->second.active)) {
+            logDepartureCluster(coord_log_sink_, "RELEASE", "snapshot_restore",
+                                current.second, -1.0, -1.0);
+        }
+    }
+    for (const auto& incoming : s.departure_clusters) {
+        const auto current = departure_cluster_commitments_.find(incoming.first);
+        if (incoming.second.active &&
+            (current == departure_cluster_commitments_.end() ||
+             !current->second.active)) {
+            logDepartureCluster(coord_log_sink_, "CREATE", "snapshot_restore",
+                                incoming.second, -1.0, -1.0);
+        } else if (incoming.second.active && current != departure_cluster_commitments_.end() &&
+                   !sameDepartureCluster(current->second, incoming.second)) {
+            logDepartureCluster(coord_log_sink_, "HOLD", "snapshot_restore",
+                                incoming.second, -1.0, -1.0);
+        }
+    }
     conflict_reservations_ = s.reservations;
+    departure_cluster_commitments_ = s.departure_clusters;
     following_pairs_ = s.following_pairs;
     tokens_ = s.tokens;
     conflicts_ = s.conflicts;
@@ -460,6 +533,44 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
     return zones;
 }
 
+RuleEngine::FutureA1ZoneSelection RuleEngine::selectFutureA1ProtectedZones(
+    const std::vector<ConflictZone>& canonical_zones,
+    bool preview_is_lo, double protected_until,
+    double other_path_s) const {
+    FutureA1ZoneSelection selection;
+    selection.normalized_zones.reserve(canonical_zones.size());
+    std::vector<FutureA1ConflictInterval> intervals;
+    intervals.reserve(canonical_zones.size());
+    for (const ConflictZone& canonical : canonical_zones) {
+        ConflictZone normalized = canonical;
+        if (!preview_is_lo) {
+            std::swap(normalized.s_self_enter, normalized.s_other_enter);
+            std::swap(normalized.s_self_exit, normalized.s_other_exit);
+        }
+        selection.normalized_zones.push_back(normalized);
+        intervals.push_back(FutureA1ConflictInterval{
+            normalized.s_self_enter, normalized.s_self_exit,
+            normalized.s_other_enter, normalized.s_other_exit});
+    }
+
+    const FutureA1ProtectedCluster cluster =
+        selectFutureA1ProtectedCluster(intervals, protected_until,
+                                       other_path_s);
+    selection.seed_indices = cluster.seed_indices;
+    selection.protected_indices = cluster.protected_indices;
+    selection.other_already_inside = cluster.other_already_inside;
+    if (cluster.upstream_other_enter) {
+        for (size_t index : selection.protected_indices) {
+            if (std::abs(selection.normalized_zones[index].s_other_enter -
+                         *cluster.upstream_other_enter) <= 1e-9) {
+                selection.upstream_index = static_cast<int>(index);
+                break;
+            }
+        }
+    }
+    return selection;
+}
+
 const std::vector<RuleEngine::ConflictZone>& RuleEngine::conflictBlocksCanonical(
     const VehicleAgent& lo, const VehicleAgent& hi) const {
     // lo.id < hi.id(调用方保证)。按 path_gen 缓存:任一方换了固定路径才重算。
@@ -467,6 +578,7 @@ const std::vector<RuleEngine::ConflictZone>& RuleEngine::conflictBlocksCanonical
     ConflictCacheEntry& e = conflict_cache_[key];
     if (e.gen_lo != lo.path_gen || e.gen_hi != hi.path_gen) {
         e.blocks = computeConflictZonesFull(lo, hi);  // self=lo, other=hi
+        e.display_overlap_polygons.clear();
         e.gen_lo = lo.path_gen;
         e.gen_hi = hi.path_gen;
     }
@@ -505,6 +617,209 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::findConflictZones(
         out.push_back(z);
     }
     return out;
+}
+
+std::vector<ConflictMarker> RuleEngine::conflictResourceMarkers(
+    const std::vector<VehicleAgent>& vehicles) const {
+    std::vector<ConflictMarker> markers;
+    if (!cfg_.show_prediction_conflicts) return markers;
+
+    constexpr double kDisplayStep = 0.025;
+    constexpr size_t kMaxPolygonsPerZone = 256;
+    const double footprint_margin = 0.5 * cfg_.conflict_margin;
+
+    auto buildPolygons = [&](const VehicleAgent& self,
+                             const VehicleAgent& other,
+                             const ConflictZone& zone) {
+        // ConflictZone stores only a compressed (s_self,s_other) rectangle.
+        // Re-run the same OBB predicate inside that rectangle for display;
+        // non-overlapping combinations inside the compressed rectangle are
+        // explicitly discarded and never rendered.
+        std::map<std::pair<long long, long long>,
+                 std::vector<ConflictMarker::Point>> spatial_cells;
+        for (double ss = zone.s_self_enter;
+             ss <= zone.s_self_exit + 1e-9; ss += kDisplayStep) {
+            const double self_s = std::min(ss, zone.s_self_exit);
+            const OBB self_body = makeBody(
+                self.track.poseAtS(self_s), mp_, footprint_margin);
+            for (double so = zone.s_other_enter;
+                 so <= zone.s_other_exit + 1e-9; so += kDisplayStep) {
+                const double other_s = std::min(so, zone.s_other_exit);
+                const OBB other_body = makeBody(
+                    other.track.poseAtS(other_s), mp_, footprint_margin);
+                if (!overlaps(self_body, other_body)) continue;
+                auto polygon = intersectObbs(self_body, other_body);
+                if (polygon.size() < 3) continue;
+                double cx = 0.0;
+                double cy = 0.0;
+                for (const auto& p : polygon) {
+                    cx += p.x;
+                    cy += p.y;
+                }
+                cx /= static_cast<double>(polygon.size());
+                cy /= static_cast<double>(polygon.size());
+                const std::pair<long long, long long> cell{
+                    static_cast<long long>(std::llround(cx / kDisplayStep)),
+                    static_cast<long long>(std::llround(cy / kDisplayStep))};
+                spatial_cells.emplace(cell, std::move(polygon));
+            }
+        }
+
+        std::vector<std::vector<ConflictMarker::Point>> polygons;
+        if (spatial_cells.empty()) return polygons;
+        const size_t stride = std::max<size_t>(
+            1, (spatial_cells.size() + kMaxPolygonsPerZone - 1) /
+                   kMaxPolygonsPerZone);
+        polygons.reserve(std::min(spatial_cells.size(),
+                                  kMaxPolygonsPerZone));
+        size_t index = 0;
+        for (auto& item : spatial_cells) {
+            if (index % stride == 0 &&
+                polygons.size() < kMaxPolygonsPerZone) {
+                polygons.push_back(std::move(item.second));
+            }
+            ++index;
+        }
+        return polygons;
+    };
+
+    auto polygonsForZone = [&](const VehicleAgent& self,
+                               const VehicleAgent& other,
+                               const ConflictZone& oriented_zone)
+        -> const std::vector<std::vector<ConflictMarker::Point>>& {
+        const bool self_is_lo = self.id < other.id;
+        const VehicleAgent& lo = self_is_lo ? self : other;
+        const VehicleAgent& hi = self_is_lo ? other : self;
+        const auto& canonical = conflictBlocksCanonical(lo, hi);
+        ConflictCacheEntry& cache = conflict_cache_[{lo.id, hi.id}];
+        if (cache.display_overlap_polygons.size() != canonical.size()) {
+            cache.display_overlap_polygons.clear();
+            cache.display_overlap_polygons.reserve(canonical.size());
+            for (const ConflictZone& zone : canonical) {
+                cache.display_overlap_polygons.push_back(
+                    buildPolygons(lo, hi, zone));
+            }
+        }
+
+        const double self_enter = self_is_lo
+            ? oriented_zone.s_self_enter : oriented_zone.s_other_enter;
+        const double self_exit = self_is_lo
+            ? oriented_zone.s_self_exit : oriented_zone.s_other_exit;
+        const double other_enter = self_is_lo
+            ? oriented_zone.s_other_enter : oriented_zone.s_self_enter;
+        const double other_exit = self_is_lo
+            ? oriented_zone.s_other_exit : oriented_zone.s_self_exit;
+        for (size_t index = 0; index < canonical.size(); ++index) {
+            const ConflictZone& zone = canonical[index];
+            if (std::abs(zone.s_self_enter - self_enter) <= 1e-9 &&
+                std::abs(zone.s_self_exit - self_exit) <= 1e-9 &&
+                std::abs(zone.s_other_enter - other_enter) <= 1e-9 &&
+                std::abs(zone.s_other_exit - other_exit) <= 1e-9) {
+                return cache.display_overlap_polygons[index];
+            }
+        }
+        static const std::vector<std::vector<ConflictMarker::Point>> empty;
+        return empty;
+    };
+
+    auto makeMarker = [&](const VehicleAgent& a, const VehicleAgent& b,
+                          const ConflictZone& zone, int zone_index,
+                          ConflictMarkerKind kind, int holder_id,
+                          int waiter_id) {
+        ConflictMarker marker;
+        marker.vehicle_a = a.id;
+        marker.vehicle_b = b.id;
+        marker.zone_index = zone_index;
+        marker.s_a_enter = zone.s_self_enter;
+        marker.s_a_exit = zone.s_self_exit;
+        marker.s_b_enter = zone.s_other_enter;
+        marker.s_b_exit = zone.s_other_exit;
+        marker.kind = kind;
+        marker.holder_id = holder_id;
+        marker.waiter_id = waiter_id;
+        marker.spatial_overlap_polygons = polygonsForZone(a, b, zone);
+
+        double x_min = std::numeric_limits<double>::infinity();
+        double y_min = std::numeric_limits<double>::infinity();
+        double x_max = -std::numeric_limits<double>::infinity();
+        double y_max = -std::numeric_limits<double>::infinity();
+        for (const auto& polygon : marker.spatial_overlap_polygons) {
+            for (const auto& point : polygon) {
+                x_min = std::min(x_min, point.x);
+                y_min = std::min(y_min, point.y);
+                x_max = std::max(x_max, point.x);
+                y_max = std::max(y_max, point.y);
+            }
+        }
+        if (std::isfinite(x_min) && std::isfinite(y_min) &&
+            std::isfinite(x_max) && std::isfinite(y_max)) {
+            marker.x = 0.5 * (x_min + x_max);
+            marker.y = 0.5 * (y_min + y_max);
+            marker.scale_x = std::max(0.01, x_max - x_min);
+            marker.scale_y = std::max(0.01, y_max - y_min);
+        } else {
+            marker.x = zone.x;
+            marker.y = zone.y;
+        }
+        return marker;
+    };
+
+    for (size_t i = 0; i < vehicles.size(); ++i) {
+        const VehicleAgent& a = vehicles[i];
+        if (!a.active() || a.track.empty()) continue;
+        for (size_t j = i + 1; j < vehicles.size(); ++j) {
+            const VehicleAgent& b = vehicles[j];
+            if (!b.active() || b.track.empty()) continue;
+            const std::vector<ConflictZone> zones = findConflictZones(a, b);
+            for (size_t zone_index = 0; zone_index < zones.size();
+                 ++zone_index) {
+                markers.push_back(makeMarker(
+                    a, b, zones[zone_index],
+                    static_cast<int>(zone_index),
+                    ConflictMarkerKind::POTENTIAL_CONFLICT_ZONE, -1, -1));
+            }
+
+            const std::pair<int, int> key{std::min(a.id, b.id),
+                                          std::max(a.id, b.id)};
+            const auto reservation = conflict_reservations_.find(key);
+            if (reservation == conflict_reservations_.end()) continue;
+            const ConflictReservation& r = reservation->second;
+            const bool a_is_lo = a.id == key.first;
+            if (r.gen_lo != (a_is_lo ? a.path_gen : b.path_gen) ||
+                r.gen_hi != (a_is_lo ? b.path_gen : a.path_gen)) {
+                continue;
+            }
+            ConflictZone reserved_zone;
+            reserved_zone.s_self_enter = a_is_lo ? r.enter_lo : r.enter_hi;
+            reserved_zone.s_self_exit = a_is_lo ? r.exit_lo : r.exit_hi;
+            reserved_zone.s_other_enter = a_is_lo ? r.enter_hi : r.enter_lo;
+            reserved_zone.s_other_exit = a_is_lo ? r.exit_hi : r.exit_lo;
+            reserved_zone.x = r.x;
+            reserved_zone.y = r.y;
+            int reserved_zone_index = -1;
+            for (size_t zone_index = 0; zone_index < zones.size();
+                 ++zone_index) {
+                const ConflictZone& zone = zones[zone_index];
+                if (std::abs(zone.s_self_enter -
+                             reserved_zone.s_self_enter) <= 1e-9 &&
+                    std::abs(zone.s_self_exit -
+                             reserved_zone.s_self_exit) <= 1e-9 &&
+                    std::abs(zone.s_other_enter -
+                             reserved_zone.s_other_enter) <= 1e-9 &&
+                    std::abs(zone.s_other_exit -
+                             reserved_zone.s_other_exit) <= 1e-9) {
+                    reserved_zone_index = static_cast<int>(zone_index);
+                    break;
+                }
+            }
+            const int waiter_id = r.owner_id == a.id ? b.id : a.id;
+            markers.push_back(makeMarker(
+                a, b, reserved_zone, reserved_zone_index,
+                ConflictMarkerKind::CONFLICT_RESERVATION,
+                r.owner_id, waiter_id));
+        }
+    }
+    return markers;
 }
 
 void RuleEngine::recordConflictZones(
@@ -652,6 +967,219 @@ void RuleEngine::applyActionRequest(VehicleAgent& v, VehicleAction action,
         v.requested_action = action;
         v.reason = reason;
         v.blocker_id = blocker_id;
+    }
+}
+
+void RuleEngine::refreshDepartureClusterCommitments(
+    std::vector<VehicleAgent>& vehicles) {
+    auto agentById = [&](int id) -> VehicleAgent* {
+        for (VehicleAgent& v : vehicles) {
+            if (v.id == id) return &v;
+        }
+        return nullptr;
+    };
+    auto eraseWithEvent = [&](auto it, const char* event,
+                              const char* reason) {
+        VehicleAgent* owner = agentById(it->second.owner_id);
+        VehicleAgent* other = agentById(it->second.other_id);
+        logDepartureCluster(coord_log_sink_, event, reason, it->second,
+                            owner ? owner->path_s : -1.0,
+                            other ? other->path_s : -1.0);
+        return departure_cluster_commitments_.erase(it);
+    };
+
+    for (auto it = departure_cluster_commitments_.begin();
+         it != departure_cluster_commitments_.end();) {
+        DepartureClusterCommitment& c = it->second;
+        VehicleAgent* owner = agentById(c.owner_id);
+        VehicleAgent* other = agentById(c.other_id);
+        if (owner == nullptr || other == nullptr || !owner->active() ||
+            !other->active() || owner->track.empty() || other->track.empty()) {
+            it = eraseWithEvent(it, c.active ? "INVALIDATE" : "INVALIDATE",
+                                "vehicle_or_path_invalid");
+            continue;
+        }
+
+        if (!c.active) {
+            if (owner->mission_phase == MissionPhase::TO_B &&
+                owner->path_gen == c.owner_path_gen &&
+                other->path_gen == c.other_path_gen &&
+                other->mission_phase == MissionPhase::TO_A1) {
+                c.active = true;
+                c.handoff_already_inside = false;
+                for (const auto& z : c.intervals) {
+                    if (other->path_s > z.other_enter + 1e-9 &&
+                        other->path_s <= z.other_exit + 1e-9) {
+                        c.handoff_already_inside = true;
+                        break;
+                    }
+                }
+                logDepartureCluster(
+                    coord_log_sink_, "CREATE",
+                    c.handoff_already_inside ? "handoff_already_inside"
+                                             : "future_handoff",
+                    c, owner->path_s, other->path_s);
+                ++it;
+                continue;
+            }
+            const bool preview_still_matches =
+                (owner->mission_phase == MissionPhase::TO_A1 ||
+                 owner->mission_phase == MissionPhase::PICKUP_DWELL) &&
+                owner->pending_dropoff_valid &&
+                !owner->pending_dropoff_track.empty() &&
+                owner->path_gen + 1 == c.owner_path_gen &&
+                other->path_gen == c.other_path_gen &&
+                other->mission_phase == MissionPhase::TO_A1 &&
+                (owner->mission_phase == MissionPhase::PICKUP_DWELL ||
+                 (future_a1_commitment_.valid() &&
+                  future_a1_commitment_.owner_id == owner->id &&
+                  future_a1_commitment_.owner_path_gen == owner->path_gen));
+            if (!preview_still_matches) {
+                it = eraseWithEvent(it, "INVALIDATE", "staged_handoff_invalid");
+            } else {
+                ++it;
+            }
+            continue;
+        }
+
+        if (!departureClusterGenerationsMatch(
+                c.owner_path_gen, owner->path_gen,
+                c.other_path_gen, other->path_gen)) {
+            it = eraseWithEvent(it, "INVALIDATE", "path_gen_changed");
+        } else if (owner->mission_phase != MissionPhase::TO_B ||
+                   other->mission_phase != MissionPhase::TO_A1) {
+            it = eraseWithEvent(it, "INVALIDATE", "mission_phase_changed");
+        } else if (departureClusterCleared(
+                       owner->path_s, c.owner_release_exit_s,
+                       other->path_s, c.other_release_exit_s)) {
+            const char* reason = owner->path_s > c.owner_release_exit_s + 1e-9
+                ? "owner_cleared_cluster" : "other_cleared_cluster";
+            it = eraseWithEvent(it, "RELEASE", reason);
+        } else {
+            ++it;
+        }
+    }
+
+    // Fallback for a TO_B activation that was not represented in the current
+    // Future snapshot. It deterministically rebuilds the same protected
+    // closure from the actual prepared track and the existing full-zone cache.
+    constexpr double kStopBuffer = 0.01;
+    for (VehicleAgent& owner : vehicles) {
+        if (!owner.active() || owner.track.empty() ||
+            owner.mission_phase != MissionPhase::TO_B ||
+            !owner.a1_departure_committed ||
+            owner.a1_departure_priority_until_s <= 1e-9) {
+            continue;
+        }
+        for (VehicleAgent& other : vehicles) {
+            if (other.id == owner.id || !other.active() || other.track.empty() ||
+                other.mission_phase != MissionPhase::TO_A1) {
+                continue;
+            }
+            const std::pair<int, int> key{std::min(owner.id, other.id),
+                                          std::max(owner.id, other.id)};
+            if (departure_cluster_commitments_.count(key) != 0) continue;
+            const bool owner_is_lo = owner.id < other.id;
+            const VehicleAgent& lo = owner_is_lo ? owner : other;
+            const VehicleAgent& hi = owner_is_lo ? other : owner;
+            const auto& blocks = conflictBlocksCanonical(lo, hi);
+            const FutureA1ZoneSelection selected =
+                selectFutureA1ProtectedZones(
+                    blocks, owner_is_lo,
+                    owner.a1_departure_priority_until_s, other.path_s);
+            if (selected.protected_indices.empty() ||
+                selected.upstream_index < 0) {
+                continue;
+            }
+            DepartureClusterCommitment c;
+            c.owner_id = owner.id;
+            c.owner_path_gen = owner.path_gen;
+            c.other_id = other.id;
+            c.other_path_gen = other.path_gen;
+            c.seed_indices = selected.seed_indices;
+            c.cluster_indices = selected.protected_indices;
+            c.waiter_stop_boundary_s =
+                selected.normalized_zones[static_cast<size_t>(
+                    selected.upstream_index)].s_other_enter;
+            c.waiter_stop_s =
+                std::max(0.0, c.waiter_stop_boundary_s - kStopBuffer);
+            c.active = true;
+            c.handoff_already_inside = selected.other_already_inside;
+            for (size_t index : selected.protected_indices) {
+                const ConflictZone& z = selected.normalized_zones[index];
+                c.intervals.push_back(FutureA1ConflictInterval{
+                    z.s_self_enter, z.s_self_exit,
+                    z.s_other_enter, z.s_other_exit});
+                c.owner_release_exit_s =
+                    std::max(c.owner_release_exit_s, z.s_self_exit);
+                c.other_release_exit_s =
+                    std::max(c.other_release_exit_s, z.s_other_exit);
+            }
+            departure_cluster_commitments_[key] = c;
+            logDepartureCluster(
+                coord_log_sink_, "CREATE",
+                c.handoff_already_inside ? "handoff_already_inside"
+                                         : "deterministic_rebuild",
+                c, owner.path_s, other.path_s);
+        }
+    }
+}
+
+int RuleEngine::departureClusterOwnerForPair(const VehicleAgent& a,
+                                             const VehicleAgent& b) const {
+    const std::pair<int, int> key{std::min(a.id, b.id), std::max(a.id, b.id)};
+    const auto it = departure_cluster_commitments_.find(key);
+    if (it == departure_cluster_commitments_.end() || !it->second.active) {
+        return -1;
+    }
+    const DepartureClusterCommitment& c = it->second;
+    const VehicleAgent* owner = a.id == c.owner_id ? &a :
+                                b.id == c.owner_id ? &b : nullptr;
+    const VehicleAgent* other = a.id == c.other_id ? &a :
+                                b.id == c.other_id ? &b : nullptr;
+    if (owner == nullptr || other == nullptr ||
+        owner->path_gen != c.owner_path_gen ||
+        other->path_gen != c.other_path_gen) {
+        return -1;
+    }
+    if (futureA1OtherInsideCluster(c.intervals, other->path_s)) {
+        return other->id;  // Actual occupancy is stronger than handoff.
+    }
+    return owner->id;
+}
+
+void RuleEngine::enforceDepartureClusterCommitments(
+    std::vector<VehicleAgent>& vehicles, double dt) {
+    auto agentById = [&](int id) -> VehicleAgent* {
+        for (VehicleAgent& v : vehicles) {
+            if (v.id == id) return &v;
+        }
+        return nullptr;
+    };
+    for (auto& entry : departure_cluster_commitments_) {
+        DepartureClusterCommitment& c = entry.second;
+        if (!c.active) continue;
+        VehicleAgent* owner = agentById(c.owner_id);
+        VehicleAgent* other = agentById(c.other_id);
+        if (owner == nullptr || other == nullptr) continue;
+        const bool already_inside =
+            futureA1OtherInsideCluster(c.intervals, other->path_s);
+        if (already_inside) continue;
+
+        const double distance = c.waiter_stop_s - other->path_s;
+        const double speed = std::max(0.0, other->current_speed);
+        const double stopping_distance =
+            speed * speed / (2.0 * std::max(1e-6, cfg_.max_decel)) +
+            speed * dt;
+        if (distance > stopping_distance + 1e-9) continue;
+        applyActionRequest(*other, VehicleAction::STOP,
+                           "departure_cluster_priority", owner->id);
+        if (!c.hold_logged) {
+            logDepartureCluster(coord_log_sink_, "HOLD",
+                                "cluster_stop_boundary", c,
+                                owner->path_s, other->path_s);
+            c.hold_logged = true;
+        }
     }
 }
 
@@ -860,25 +1388,14 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             cache.gen_hi = hi.path_gen;
         }
 
-        bool eligible = false;
-        for (const ConflictZone& zone : cache.blocks) {
-            const double exit_enter = preview_is_lo
-                ? zone.s_self_enter : zone.s_other_enter;
-            const double other_enter = preview_is_lo
-                ? zone.s_other_enter : zone.s_self_enter;
-            const double other_exit = preview_is_lo
-                ? zone.s_other_exit : zone.s_self_exit;
-            if (exit_enter >= owner->a1_departure_priority_until_s - 1e-9 ||
-                other->path_s > other_exit + 1e-9) {
-                continue;
-            }
-            if (other->path_s > other_enter + 1e-9 &&
-                other->path_s <= other_exit + 1e-9) {
-                return -1;  // Actual occupancy remains stronger.
-            }
-            eligible = true;
+        const FutureA1ZoneSelection future_zones =
+            selectFutureA1ProtectedZones(
+                cache.blocks, preview_is_lo,
+                owner->a1_departure_priority_until_s, other->path_s);
+        if (future_zones.protected_indices.empty() ||
+            future_zones.other_already_inside) {
+            return -1;  // Actual occupancy remains stronger.
         }
-        if (!eligible) return -1;
 
         // The other vehicle may be outside the prepared exit conflict but
         // already physically committed to a conflict on the owner's current
@@ -943,10 +1460,14 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     insideInterval(lo, r.enter_lo, r.exit_lo);
                 const bool hi_inside =
                     insideInterval(hi, r.enter_hi, r.exit_hi);
+                const int departure_cluster_owner =
+                    departureClusterOwnerForPair(a, b);
                 const int future_owner = futureA1OwnerForPair(a, b);
-                if (!lo_inside && !hi_inside && future_owner >= 0 &&
-                    r.owner_id != future_owner) {
-                    r.owner_id = future_owner;
+                const int protected_owner = departure_cluster_owner >= 0
+                    ? departure_cluster_owner : future_owner;
+                if (!lo_inside && !hi_inside && protected_owner >= 0 &&
+                    r.owner_id != protected_owner) {
+                    r.owner_id = protected_owner;
                     logConflictReservation(coord_log_sink_, key, "update", r);
                 }
 
@@ -1096,6 +1617,8 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     holder = priorityWinner(a, b);
                 }
             } else {
+                const int departure_cluster_owner =
+                    departureClusterOwnerForPair(a, b);
                 const int future_owner = futureA1OwnerForPair(a, b);
                 const bool a_a1_departure =
                     a.a1_departure_committed &&
@@ -1103,7 +1626,9 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 const bool b_a1_departure =
                     b.a1_departure_committed &&
                     b.path_s < b.a1_departure_priority_until_s - 1e-9;
-                if (future_owner >= 0) {
+                if (departure_cluster_owner >= 0) {
+                    holder = departure_cluster_owner;
+                } else if (future_owner >= 0) {
                     holder = future_owner;
                 } else if (a_a1_departure != b_a1_departure) {
                     // Normal A1 case: neither vehicle has entered this event,
@@ -1253,29 +1778,15 @@ void RuleEngine::enforceFutureA1Admission(
             cache.gen_hi = hi.path_gen;
         }
 
-        bool future_already_inside = false;
+        const FutureA1ZoneSelection future_zones =
+            selectFutureA1ProtectedZones(cache.blocks, preview_is_lo,
+                                         protected_until, other.path_s);
         std::optional<double> future_exit_enter_s;
         ConflictZone future_selected;
-        for (const ConflictZone& canonical : cache.blocks) {
-            ConflictZone zone = canonical;
-            if (!preview_is_lo) {
-                std::swap(zone.s_self_enter, zone.s_other_enter);
-                std::swap(zone.s_self_exit, zone.s_other_exit);
-            }
-            if (zone.s_self_enter >= protected_until - 1e-9) continue;
-            if (other.path_s > zone.s_other_exit + 1e-9) continue;
-            if (other.path_s > zone.s_other_enter + 1e-9 &&
-                other.path_s <= zone.s_other_exit + 1e-9) {
-                future_already_inside = true;
-                future_exit_enter_s = zone.s_other_enter;
-                future_selected = zone;
-                break;
-            }
-            if (!future_exit_enter_s ||
-                zone.s_other_enter < *future_exit_enter_s) {
-                future_exit_enter_s = zone.s_other_enter;
-                future_selected = zone;
-            }
+        if (future_zones.upstream_index >= 0) {
+            future_selected = future_zones.normalized_zones[
+                static_cast<size_t>(future_zones.upstream_index)];
+            future_exit_enter_s = future_selected.s_other_enter;
         }
 
         // Admission must also keep the non-owner upstream of any still-relevant
@@ -1318,7 +1829,7 @@ void RuleEngine::enforceFutureA1Admission(
         if (!future_exit_enter_s) continue;
 
         const bool already_inside =
-            future_already_inside || ordinary_already_inside;
+            future_zones.other_already_inside || ordinary_already_inside;
         const std::optional<double> selected_stop_boundary_s =
             futureA1StopBoundary(future_exit_enter_s, ordinary_enter_s);
         const std::optional<double> selected_stop_s =
@@ -1328,6 +1839,41 @@ void RuleEngine::enforceFutureA1Admission(
             std::abs(*ordinary_enter_s - *selected_stop_boundary_s) <= 1e-9;
         const ConflictZone& selected = ordinary_selected_boundary
             ? ordinary_selected : future_selected;
+
+        // Stage the exact admission boundary and transitive exit cluster for
+        // the generation activatePreparedDropoffLeg() will assign. The entry
+        // remains inert until refreshDepartureClusterCommitments() observes
+        // the actual TO_B transition, so it cannot act as a second Future
+        // owner during TO_A1/PICKUP_DWELL.
+        const std::pair<int, int> cluster_key{
+            std::min(owner->id, other.id), std::max(owner->id, other.id)};
+        auto existing_cluster =
+            departure_cluster_commitments_.find(cluster_key);
+        if (existing_cluster == departure_cluster_commitments_.end() ||
+            !existing_cluster->second.active) {
+            DepartureClusterCommitment staged;
+            staged.owner_id = owner->id;
+            staged.owner_path_gen = exit_preview.path_gen;
+            staged.other_id = other.id;
+            staged.other_path_gen = other.path_gen;
+            staged.seed_indices = future_zones.seed_indices;
+            staged.cluster_indices = future_zones.protected_indices;
+            staged.waiter_stop_boundary_s = *selected_stop_boundary_s;
+            staged.waiter_stop_s = *selected_stop_s;
+            staged.handed_off_from_future = true;
+            staged.handoff_already_inside = already_inside;
+            for (size_t index : future_zones.protected_indices) {
+                const ConflictZone& z = future_zones.normalized_zones[index];
+                staged.intervals.push_back(FutureA1ConflictInterval{
+                    z.s_self_enter, z.s_self_exit,
+                    z.s_other_enter, z.s_other_exit});
+                staged.owner_release_exit_s =
+                    std::max(staged.owner_release_exit_s, z.s_self_exit);
+                staged.other_release_exit_s =
+                    std::max(staged.other_release_exit_s, z.s_other_exit);
+            }
+            departure_cluster_commitments_[cluster_key] = std::move(staged);
+        }
 
         auto appendAdmissionGeometry = [&](std::ostringstream& line) {
             line << " future_exit_enter_s=" << *future_exit_enter_s
@@ -1339,7 +1885,25 @@ void RuleEngine::enforceFutureA1Admission(
                  << " stop_s=" << *selected_stop_s
                  << " other_s=" << other.path_s
                  << " already_inside="
-                 << (already_inside ? "true" : "false");
+                 << (already_inside ? "true" : "false")
+                 << " seed_zones=[";
+            for (size_t i = 0; i < future_zones.seed_indices.size(); ++i) {
+                if (i > 0) line << ",";
+                line << future_zones.seed_indices[i];
+            }
+            line << "] closure_zones=[";
+            for (size_t i = 0;
+                 i < future_zones.protected_indices.size(); ++i) {
+                if (i > 0) line << ",";
+                line << future_zones.protected_indices[i];
+            }
+            line << "] selected_zone_count="
+                 << future_zones.protected_indices.size()
+                 << " inclusion_reason="
+                 << (future_zones.protected_indices.size() >
+                             future_zones.seed_indices.size()
+                         ? "protected_seed+other_interval_overlap"
+                         : "protected_seed");
         };
 
         const std::pair<int, int> log_key{owner->id, other.id};
@@ -2042,8 +2606,10 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
     const double pairwise_horizon = prediction_horizon_override >= 0.0
         ? prediction_horizon_override
         : cfg_.prediction_horizon;
+    refreshDepartureClusterCommitments(vehicles);
     resolvePairwiseConflicts(vehicles, dt, pairwise_horizon);
     enforceFutureA1Admission(vehicles, dt);
+    enforceDepartureClusterCommitments(vehicles, dt);
     resolveTargetSlotOccupancy(vehicles);  // slot-mouth queueing (spec 6/7)
     enforceForwardClearance(vehicles);     // 普适前向净空兜底:堵分类接缝→防十字楔死
     applyFollowingSuggestions(vehicles);   // lowest-priority longitudinal hint
