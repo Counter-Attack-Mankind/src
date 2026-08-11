@@ -26,12 +26,21 @@
 
 #include "forklift_map/forklift_map.h"
 #include "forklift_map/map_param.h"
+#include "forklift_planner/multi_vehicle/cluster_admission_counterfactual_simulator.h"
+#include "forklift_planner/multi_vehicle/dynamic_cluster_admission_shadow.h"
 #include "forklift_planner/multi_vehicle/footprint.h"
 #include "forklift_planner/multi_vehicle/future_a1_policy.h"
+#include "forklift_planner/multi_vehicle/future_cluster_admission_shadow.h"
+#include "forklift_planner/multi_vehicle/future_cluster_arbitration_shadow.h"
+#include "forklift_planner/multi_vehicle/future_conflict_cluster_shadow.h"
+#include "forklift_planner/multi_vehicle/future_conflict_zone_shadow.h"
+#include "forklift_planner/multi_vehicle/future_mission_trajectory.h"
 #include "forklift_planner/multi_vehicle/marker_publisher.h"
 #include "forklift_planner/multi_vehicle/multi_vehicle_config.h"
+#include "forklift_planner/multi_vehicle/prediction_shadow_comparator.h"
 #include "forklift_planner/multi_vehicle/rule_engine.h"
 #include "forklift_planner/multi_vehicle/task_allocator.h"
+#include "forklift_planner/multi_vehicle/timed_conflict_shadow_checker.h"
 #include "forklift_planner/multi_vehicle/traffic_resource_map.h"
 #include "forklift_planner/path_generator.h"
 #include "forklift_planner/planner_param.h"
@@ -107,6 +116,38 @@ public:
             mp_, pp_, cfg_, *map_, *generator_);
         rule_engine_ = std::make_unique<forklift_planner::multi_vehicle::RuleEngine>(
             mp_, cfg_);
+        future_mission_plan_builder_ = std::make_unique<
+            forklift_planner::multi_vehicle::FutureMissionPlanBuilder>(cfg_);
+        future_trajectory_generator_ = std::make_unique<
+            forklift_planner::multi_vehicle::FutureTrajectoryGenerator>(mp_, cfg_);
+        legacy_prediction_shadow_generator_ = std::make_unique<
+            forklift_planner::multi_vehicle::LegacyPredictionShadowGenerator>(
+                mp_, cfg_);
+        prediction_shadow_comparator_ = std::make_unique<
+            forklift_planner::multi_vehicle::PredictionShadowComparator>();
+        timed_conflict_shadow_checker_ = std::make_unique<
+            forklift_planner::multi_vehicle::TimedConflictShadowChecker>(
+                mp_, cfg_);
+        future_conflict_zone_shadow_builder_ = std::make_unique<
+            forklift_planner::multi_vehicle::
+                FutureConflictZoneShadowBuilder>(mp_, cfg_);
+        future_conflict_cluster_shadow_builder_ = std::make_unique<
+            forklift_planner::multi_vehicle::
+                FutureConflictClusterShadowBuilder>();
+        future_cluster_arbitration_shadow_ = std::make_unique<
+            forklift_planner::multi_vehicle::
+                FutureClusterArbitrationShadow>();
+        future_cluster_admission_shadow_ = std::make_unique<
+            forklift_planner::multi_vehicle::
+                FutureClusterAdmissionShadow>();
+        future_cluster_admission_shadow_tracker_ = std::make_unique<
+            forklift_planner::multi_vehicle::
+                FutureClusterAdmissionShadowTracker>();
+        cluster_admission_evaluator_ = std::make_unique<
+            forklift_planner::multi_vehicle::ClusterAdmissionEvaluator>();
+        cluster_admission_counterfactual_simulator_ = std::make_unique<
+            forklift_planner::multi_vehicle::
+                ClusterAdmissionCounterfactualSimulator>();
         const auto coord_log_sink = [this](const std::string& line) {
             coordLog(line);
         };
@@ -145,9 +186,16 @@ public:
         double batch_minutes = 0.0;
         pnh.param("batch_ticks", batch_ticks, 0);
         pnh.param("batch_minutes", batch_minutes, 0.0);
+        pnh.param("cluster_counterfactual_shadow",
+                  cluster_counterfactual_shadow_enabled_, false);
         if (batch_ticks <= 0 && batch_minutes > 0.0)
             batch_ticks = static_cast<int>(batch_minutes * 60.0 * pp_.update_rate);
         cfg_batch_ticks_ = batch_ticks > 0 ? static_cast<unsigned long long>(batch_ticks) : 0;
+        if (cluster_counterfactual_shadow_enabled_) {
+            ROS_WARN("[PHASE63] counterfactual cluster admission simulation "
+                     "enabled; this process is a shadow experiment and does "
+                     "not represent baseline RuleEngine behavior");
+        }
         if (cfg_batch_ticks_ > 0) {
             ROS_WARN("[batch] 无头快速回归模式:将狂跑 %llu 拍(≈%.0f 仿真分钟),"
                      "不发 marker、不按实时。", cfg_batch_ticks_,
@@ -173,6 +221,30 @@ private:
     using VehicleMode = forklift_planner::multi_vehicle::VehicleMode;
     using MissionPhase = forklift_planner::multi_vehicle::MissionPhase;
     using LegTargetKind = forklift_planner::multi_vehicle::LegTargetKind;
+    using FutureCertainty =
+        forklift_planner::multi_vehicle::FutureCertainty;
+    using FutureMissionTrajectory =
+        forklift_planner::multi_vehicle::FutureMissionTrajectory;
+    using FutureSegmentType =
+        forklift_planner::multi_vehicle::FutureSegmentType;
+    using PredictionShadowReport =
+        forklift_planner::multi_vehicle::PredictionShadowReport;
+    using TimedConflictShadowReport =
+        forklift_planner::multi_vehicle::TimedConflictShadowReport;
+    using FutureConflictZone =
+        forklift_planner::multi_vehicle::FutureConflictZone;
+    using FutureConflictCluster =
+        forklift_planner::multi_vehicle::FutureConflictCluster;
+    using ClusterReservationShadow =
+        forklift_planner::multi_vehicle::ClusterReservationShadow;
+    using ClusterAdmissionShadow =
+        forklift_planner::multi_vehicle::ClusterAdmissionShadow;
+    using ClusterAdmissionConstraint =
+        forklift_planner::multi_vehicle::ClusterAdmissionConstraint;
+    using ShadowVehicleState =
+        forklift_planner::multi_vehicle::ShadowVehicleState;
+    using CounterfactualShadowAction =
+        forklift_planner::multi_vehicle::CounterfactualShadowAction;
 
     // Transitional simulation plan (stage 2 of the horizon refactor).
     // The planner still uses the existing sandbox world model for now, but
@@ -941,6 +1013,7 @@ private:
         // while batch mode calls this function directly. Keep both paths
         // behaviorally identical.
         prepareA1DropoffPreviewsForHorizon();
+        buildFutureMissionTrajectoryCache();
 
         const auto previous_commitment = future_a1_commitment_;
         const A1ArrivalSummary arrivals = predictA1Arrivals(rb_horizon_);
@@ -964,6 +1037,10 @@ private:
         sim_plan_valid_ = !sim_plan_frames_.empty();
         sim_plan_start_time_ = sim_time_;
         ++sim_plan_id_;
+        evaluateFutureClusterArbitrationShadow();
+        publishFutureClusterArbitrationShadowMarkers();
+        publishFutureClusterAdmissionShadowMarkers();
+        publishFutureClusterCounterfactualMarkers();
         logFutureA1Transition(previous_commitment, commitment, arrivals,
                               change_reason);
         ROS_INFO("[sim_plan] built plan=%llu start=%.2f horizon=%.2f "
@@ -985,6 +1062,1418 @@ private:
                      std::max(0.0, rb_horizon_ - v.dwell_remaining),
                      rb_horizon_);
         }
+    }
+
+    void buildFutureMissionTrajectoryCache() {
+        future_trajectory_cache_.clear();
+        future_trajectory_cache_.reserve(agents_.size());
+        prediction_shadow_reports_.clear();
+        prediction_shadow_reports_.reserve(agents_.size());
+        legacy_prediction_cache_.clear();
+        legacy_prediction_cache_.reserve(agents_.size());
+
+        for (const VehicleAgent& vehicle : agents_) {
+            std::optional<forklift_planner::multi_vehicle::PathTrack>
+                next_pickup_track;
+            int pickup_slot = -1;
+            if (vehicle.mission_phase == MissionPhase::TO_B) {
+                pickup_slot = vehicle.target_slot;
+            } else if (vehicle.mission_phase == MissionPhase::UNLOAD_DWELL) {
+                pickup_slot = vehicle.current_slot;
+            }
+            if (pickup_slot >= 0) {
+                forklift_planner::multi_vehicle::PathTrack preview;
+                if (allocator_->previewPickupTrack(pickup_slot, preview)) {
+                    next_pickup_track = std::move(preview);
+                }
+            }
+
+            FutureMissionTrajectory trajectory;
+            trajectory.plan = future_mission_plan_builder_->build(
+                vehicle, rb_horizon_, next_pickup_track);
+            trajectory.samples =
+                future_trajectory_generator_->generate(trajectory.plan);
+
+            const auto legacy_samples =
+                legacy_prediction_shadow_generator_->generate(vehicle,
+                                                               rb_horizon_);
+            const PredictionShadowReport shadow =
+                prediction_shadow_comparator_->compare(
+                    vehicle, legacy_samples, trajectory);
+            prediction_shadow_reports_.push_back(shadow);
+            legacy_prediction_cache_.push_back(legacy_samples);
+
+            {
+                std::ostringstream line;
+                line << std::fixed << std::setprecision(2)
+                     << "[FUTURE_SHADOW] vehicle=V" << vehicle.id
+                     << " event=SUMMARY horizon=" << rb_horizon_
+                     << " old_samples=" << shadow.old_sample_count
+                     << " new_samples=" << shadow.new_sample_count
+                     << " matched=" << shadow.matched_sample_count
+                     << " segment_mismatch="
+                     << shadow.segment_mismatch_count
+                     << " time_mismatch=" << shadow.time_mismatch_count
+                     << std::scientific << std::setprecision(6)
+                     << " max_s_error=" << shadow.max_s_error
+                     << " mean_s_error=" << shadow.mean_s_error
+                     << " max_position_error="
+                     << shadow.max_position_error
+                     << " mean_position_error="
+                     << shadow.mean_position_error
+                     << " max_speed_error=" << shadow.max_speed_error
+                     << " max_body_center_error="
+                     << shadow.max_body_center_error
+                     << " max_body_yaw_error="
+                     << shadow.max_body_yaw_error;
+                ROS_INFO("%s", line.str().c_str());
+                coordLogWithContext(line.str(), "PREDICT", sim_plan_id_ + 1,
+                                    -1, -1);
+            }
+            if (shadow.maximum_error.valid) {
+                std::ostringstream line;
+                line << std::fixed << std::setprecision(6)
+                     << "[FUTURE_SHADOW] vehicle=V" << vehicle.id
+                     << " event=MAX_ERROR t=" << shadow.maximum_error.t
+                     << " old_s=" << shadow.maximum_error.old_s
+                     << " new_s=" << shadow.maximum_error.new_s
+                     << " position_error="
+                     << shadow.maximum_error.position_error
+                     << " phase="
+                     << missionPhaseName(shadow.maximum_error.new_phase)
+                     << " segment="
+                     << shadow.maximum_error.new_segment_id;
+                ROS_INFO("%s", line.str().c_str());
+                coordLogWithContext(line.str(), "PREDICT", sim_plan_id_ + 1,
+                                    -1, -1);
+            }
+            if (shadow.first_mismatch.valid) {
+                std::ostringstream line;
+                line << std::fixed << std::setprecision(2)
+                     << "[FUTURE_SHADOW] vehicle=V" << vehicle.id
+                     << " event=SEGMENT_MISMATCH t="
+                     << shadow.first_mismatch.t
+                     << " old="
+                     << (shadow.first_mismatch.mismatch ==
+                                 forklift_planner::multi_vehicle::
+                                     ShadowMismatchKind::
+                                         OLD_PREDICTION_UNAVAILABLE
+                             ? "unavailable"
+                             : "current_track")
+                     << " new_phase="
+                     << missionPhaseName(shadow.first_mismatch.new_phase)
+                     << " new_segment="
+                     << shadow.first_mismatch.new_segment_id
+                     << " reason="
+                     << forklift_planner::multi_vehicle::
+                            shadowMismatchKindName(
+                                shadow.first_mismatch.mismatch);
+                ROS_INFO("%s", line.str().c_str());
+                coordLogWithContext(line.str(), "PREDICT", sim_plan_id_ + 1,
+                                    -1, -1);
+            }
+
+            for (const auto& segment : trajectory.plan.segments) {
+                std::ostringstream line;
+                line << std::fixed << std::setprecision(2)
+                     << "[FUTURE_MISSION] vehicle=V" << vehicle.id
+                     << " segment=" << segment.segment_id
+                     << " phase=" << missionPhaseName(segment.phase)
+                     << " type="
+                     << forklift_planner::multi_vehicle::
+                            futureSegmentTypeName(segment.type)
+                     << " certainty="
+                     << forklift_planner::multi_vehicle::
+                            futureCertaintyName(segment.certainty)
+                     << " start=" << segment.start_time
+                     << " duration=" << segment.duration
+                     << " path_gen="
+                     << segment.mission_leg_id.expected_path_gen;
+                ROS_INFO("%s", line.str().c_str());
+                coordLogWithContext(line.str(), "PREDICT", sim_plan_id_ + 1,
+                                    -1, -1);
+            }
+            future_trajectory_cache_.push_back(std::move(trajectory));
+        }
+        future_conflict_zones_ =
+            future_conflict_zone_shadow_builder_->build(
+                future_trajectory_cache_);
+        future_conflict_clusters_ =
+            future_conflict_cluster_shadow_builder_->build(
+                future_conflict_zones_, sim_plan_id_ + 1);
+        logFutureConflictZones();
+        logFutureConflictClusters();
+        runTimedConflictShadowComparison();
+        publishFutureMissionMarkers();
+        publishFutureShadowConflictMarkers();
+        publishFutureConflictZoneShadowMarkers();
+        publishFutureConflictClusterShadowMarkers();
+    }
+
+    void logFutureConflictZones() {
+        for (const FutureConflictZone& zone : future_conflict_zones_) {
+            if (zone.source != forklift_planner::multi_vehicle::
+                                   FutureConflictZoneSource::FUTURE_SEGMENT) {
+                continue;
+            }
+            const auto key = std::make_tuple(
+                zone.vehicle_a, zone.vehicle_b, zone.segment_id_a,
+                zone.segment_id_b, zone.path_generation_a,
+                zone.path_generation_b,
+                static_cast<long long>(std::llround(zone.s_a_enter * 1000.0)),
+                static_cast<long long>(std::llround(zone.s_b_enter * 1000.0)));
+            if (!future_conflict_zone_log_keys_.insert(key).second) continue;
+            std::ostringstream line;
+            line << std::fixed << std::setprecision(3)
+                 << "[FUTURE_CONFLICT_ZONE] pair=V" << zone.vehicle_a
+                 << "-V" << zone.vehicle_b
+                 << " future_zone=" << zone.future_zone_id
+                 << " segment_a=" << zone.segment_id_a
+                 << " phase_a=" << missionPhaseName(zone.phase_a)
+                 << " certainty_a="
+                 << forklift_planner::multi_vehicle::futureCertaintyName(
+                        zone.certainty_a)
+                 << " segment_b=" << zone.segment_id_b
+                 << " phase_b=" << missionPhaseName(zone.phase_b)
+                 << " certainty_b="
+                 << forklift_planner::multi_vehicle::futureCertaintyName(
+                        zone.certainty_b)
+                 << " s_a=[" << zone.s_a_enter << "," << zone.s_a_exit
+                 << "] s_b=[" << zone.s_b_enter << "," << zone.s_b_exit
+                 << "] center=(" << zone.x << "," << zone.y << ")"
+                 << " path_gen_a=" << zone.path_generation_a
+                 << " path_gen_b=" << zone.path_generation_b
+                 << " source="
+                 << forklift_planner::multi_vehicle::
+                        futureConflictZoneSourceName(zone.source);
+            ROS_INFO("%s", line.str().c_str());
+            coordLogWithContext(line.str(), "PREDICT", sim_plan_id_ + 1,
+                                -1, -1);
+        }
+    }
+
+    void logFutureConflictClusters() {
+        for (const FutureConflictCluster& cluster :
+             future_conflict_clusters_) {
+            if (cluster.member_zone_ids.size() < 2) continue;
+            std::ostringstream line;
+            line << "[FUTURE_CONFLICT_CLUSTER] snapshot="
+                 << cluster.horizon_snapshot_id
+                 << " cluster=" << cluster.cluster_id
+                 << " pair=V" << cluster.vehicle_a << "-V"
+                 << cluster.vehicle_b << " members=[";
+            for (std::size_t i = 0; i < cluster.member_zone_ids.size(); ++i) {
+                if (i > 0) line << ",";
+                line << cluster.member_zone_ids[i];
+            }
+            line << "] merge_reason=";
+            for (std::size_t i = 0; i < cluster.merge_reasons.size(); ++i) {
+                if (i > 0) line << "|";
+                line << forklift_planner::multi_vehicle::
+                    futureConflictClusterMergeReasonName(
+                        cluster.merge_reasons[i]);
+            }
+            ROS_INFO("%s", line.str().c_str());
+            coordLogWithContext(line.str(), "PREDICT",
+                                cluster.horizon_snapshot_id, -1, -1);
+        }
+    }
+
+    void evaluateFutureClusterArbitrationShadow() {
+        cluster_arbitration_shadows_.clear();
+        cluster_admission_shadows_.clear();
+        cluster_admission_constraints_.clear();
+        const auto snapshot = rule_engine_->snapshot();
+
+        auto agentById = [&](int id) -> const VehicleAgent* {
+            for (const VehicleAgent& vehicle : agents_) {
+                if (vehicle.id == id) return &vehicle;
+            }
+            return nullptr;
+        };
+
+        for (const FutureConflictCluster& cluster :
+             future_conflict_clusters_) {
+            const VehicleAgent* vehicle_a = agentById(cluster.vehicle_a);
+            const VehicleAgent* vehicle_b = agentById(cluster.vehicle_b);
+            if (vehicle_a == nullptr || vehicle_b == nullptr ||
+                cluster.member_zones.empty()) {
+                continue;
+            }
+
+            forklift_planner::multi_vehicle::
+                ClusterArbitrationShadowContext context;
+            const std::pair<int, int> pair{
+                std::min(vehicle_a->id, vehicle_b->id),
+                std::max(vehicle_a->id, vehicle_b->id)};
+
+            const auto departure = snapshot.departure_clusters.find(pair);
+            if (departure != snapshot.departure_clusters.end() &&
+                departure->second.active) {
+                const auto& commitment = departure->second;
+                const VehicleAgent* owner =
+                    vehicle_a->id == commitment.owner_id ? vehicle_a :
+                    vehicle_b->id == commitment.owner_id ? vehicle_b :
+                    nullptr;
+                const VehicleAgent* other =
+                    vehicle_a->id == commitment.other_id ? vehicle_a :
+                    vehicle_b->id == commitment.other_id ? vehicle_b :
+                    nullptr;
+                if (owner != nullptr && other != nullptr &&
+                    owner->path_gen == commitment.owner_path_gen &&
+                    other->path_gen == commitment.other_path_gen) {
+                    context.departure_cluster_owner_id =
+                        forklift_planner::multi_vehicle::
+                            futureA1OtherInsideCluster(
+                                commitment.intervals, other->path_s)
+                            ? other->id
+                            : owner->id;
+                }
+            }
+
+            if (future_a1_commitment_.valid() &&
+                (future_a1_commitment_.owner_id == vehicle_a->id ||
+                 future_a1_commitment_.owner_id == vehicle_b->id)) {
+                const VehicleAgent* owner =
+                    future_a1_commitment_.owner_id == vehicle_a->id
+                        ? vehicle_a : vehicle_b;
+                const VehicleAgent* other =
+                    owner == vehicle_a ? vehicle_b : vehicle_a;
+                const bool owner_phase_valid =
+                    owner->mission_phase == MissionPhase::TO_A1 ||
+                    owner->mission_phase == MissionPhase::PICKUP_DWELL;
+                bool protects_cluster = false;
+                for (const FutureConflictZone& zone :
+                     cluster.member_zones) {
+                    const bool owner_is_a = zone.vehicle_a == owner->id;
+                    const MissionPhase owner_phase =
+                        owner_is_a ? zone.phase_a : zone.phase_b;
+                    const MissionPhase other_phase =
+                        owner_is_a ? zone.phase_b : zone.phase_a;
+                    const int owner_generation = owner_is_a
+                        ? zone.path_generation_a : zone.path_generation_b;
+                    const int other_generation = owner_is_a
+                        ? zone.path_generation_b : zone.path_generation_a;
+                    if (owner_phase == MissionPhase::TO_B &&
+                        other_phase == MissionPhase::TO_A1 &&
+                        owner_generation == owner->path_gen + 1 &&
+                        other_generation == other->path_gen) {
+                        protects_cluster = true;
+                        break;
+                    }
+                }
+                if (owner_phase_valid && owner->pending_dropoff_valid &&
+                    owner->path_gen ==
+                        future_a1_commitment_.owner_path_gen &&
+                    other->mission_phase == MissionPhase::TO_A1 &&
+                    protects_cluster) {
+                    context.future_a1_owner_id = owner->id;
+                }
+            }
+
+            context.a_a1_departure =
+                vehicle_a->a1_departure_committed &&
+                vehicle_a->path_s <
+                    vehicle_a->a1_departure_priority_until_s - 1e-9;
+            context.b_a1_departure =
+                vehicle_b->a1_departure_committed &&
+                vehicle_b->path_s <
+                    vehicle_b->a1_departure_priority_until_s - 1e-9;
+            const double terminal_distance = std::max(
+                cfg_.target_request_distance, cfg_.target_stop_distance);
+            context.a_terminal_docking =
+                vehicle_a->active() &&
+                vehicle_a->remainingS() <= terminal_distance;
+            context.b_terminal_docking =
+                vehicle_b->active() &&
+                vehicle_b->remainingS() <= terminal_distance;
+            context.priority_winner_id =
+                rule_engine_->priorityWinner(*vehicle_a, *vehicle_b);
+
+            ClusterReservationShadow result =
+                future_cluster_arbitration_shadow_->evaluate(
+                    cluster, *vehicle_a, *vehicle_b, context);
+            cluster_arbitration_shadows_.push_back(result);
+
+            // Mirrors the existing 0.01 m Future A1/conflict admission
+            // buffer.  This value is diagnostic-only and never reaches an
+            // action request.
+            constexpr double kShadowStopBuffer = 0.01;
+            ClusterAdmissionShadow admission =
+                future_cluster_admission_shadow_->evaluate(
+                    cluster, result, *vehicle_a, *vehicle_b,
+                    kShadowStopBuffer);
+            admission = future_cluster_admission_shadow_tracker_->update(
+                std::move(admission), result, *vehicle_a, *vehicle_b,
+                sim_time_);
+            cluster_admission_shadows_.push_back(admission);
+            ++cluster_admission_evaluations_;
+            if (admission.admission_valid) {
+                ++cluster_admission_valid_count_;
+            }
+            if (admission.prevent_zone_mixing) {
+                ++cluster_admission_prevent_count_;
+            }
+            if (admission.zone_mixing_observed) {
+                ++cluster_admission_late_mixing_count_;
+            }
+
+            const VehicleAgent& constraint_waiter =
+                admission.waiter_id == vehicle_a->id
+                    ? *vehicle_a : *vehicle_b;
+            ClusterAdmissionConstraint constraint =
+                cluster_admission_evaluator_->buildConstraint(
+                    cluster, admission, result,
+                    future_trajectory_cache_, *vehicle_a, *vehicle_b,
+                    kShadowStopBuffer, 1.0 / pp_.update_rate,
+                    cfg_.max_accel, cfg_.max_decel,
+                    constraint_waiter.active()
+                        ? curvatureSpeed(constraint_waiter) : 0.0);
+            cluster_admission_constraints_.push_back(constraint);
+            if (constraint.admission_feasible) {
+                ++dynamic_admission_feasible_count_;
+            } else if (constraint.admission_reason.rfind(
+                           "admission_not_feasible", 0) == 0) {
+                ++dynamic_admission_infeasible_count_;
+            }
+            std::ostringstream dynamic_line;
+            dynamic_line << std::fixed << std::setprecision(3)
+                << "[DYNAMIC_CLUSTER_ADMISSION_SHADOW] time="
+                << readableSimTime(sim_time_)
+                << " cluster=" << constraint.cluster_id
+                << " holder="
+                << (constraint.holder_id >= 0
+                        ? "V" + std::to_string(constraint.holder_id)
+                        : "none")
+                << " waiter="
+                << (constraint.waiter_id >= 0
+                        ? "V" + std::to_string(constraint.waiter_id)
+                        : "none")
+                << " cluster_enter_s=" << constraint.cluster_enter_s
+                << " cluster_exit_s=" << constraint.cluster_exit_s
+                << " earliest_stop_s=" << constraint.earliest_stop_s
+                << " required_clearance_s="
+                << constraint.required_clearance_s
+                << " path_s=" << constraint.evaluated_path_s
+                << " speed=" << constraint.evaluated_speed
+                << " curvature_speed_limit="
+                << constraint.curvature_speed_limit
+                << " approach_speed_upper_bound="
+                << constraint.approach_speed_upper_bound
+                << " required_braking_distance="
+                << constraint.required_braking_distance
+                << " available_braking_distance="
+                << constraint.available_braking_distance
+                << " feasible="
+                << (constraint.admission_feasible ? "true" : "false")
+                << " reason=" << constraint.admission_reason
+                << " holder_lifecycle=[";
+            for (std::size_t i = 0;
+                 i < constraint.holder_lifecycle.size(); ++i) {
+                if (i > 0) dynamic_line << ",";
+                const auto& lifecycle = constraint.holder_lifecycle[i];
+                dynamic_line << missionPhaseName(lifecycle.phase)
+                    << ":seg" << lifecycle.segment_id
+                    << ":gen" << lifecycle.path_generation
+                    << ":s" << lifecycle.cluster_enter_s
+                    << "-" << lifecycle.cluster_exit_s;
+            }
+            dynamic_line << "]";
+            ROS_INFO("%s", dynamic_line.str().c_str());
+            coordLogWithContext(dynamic_line.str(), "PREDICT",
+                                constraint.horizon_snapshot_id, -1, -1);
+
+            int legacy_holder = -1;
+            const auto reservation = snapshot.reservations.find(pair);
+            if (reservation != snapshot.reservations.end()) {
+                legacy_holder = reservation->second.owner_id;
+            }
+            std::ostringstream line;
+            line << std::fixed << std::setprecision(3)
+                 << "[CLUSTER_ARBITRATION_SHADOW] time="
+                 << readableSimTime(sim_time_)
+                 << " snapshot=" << result.horizon_snapshot_id
+                 << " cluster_id=" << result.cluster_id
+                 << " vehicles=V" << result.vehicle_a << "-V"
+                 << result.vehicle_b << " member_zone_ids=[";
+            for (std::size_t i = 0; i < result.member_zone_ids.size(); ++i) {
+                if (i > 0) line << ",";
+                line << result.member_zone_ids[i];
+            }
+            line << "] holder="
+                 << (result.holder_id >= 0
+                         ? "V" + std::to_string(result.holder_id) : "none")
+                 << " waiter="
+                 << (result.waiter_id >= 0
+                         ? "V" + std::to_string(result.waiter_id) : "none")
+                 << " decision_reason=" << result.decision_reason
+                 << " stop_boundary=" << result.stop_boundary_s
+                 << " inside_a=" << (result.vehicle_a_inside ? "true" : "false")
+                 << " inside_b=" << (result.vehicle_b_inside ? "true" : "false")
+                 << " released=" << (result.all_members_cleared ? "true" : "false")
+                 << " zone_holders=[";
+            for (std::size_t i = 0;
+                 i < result.member_zone_holders.size(); ++i) {
+                if (i > 0) line << ",";
+                line << result.member_zone_holders[i].first << ":";
+                const int holder = result.member_zone_holders[i].second;
+                line << (holder >= 0 ? "V" + std::to_string(holder)
+                                     : "none");
+            }
+            line << "] mixed_zone_holders="
+                 << (result.zone_level_mixed_holders ? "true" : "false")
+                 << " legacy_reservation_holder="
+                 << (legacy_holder >= 0
+                         ? "V" + std::to_string(legacy_holder) : "none");
+            ROS_INFO("%s", line.str().c_str());
+            coordLogWithContext(line.str(), "PREDICT",
+                                result.horizon_snapshot_id, -1, -1);
+
+            std::ostringstream admission_line;
+            admission_line << std::fixed << std::setprecision(3)
+                << "[CLUSTER_ADMISSION_SHADOW] time="
+                << readableSimTime(sim_time_)
+                << " cluster_id=" << admission.cluster_id
+                << " members=[";
+            for (std::size_t i = 0;
+                 i < admission.member_zone_ids.size(); ++i) {
+                if (i > 0) admission_line << ",";
+                admission_line << admission.member_zone_ids[i];
+            }
+            admission_line << "] holder="
+                << (admission.holder_id >= 0
+                        ? "V" + std::to_string(admission.holder_id)
+                        : "none")
+                << " waiter="
+                << (admission.waiter_id >= 0
+                        ? "V" + std::to_string(admission.waiter_id)
+                        : "none")
+                << " cluster_enter_s_a="
+                << admission.cluster_enter_s_a
+                << " cluster_enter_s_b="
+                << admission.cluster_enter_s_b
+                << " waiter_stop_s=" << admission.waiter_stop_s
+                << " prevent_zone_mixing="
+                << (admission.prevent_zone_mixing ? "true" : "false")
+                << " admission_valid="
+                << (admission.admission_valid ? "true" : "false")
+                << " waiter_before_entry="
+                << (admission.waiter_before_entry ? "true" : "false")
+                << " waiter_already_inside="
+                << (admission.waiter_already_inside ? "true" : "false")
+                << " zone_mixing_observed="
+                << (admission.zone_mixing_observed ? "true" : "false")
+                << " shadow_lock_active="
+                << (admission.shadow_lock_active ? "true" : "false")
+                << " holder_change_suppressed="
+                << (admission.holder_change_suppressed ? "true" : "false")
+                << " lock_created_time="
+                << admission.shadow_lock_created_time
+                << " decision_reason=" << admission.decision_reason;
+            ROS_INFO("%s", admission_line.str().c_str());
+            coordLogWithContext(admission_line.str(), "PREDICT",
+                                admission.horizon_snapshot_id, -1, -1);
+        }
+        if (cluster_counterfactual_shadow_enabled_) {
+            cluster_admission_counterfactual_simulator_->refresh(
+                future_conflict_clusters_, cluster_admission_constraints_,
+                cluster_arbitration_shadows_, future_trajectory_cache_,
+                agents_, sim_time_);
+        }
+    }
+
+    void logCounterfactualClusterEvents() {
+        for (const auto& event :
+             cluster_admission_counterfactual_simulator_->takeEvents()) {
+            const auto& status = event.status;
+            if (event.event == "RELEASE") {
+                ++counterfactual_cluster_releases_;
+            } else if (event.event == "RESUME") {
+                ++counterfactual_waiter_resumes_;
+            } else if (event.event == "WAITER_ENTRY_VIOLATION" ||
+                       event.event ==
+                           "DYNAMIC_ADMISSION_BOUNDARY_VIOLATION") {
+                ++counterfactual_waiter_entry_violations_;
+            } else if (event.event ==
+                       "LATE_ADMISSION_BRAKING_INFEASIBLE") {
+                ++counterfactual_late_braking_events_;
+            }
+            std::ostringstream line;
+            line << std::fixed << std::setprecision(3)
+                 << "[CLUSTER_COUNTERFACTUAL] time="
+                 << readableSimTime(sim_time_)
+                 << " event=" << event.event
+                 << " cluster=" << status.cluster_id
+                 << " members=[";
+            for (std::size_t i = 0;
+                 i < status.member_zone_ids.size(); ++i) {
+                if (i > 0) line << ",";
+                line << status.member_zone_ids[i];
+            }
+            line << "] holder=V" << status.holder_id
+                 << " waiter=V" << status.waiter_id
+                 << " waiter_stop_s=" << status.waiter_stop_s
+                 << " holder_clear_time=" << status.holder_clear_time
+                 << " cluster_release_time="
+                 << status.cluster_release_time
+                 << " waiter_resume_time=" << status.waiter_resume_time
+                 << " waiter_entered_member_zone="
+                 << (status.waiter_entered_member_zone ? "true" : "false")
+                 << " braking_feasible="
+                 << (status.admission_braking_feasible ? "true" : "false");
+            ROS_WARN("%s", line.str().c_str());
+            coordLogWithContext(line.str(), "COUNTERFACTUAL",
+                                status.horizon_snapshot_id, -1, -1);
+        }
+    }
+
+    void applyClusterAdmissionCounterfactual(double dt) {
+        if (!cluster_counterfactual_shadow_enabled_) return;
+        counterfactual_shadow_states_ =
+            cluster_admission_counterfactual_simulator_->step(
+                agents_, sim_time_, dt, cfg_.max_decel);
+        logCounterfactualClusterEvents();
+
+        std::map<int, ShadowVehicleState> selected;
+        for (const ShadowVehicleState& state :
+             counterfactual_shadow_states_) {
+            const auto found = selected.find(state.vehicle_id);
+            if (found == selected.end() ||
+                state.shadow_action == CounterfactualShadowAction::STOP ||
+                found->second.shadow_action ==
+                    CounterfactualShadowAction::NONE) {
+                selected[state.vehicle_id] = state;
+            }
+        }
+
+        for (const auto& item : selected) {
+            VehicleAgent* vehicle = agentById(item.first);
+            if (vehicle == nullptr || !vehicle->active()) continue;
+            const ShadowVehicleState& state = item.second;
+            if (state.shadow_action == CounterfactualShadowAction::STOP) {
+                ++dynamic_admission_stop_requests_;
+                if (state.action_changed) {
+                    ++dynamic_admission_action_changes_;
+                }
+                const auto decision_key = std::make_tuple(
+                    state.cluster_id, state.holder_id, state.waiter_id,
+                    vehicle->path_gen,
+                    static_cast<long long>(std::llround(
+                        state.waiter_stop_s * 1000.0)));
+                if (dynamic_admission_decision_log_keys_.insert(
+                        decision_key).second) {
+                    std::ostringstream decision_line;
+                    decision_line << std::fixed << std::setprecision(3)
+                        << "[DYNAMIC_CLUSTER_DECISION_SHADOW] time="
+                        << readableSimTime(sim_time_)
+                        << " cluster=" << state.cluster_id
+                        << " holder=V" << state.holder_id
+                        << " waiter=V" << state.waiter_id
+                        << " baseline_action="
+                        << actionName(state.baseline_action)
+                        << " baseline_reason=" << vehicle->reason
+                        << " constrained_action="
+                        << actionName(state.constrained_action)
+                        << " action_changed="
+                        << (state.action_changed ? "true" : "false")
+                        << " baseline_stop_s=not_exposed"
+                        << " constraint_stop_s=" << state.waiter_stop_s
+                        << " distance_to_stop_s="
+                        << state.distance_to_stop_s
+                        << " required_braking_distance="
+                        << state.required_braking_distance
+                        << " early_stop=true";
+                    ROS_WARN("%s", decision_line.str().c_str());
+                    coordLogWithContext(decision_line.str(),
+                                        "COUNTERFACTUAL",
+                                        coord_log_plan_id_, -1, -1);
+                }
+                vehicle->action = VehicleAction::STOP;
+                vehicle->requested_action = VehicleAction::STOP;
+                vehicle->blocker_id = state.holder_id;
+                vehicle->reason = "counterfactual_cluster_wait_V" +
+                    std::to_string(state.holder_id);
+                vehicle->wait_time = std::max(
+                    vehicle->wait_time, state.waiting_duration);
+                ++counterfactual_stop_vehicle_ticks_;
+                counterfactual_max_cluster_wait_ = std::max(
+                    counterfactual_max_cluster_wait_,
+                    state.waiting_duration);
+                continue;
+            }
+            if (state.shadow_action == CounterfactualShadowAction::GO &&
+                state.cluster_released) {
+                force_horizon_refresh_ = true;
+            }
+            // Counterfactual admission is monotone: it may add a STOP request
+            // for the waiter, but it must never relax an action selected by the
+            // real RuleEngine.  In particular, the cluster holder remains
+            // subject to hard guard, timed conflict, forward-clearance and
+            // every existing reservation/priority decision.
+        }
+    }
+
+    void runTimedConflictShadowComparison() {
+        timed_conflict_shadow_reports_.clear();
+        if (future_trajectory_cache_.size() != agents_.size() ||
+            legacy_prediction_cache_.size() != agents_.size()) {
+            return;
+        }
+
+        std::vector<forklift_planner::multi_vehicle::ShadowConflictZone> zones;
+        auto compareAll = [&]() {
+            std::vector<TimedConflictShadowReport> reports;
+            for (size_t i = 0; i < agents_.size(); ++i) {
+                for (size_t j = i + 1; j < agents_.size(); ++j) {
+                    reports.push_back(timed_conflict_shadow_checker_->compare(
+                        agents_[i], agents_[j], legacy_prediction_cache_[i],
+                        legacy_prediction_cache_[j],
+                        future_trajectory_cache_[i],
+                        future_trajectory_cache_[j], zones,
+                        future_conflict_zones_));
+                }
+            }
+            return reports;
+        };
+
+        timed_conflict_shadow_reports_ = compareAll();
+        const bool any_collision = std::any_of(
+            timed_conflict_shadow_reports_.begin(),
+            timed_conflict_shadow_reports_.end(),
+            [](const TimedConflictShadowReport& report) {
+                return report.old_event.valid || report.new_event.valid;
+            });
+        if (any_collision) {
+            for (const auto& marker :
+                 rule_engine_->conflictResourceMarkers(agents_)) {
+                if (marker.kind != forklift_planner::multi_vehicle::
+                                       ConflictMarkerKind::
+                                           POTENTIAL_CONFLICT_ZONE) {
+                    continue;
+                }
+                zones.push_back(
+                    forklift_planner::multi_vehicle::ShadowConflictZone{
+                        marker.vehicle_a, marker.vehicle_b,
+                        marker.zone_index, marker.s_a_enter, marker.s_a_exit,
+                        marker.s_b_enter, marker.s_b_exit});
+            }
+            timed_conflict_shadow_reports_ = compareAll();
+
+            for (const TimedConflictShadowReport& report :
+                 timed_conflict_shadow_reports_) {
+                if (!report.new_event.valid ||
+                    report.new_event.matched_zone < 0 ||
+                    report.new_event.future_zone_id < 0) {
+                    continue;
+                }
+                const auto current_it = std::find_if(
+                    zones.begin(), zones.end(), [&](const auto& zone) {
+                        return zone.vehicle_a == report.vehicle_a &&
+                               zone.vehicle_b == report.vehicle_b &&
+                               zone.zone_index ==
+                                   report.new_event.matched_zone;
+                    });
+                const auto future_it = std::find_if(
+                    future_conflict_zones_.begin(),
+                    future_conflict_zones_.end(),
+                    [&](const FutureConflictZone& zone) {
+                        return zone.future_zone_id ==
+                               report.new_event.future_zone_id;
+                    });
+                if (current_it == zones.end() ||
+                    future_it == future_conflict_zones_.end()) {
+                    continue;
+                }
+                const double max_error = std::max(
+                    {std::abs(current_it->s_a_enter - future_it->s_a_enter),
+                     std::abs(current_it->s_a_exit - future_it->s_a_exit),
+                     std::abs(current_it->s_b_enter - future_it->s_b_enter),
+                     std::abs(current_it->s_b_exit - future_it->s_b_exit)});
+                std::ostringstream line;
+                line << std::fixed << std::setprecision(6)
+                     << "[FUTURE_ZONE_COMPARE] pair=V" << report.vehicle_a
+                     << "-V" << report.vehicle_b
+                     << " current_zone="
+                     << report.new_event.matched_zone
+                     << " future_zone="
+                     << report.new_event.future_zone_id
+                     << " result="
+                     << (max_error <= 1e-9 ? "MATCH" : "DIFFERENCE")
+                     << " max_interval_error=" << max_error;
+                ROS_INFO("%s", line.str().c_str());
+                coordLogWithContext(line.str(), "PREDICT",
+                                    sim_plan_id_ + 1, -1, -1);
+            }
+        }
+
+        for (const TimedConflictShadowReport& report :
+             timed_conflict_shadow_reports_) {
+            if (!report.old_event.valid && !report.new_event.valid &&
+                report.classification ==
+                    forklift_planner::multi_vehicle::
+                        TimedConflictShadowClass::MATCH) {
+                continue;
+            }
+            std::ostringstream line;
+            line << std::fixed << std::setprecision(2)
+                 << "[TIMED_CONFLICT_SHADOW] pair=V" << report.vehicle_a
+                 << "-V" << report.vehicle_b
+                 << " class="
+                 << forklift_planner::multi_vehicle::
+                        timedConflictShadowClassName(report.classification)
+                 << " old_collision=" << report.old_event.valid
+                 << " new_collision=" << report.new_event.valid
+                 << " old_first=";
+            if (report.old_event.valid) {
+                line << report.old_event.first_t
+                     << " old_last=" << report.old_event.last_t
+                     << " old_zone=" << report.old_event.matched_zone;
+            } else {
+                line << "none old_last=none old_zone=none";
+            }
+            line << " new_first=";
+            if (report.new_event.valid) {
+                line << report.new_event.first_t
+                     << " new_last=" << report.new_event.last_t
+                     << " duration=" << report.new_event.overlap_duration
+                     << " samples=" << report.new_event.overlap_samples
+                     << " new_zone=";
+                if (report.new_event.matched_zone >= 0) {
+                    line << report.new_event.matched_zone;
+                } else {
+                    line << "none";
+                }
+                line << " future_zone=";
+                if (report.new_event.future_zone_id >= 0) {
+                    line << report.new_event.future_zone_id;
+                } else {
+                    line << "none";
+                }
+                line << " segment_a=" << report.new_event.segment_a
+                     << " phase_a="
+                     << missionPhaseName(report.new_event.phase_a)
+                     << " certainty_a="
+                     << forklift_planner::multi_vehicle::futureCertaintyName(
+                            report.new_event.certainty_a)
+                     << " segment_b=" << report.new_event.segment_b
+                     << " phase_b="
+                     << missionPhaseName(report.new_event.phase_b)
+                     << " certainty_b="
+                     << forklift_planner::multi_vehicle::futureCertaintyName(
+                            report.new_event.certainty_b);
+            } else {
+                line << "none new_last=none duration=0 samples=0 "
+                        "new_zone=none";
+            }
+            ROS_INFO("%s", line.str().c_str());
+            coordLogWithContext(line.str(), "PREDICT", sim_plan_id_ + 1,
+                                -1, -1);
+        }
+    }
+
+    void publishFutureConflictZoneShadowMarkers() {
+        visualization_msgs::MarkerArray markers;
+        const ros::Time stamp = ros::Time::now();
+        for (const auto& key : future_conflict_zone_marker_keys_) {
+            visualization_msgs::Marker remove;
+            remove.header.frame_id = pp_.frame_id;
+            remove.header.stamp = stamp;
+            remove.ns = key.first;
+            remove.id = key.second;
+            remove.action = visualization_msgs::Marker::DELETE;
+            markers.markers.push_back(remove);
+        }
+        future_conflict_zone_marker_keys_.clear();
+
+        if (cfg_.show_prediction_conflicts) {
+            int marker_id = 0;
+            for (const FutureConflictZone& zone : future_conflict_zones_) {
+                visualization_msgs::Marker point;
+                point.header.frame_id = pp_.frame_id;
+                point.header.stamp = stamp;
+                point.ns = "future_conflict_zone_shadow";
+                point.id = marker_id++;
+                point.type = visualization_msgs::Marker::SPHERE;
+                point.action = visualization_msgs::Marker::ADD;
+                point.pose.position.x = zone.x;
+                point.pose.position.y = zone.y;
+                point.pose.orientation.w = 1.0;
+                point.scale.x = 0.10;
+                point.scale.y = 0.10;
+                point.scale.z = 0.025;
+                point.color = zone.source ==
+                                      forklift_planner::multi_vehicle::
+                                          FutureConflictZoneSource::
+                                              CURRENT_TRACK
+                    ? rgba(0.10f, 0.75f, 0.95f, 0.65f)
+                    : rgba(0.15f, 0.95f, 0.55f, 0.75f);
+                point.lifetime = ros::Duration(
+                    std::max(0.2, 1.5 * rb_horizon_refresh_period_));
+                markers.markers.push_back(point);
+                future_conflict_zone_marker_keys_.push_back(
+                    {point.ns, point.id});
+
+                visualization_msgs::Marker label = point;
+                label.ns = "future_conflict_zone_shadow_label";
+                label.id = marker_id++;
+                label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+                label.pose.position.z = 0.12;
+                label.scale.x = 0.0;
+                label.scale.y = 0.0;
+                label.scale.z = 0.075;
+                label.color = rgba(0.80f, 1.0f, 0.90f, 1.0f);
+                std::ostringstream text;
+                text << std::fixed << std::setprecision(2)
+                     << "FZ" << zone.future_zone_id << " V"
+                     << zone.vehicle_a << "-V" << zone.vehicle_b << " "
+                     << missionPhaseName(zone.phase_a) << "#"
+                     << zone.segment_id_a << " x "
+                     << missionPhaseName(zone.phase_b) << "#"
+                     << zone.segment_id_b << "\nA[" << zone.s_a_enter
+                     << "," << zone.s_a_exit << "] B["
+                     << zone.s_b_enter << "," << zone.s_b_exit << "]";
+                label.text = text.str();
+                markers.markers.push_back(label);
+                future_conflict_zone_marker_keys_.push_back(
+                    {label.ns, label.id});
+            }
+        }
+        if (!markers.markers.empty()) horizon_marker_pub_.publish(markers);
+    }
+
+    void publishFutureConflictClusterShadowMarkers() {
+        visualization_msgs::MarkerArray markers;
+        const ros::Time stamp = ros::Time::now();
+        for (const auto& key : future_conflict_cluster_marker_keys_) {
+            visualization_msgs::Marker remove;
+            remove.header.frame_id = pp_.frame_id;
+            remove.header.stamp = stamp;
+            remove.ns = key.first;
+            remove.id = key.second;
+            remove.action = visualization_msgs::Marker::DELETE;
+            markers.markers.push_back(remove);
+        }
+        future_conflict_cluster_marker_keys_.clear();
+
+        if (cfg_.show_prediction_conflicts) {
+            for (const FutureConflictCluster& cluster :
+                 future_conflict_clusters_) {
+                if (cluster.member_zones.empty()) continue;
+                double center_x = 0.0;
+                double center_y = 0.0;
+                for (const FutureConflictZone& zone : cluster.member_zones) {
+                    center_x += zone.x;
+                    center_y += zone.y;
+                }
+                center_x /= static_cast<double>(cluster.member_zones.size());
+                center_y /= static_cast<double>(cluster.member_zones.size());
+
+                visualization_msgs::Marker point;
+                point.header.frame_id = pp_.frame_id;
+                point.header.stamp = stamp;
+                point.ns = "future_conflict_cluster_shadow";
+                point.id = cluster.cluster_id;
+                point.type = visualization_msgs::Marker::SPHERE;
+                point.action = visualization_msgs::Marker::ADD;
+                point.pose.position.x = center_x;
+                point.pose.position.y = center_y;
+                point.pose.position.z = 0.035;
+                point.pose.orientation.w = 1.0;
+                point.scale.x = 0.14;
+                point.scale.y = 0.14;
+                point.scale.z = 0.04;
+                point.color = rgba(0.78f, 0.20f, 1.0f, 0.82f);
+                point.lifetime = ros::Duration(
+                    std::max(0.2, 1.5 * rb_horizon_refresh_period_));
+                markers.markers.push_back(point);
+                future_conflict_cluster_marker_keys_.push_back(
+                    {point.ns, point.id});
+
+                visualization_msgs::Marker label = point;
+                label.ns = "future_conflict_cluster_shadow_label";
+                label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+                label.pose.position.z = 0.20;
+                label.scale.x = 0.0;
+                label.scale.y = 0.0;
+                label.scale.z = 0.080;
+                label.color = rgba(0.95f, 0.80f, 1.0f, 1.0f);
+                std::ostringstream text;
+                text << "FC" << cluster.cluster_id << " V"
+                     << cluster.vehicle_a << "-V" << cluster.vehicle_b
+                     << " zones=[";
+                for (std::size_t i = 0;
+                     i < cluster.member_zone_ids.size(); ++i) {
+                    if (i > 0) text << ",";
+                    text << cluster.member_zone_ids[i];
+                }
+                text << "]\nreason=";
+                if (cluster.merge_reasons.empty()) {
+                    text << "SINGLE_ZONE";
+                } else {
+                    for (std::size_t i = 0;
+                         i < cluster.merge_reasons.size(); ++i) {
+                        if (i > 0) text << "|";
+                        text << forklift_planner::multi_vehicle::
+                            futureConflictClusterMergeReasonName(
+                                cluster.merge_reasons[i]);
+                    }
+                }
+                label.text = text.str();
+                markers.markers.push_back(label);
+                future_conflict_cluster_marker_keys_.push_back(
+                    {label.ns, label.id});
+            }
+        }
+        if (!markers.markers.empty()) horizon_marker_pub_.publish(markers);
+    }
+
+    void publishFutureClusterArbitrationShadowMarkers() {
+        visualization_msgs::MarkerArray markers;
+        const ros::Time stamp = ros::Time::now();
+        for (const auto& key :
+             future_cluster_arbitration_marker_keys_) {
+            visualization_msgs::Marker remove;
+            remove.header.frame_id = pp_.frame_id;
+            remove.header.stamp = stamp;
+            remove.ns = key.first;
+            remove.id = key.second;
+            remove.action = visualization_msgs::Marker::DELETE;
+            markers.markers.push_back(remove);
+        }
+        future_cluster_arbitration_marker_keys_.clear();
+
+        if (cfg_.show_prediction_conflicts) {
+            int marker_id = 0;
+            for (const ClusterReservationShadow& shadow :
+                 cluster_arbitration_shadows_) {
+                const FutureConflictCluster* source = nullptr;
+                for (const FutureConflictCluster& cluster :
+                     future_conflict_clusters_) {
+                    if (cluster.cluster_id == shadow.cluster_id &&
+                        cluster.horizon_snapshot_id ==
+                            shadow.horizon_snapshot_id &&
+                        cluster.vehicle_a == shadow.vehicle_a &&
+                        cluster.vehicle_b == shadow.vehicle_b) {
+                        source = &cluster;
+                        break;
+                    }
+                }
+                if (source == nullptr || source->member_zones.empty()) {
+                    continue;
+                }
+                double center_x = 0.0;
+                double center_y = 0.0;
+                for (const FutureConflictZone& zone : source->member_zones) {
+                    center_x += zone.x;
+                    center_y += zone.y;
+                }
+                center_x /= static_cast<double>(source->member_zones.size());
+                center_y /= static_cast<double>(source->member_zones.size());
+
+                visualization_msgs::Marker point;
+                point.header.frame_id = pp_.frame_id;
+                point.header.stamp = stamp;
+                point.ns = "future_cluster_arbitration_shadow";
+                point.id = marker_id++;
+                point.type = visualization_msgs::Marker::SPHERE;
+                point.action = visualization_msgs::Marker::ADD;
+                point.pose.position.x = center_x;
+                point.pose.position.y = center_y;
+                point.pose.position.z = 0.055;
+                point.pose.orientation.w = 1.0;
+                point.scale.x = 0.10;
+                point.scale.y = 0.10;
+                point.scale.z = 0.06;
+                point.color = rgba(1.0f, 0.62f, 0.05f, 0.92f);
+                point.lifetime = ros::Duration(
+                    std::max(0.2, 1.5 * rb_horizon_refresh_period_));
+                markers.markers.push_back(point);
+                future_cluster_arbitration_marker_keys_.push_back(
+                    {point.ns, point.id});
+
+                visualization_msgs::Marker label = point;
+                label.ns = "future_cluster_arbitration_shadow_label";
+                label.id = marker_id++;
+                label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+                label.pose.position.z = 0.30;
+                label.scale.x = 0.0;
+                label.scale.y = 0.0;
+                label.scale.z = 0.075;
+                label.color = rgba(1.0f, 0.86f, 0.35f, 1.0f);
+                std::ostringstream text;
+                text << std::fixed << std::setprecision(2)
+                     << "CA" << shadow.cluster_id
+                     << " H=V" << shadow.holder_id
+                     << " W=V" << shadow.waiter_id
+                     << " n=" << shadow.member_zone_ids.size()
+                     << "\nstop=" << shadow.stop_boundary_s
+                     << " " << shadow.decision_reason;
+                label.text = text.str();
+                markers.markers.push_back(label);
+                future_cluster_arbitration_marker_keys_.push_back(
+                    {label.ns, label.id});
+            }
+        }
+        if (!markers.markers.empty()) horizon_marker_pub_.publish(markers);
+    }
+
+    void publishFutureClusterAdmissionShadowMarkers() {
+        visualization_msgs::MarkerArray markers;
+        const ros::Time stamp = ros::Time::now();
+        for (const auto& key : future_cluster_admission_marker_keys_) {
+            visualization_msgs::Marker remove;
+            remove.header.frame_id = pp_.frame_id;
+            remove.header.stamp = stamp;
+            remove.ns = key.first;
+            remove.id = key.second;
+            remove.action = visualization_msgs::Marker::DELETE;
+            markers.markers.push_back(remove);
+        }
+        future_cluster_admission_marker_keys_.clear();
+
+        if (cfg_.show_prediction_conflicts) {
+            int marker_id = 0;
+            for (const ClusterAdmissionShadow& admission :
+                 cluster_admission_shadows_) {
+                const FutureConflictCluster* source = nullptr;
+                for (const FutureConflictCluster& cluster :
+                     future_conflict_clusters_) {
+                    if (cluster.cluster_id == admission.cluster_id &&
+                        cluster.horizon_snapshot_id ==
+                            admission.horizon_snapshot_id &&
+                        cluster.vehicle_a == admission.vehicle_a &&
+                        cluster.vehicle_b == admission.vehicle_b) {
+                        source = &cluster;
+                        break;
+                    }
+                }
+                if (source == nullptr || source->member_zones.empty()) {
+                    continue;
+                }
+                double center_x = 0.0;
+                double center_y = 0.0;
+                for (const FutureConflictZone& zone : source->member_zones) {
+                    center_x += zone.x;
+                    center_y += zone.y;
+                }
+                center_x /= static_cast<double>(source->member_zones.size());
+                center_y /= static_cast<double>(source->member_zones.size());
+
+                visualization_msgs::Marker point;
+                point.header.frame_id = pp_.frame_id;
+                point.header.stamp = stamp;
+                point.ns = "future_cluster_admission_shadow";
+                point.id = marker_id++;
+                point.type = visualization_msgs::Marker::SPHERE;
+                point.action = visualization_msgs::Marker::ADD;
+                point.pose.position.x = center_x;
+                point.pose.position.y = center_y;
+                point.pose.position.z = 0.075;
+                point.pose.orientation.w = 1.0;
+                point.scale.x = 0.08;
+                point.scale.y = 0.08;
+                point.scale.z = 0.08;
+                point.color = admission.admission_valid
+                    ? rgba(0.10f, 0.95f, 0.55f, 0.95f)
+                    : admission.prevent_zone_mixing
+                        ? rgba(1.0f, 0.25f, 0.75f, 0.95f)
+                        : rgba(0.55f, 0.55f, 0.55f, 0.75f);
+                point.lifetime = ros::Duration(
+                    std::max(0.2, 1.5 * rb_horizon_refresh_period_));
+                markers.markers.push_back(point);
+                future_cluster_admission_marker_keys_.push_back(
+                    {point.ns, point.id});
+
+                visualization_msgs::Marker label = point;
+                label.ns = "future_cluster_admission_shadow_label";
+                label.id = marker_id++;
+                label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+                label.pose.position.z = 0.39;
+                label.scale.x = 0.0;
+                label.scale.y = 0.0;
+                label.scale.z = 0.070;
+                label.color = rgba(0.75f, 1.0f, 0.85f, 1.0f);
+                std::ostringstream text;
+                text << std::fixed << std::setprecision(2)
+                     << "ADMIT C" << admission.cluster_id
+                     << " H=V" << admission.holder_id
+                     << " W=V" << admission.waiter_id
+                     << "\nentry=(" << admission.cluster_enter_s_a
+                     << "," << admission.cluster_enter_s_b << ")"
+                     << " stop=" << admission.waiter_stop_s
+                     << " "
+                     << (admission.admission_valid ? "VALID" : "SHADOW");
+                label.text = text.str();
+                markers.markers.push_back(label);
+                future_cluster_admission_marker_keys_.push_back(
+                    {label.ns, label.id});
+            }
+        }
+        if (!markers.markers.empty()) horizon_marker_pub_.publish(markers);
+    }
+
+    void publishFutureClusterCounterfactualMarkers() {
+        visualization_msgs::MarkerArray markers;
+        const ros::Time stamp = ros::Time::now();
+        for (const auto& key : future_cluster_counterfactual_marker_keys_) {
+            visualization_msgs::Marker remove;
+            remove.header.frame_id = pp_.frame_id;
+            remove.header.stamp = stamp;
+            remove.ns = key.first;
+            remove.id = key.second;
+            remove.action = visualization_msgs::Marker::DELETE;
+            markers.markers.push_back(remove);
+        }
+        future_cluster_counterfactual_marker_keys_.clear();
+
+        if (cluster_counterfactual_shadow_enabled_ &&
+            cfg_.show_prediction_conflicts) {
+            int marker_id = 0;
+            for (const auto& status :
+                 cluster_admission_counterfactual_simulator_->statuses()) {
+                const FutureConflictCluster* source = nullptr;
+                for (const FutureConflictCluster& cluster :
+                     future_conflict_clusters_) {
+                    if (cluster.vehicle_a == status.vehicle_a &&
+                        cluster.vehicle_b == status.vehicle_b &&
+                        cluster.member_zone_ids == status.member_zone_ids) {
+                        source = &cluster;
+                        break;
+                    }
+                }
+                if (source == nullptr || source->member_zones.empty()) continue;
+                double x = 0.0;
+                double y = 0.0;
+                for (const FutureConflictZone& zone : source->member_zones) {
+                    x += zone.x;
+                    y += zone.y;
+                }
+                x /= static_cast<double>(source->member_zones.size());
+                y /= static_cast<double>(source->member_zones.size());
+
+                visualization_msgs::Marker point;
+                point.header.frame_id = pp_.frame_id;
+                point.header.stamp = stamp;
+                point.ns = "future_cluster_counterfactual";
+                point.id = marker_id++;
+                point.type = visualization_msgs::Marker::SPHERE;
+                point.action = visualization_msgs::Marker::ADD;
+                point.pose.position.x = x;
+                point.pose.position.y = y;
+                point.pose.position.z = 0.11;
+                point.pose.orientation.w = 1.0;
+                point.scale.x = 0.10;
+                point.scale.y = 0.10;
+                point.scale.z = 0.10;
+                point.color = status.active
+                    ? rgba(0.90f, 0.15f, 1.0f, 0.95f)
+                    : rgba(0.40f, 0.40f, 0.40f, 0.70f);
+                point.lifetime = ros::Duration(
+                    std::max(0.2, 1.5 * rb_horizon_refresh_period_));
+                markers.markers.push_back(point);
+                future_cluster_counterfactual_marker_keys_.push_back(
+                    {point.ns, point.id});
+
+                visualization_msgs::Marker label = point;
+                label.ns = "future_cluster_counterfactual_label";
+                label.id = marker_id++;
+                label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+                label.pose.position.z = 0.48;
+                label.scale.x = 0.0;
+                label.scale.y = 0.0;
+                label.scale.z = 0.070;
+                label.color = rgba(1.0f, 0.75f, 1.0f, 1.0f);
+                std::ostringstream text;
+                text << std::fixed << std::setprecision(2)
+                     << "CF C" << status.cluster_id
+                     << " H=V" << status.holder_id
+                     << " W=V" << status.waiter_id
+                     << " stop=" << status.waiter_stop_s
+                     << "\nrelease=";
+                if (status.cluster_release_time >= 0.0) {
+                    text << status.cluster_release_time;
+                } else {
+                    text << "pending";
+                }
+                label.text = text.str();
+                markers.markers.push_back(label);
+                future_cluster_counterfactual_marker_keys_.push_back(
+                    {label.ns, label.id});
+            }
+        }
+        if (!markers.markers.empty()) horizon_marker_pub_.publish(markers);
+    }
+
+    void publishFutureShadowConflictMarkers() {
+        visualization_msgs::MarkerArray markers;
+        const ros::Time stamp = ros::Time::now();
+        for (const auto& key : future_shadow_conflict_marker_keys_) {
+            visualization_msgs::Marker remove;
+            remove.header.frame_id = pp_.frame_id;
+            remove.header.stamp = stamp;
+            remove.ns = key.first;
+            remove.id = key.second;
+            remove.action = visualization_msgs::Marker::DELETE;
+            markers.markers.push_back(remove);
+        }
+        future_shadow_conflict_marker_keys_.clear();
+
+        if (cfg_.show_prediction_conflicts) {
+            int marker_id = 0;
+            for (const TimedConflictShadowReport& report :
+                 timed_conflict_shadow_reports_) {
+                if (!report.new_event.valid) continue;
+                visualization_msgs::Marker point;
+                point.header.frame_id = pp_.frame_id;
+                point.header.stamp = stamp;
+                point.ns = "future_shadow_conflict";
+                point.id = marker_id++;
+                point.type = visualization_msgs::Marker::SPHERE;
+                point.action = visualization_msgs::Marker::ADD;
+                point.pose.position.x = report.new_event.x;
+                point.pose.position.y = report.new_event.y;
+                point.pose.orientation.w = 1.0;
+                point.scale.x = 0.12;
+                point.scale.y = 0.12;
+                point.scale.z = 0.04;
+                point.color = rgba(0.75f, 0.15f, 0.95f, 0.80f);
+                point.lifetime = ros::Duration(
+                    std::max(0.2, 1.5 * rb_horizon_refresh_period_));
+                markers.markers.push_back(point);
+                future_shadow_conflict_marker_keys_.push_back(
+                    {point.ns, point.id});
+
+                visualization_msgs::Marker label = point;
+                label.ns = "future_shadow_conflict_label";
+                label.id = marker_id++;
+                label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+                label.pose.position.z = 0.18;
+                label.scale.x = 0.0;
+                label.scale.y = 0.0;
+                label.scale.z = 0.10;
+                label.color = rgba(0.95f, 0.85f, 1.0f, 1.0f);
+                std::ostringstream text;
+                text << std::fixed << std::setprecision(2)
+                     << "SHADOW V" << report.vehicle_a << "-V"
+                     << report.vehicle_b << " t="
+                     << report.new_event.first_t << "~"
+                     << report.new_event.last_t << "\n"
+                     << missionPhaseName(report.new_event.phase_a) << "#"
+                     << report.new_event.segment_a << " / "
+                     << missionPhaseName(report.new_event.phase_b) << "#"
+                     << report.new_event.segment_b;
+                label.text = text.str();
+                markers.markers.push_back(label);
+                future_shadow_conflict_marker_keys_.push_back(
+                    {label.ns, label.id});
+            }
+        }
+        if (!markers.markers.empty()) horizon_marker_pub_.publish(markers);
+    }
+
+    void publishFutureMissionMarkers() {
+        visualization_msgs::MarkerArray markers;
+        const ros::Time stamp = ros::Time::now();
+
+        for (const auto& key : future_mission_marker_keys_) {
+            visualization_msgs::Marker remove;
+            remove.header.frame_id = pp_.frame_id;
+            remove.header.stamp = stamp;
+            remove.ns = key.first;
+            remove.id = key.second;
+            remove.action = visualization_msgs::Marker::DELETE;
+            markers.markers.push_back(remove);
+        }
+        future_mission_marker_keys_.clear();
+
+        int marker_id = 0;
+        for (const FutureMissionTrajectory& trajectory :
+             future_trajectory_cache_) {
+            for (const auto& segment : trajectory.plan.segments) {
+                const char* certainty_name =
+                    forklift_planner::multi_vehicle::futureCertaintyName(
+                        segment.certainty);
+                std::string marker_ns = "future_mission_";
+                if (segment.certainty == FutureCertainty::COMMITTED) {
+                    marker_ns += "committed";
+                } else if (segment.certainty == FutureCertainty::PREVIEW) {
+                    marker_ns += "preview";
+                } else {
+                    marker_ns += "unknown";
+                }
+
+                std_msgs::ColorRGBA color;
+                if (segment.certainty == FutureCertainty::COMMITTED) {
+                    color = rgba(0.10f, 0.85f, 0.20f, 0.85f);
+                } else if (segment.certainty == FutureCertainty::PREVIEW) {
+                    color = rgba(0.10f, 0.65f, 1.00f, 0.55f);
+                } else {
+                    color = rgba(0.65f, 0.65f, 0.65f, 0.80f);
+                }
+
+                std::vector<const forklift_planner::multi_vehicle::FutureSample*>
+                    segment_samples;
+                for (const auto& sample : trajectory.samples) {
+                    if (sample.segment_id == segment.segment_id) {
+                        segment_samples.push_back(&sample);
+                    }
+                }
+                if (segment_samples.empty()) continue;
+
+                visualization_msgs::Marker geometry;
+                geometry.header.frame_id = pp_.frame_id;
+                geometry.header.stamp = stamp;
+                geometry.ns = marker_ns;
+                geometry.id = marker_id++;
+                geometry.action = visualization_msgs::Marker::ADD;
+                geometry.pose.orientation.w = 1.0;
+                geometry.color = color;
+                if (segment.type == FutureSegmentType::MOTION &&
+                    segment_samples.size() >= 2) {
+                    geometry.type = visualization_msgs::Marker::LINE_STRIP;
+                    geometry.scale.x = segment.certainty ==
+                            FutureCertainty::PREVIEW ? 0.012 : 0.018;
+                    for (const auto* sample : segment_samples) {
+                        geometry_msgs::Point point;
+                        point.x = sample->pose.x;
+                        point.y = sample->pose.y;
+                        point.z = 0.13;
+                        geometry.points.push_back(point);
+                    }
+                } else {
+                    geometry.type = visualization_msgs::Marker::SPHERE;
+                    geometry.pose.position.x = segment_samples.front()->pose.x;
+                    geometry.pose.position.y = segment_samples.front()->pose.y;
+                    geometry.pose.position.z = 0.13;
+                    geometry.scale.x = 0.055;
+                    geometry.scale.y = 0.055;
+                    geometry.scale.z = 0.025;
+                }
+                markers.markers.push_back(geometry);
+                future_mission_marker_keys_.push_back(
+                    {geometry.ns, geometry.id});
+
+                visualization_msgs::Marker label;
+                label.header = geometry.header;
+                label.ns = marker_ns + "_label";
+                label.id = marker_id++;
+                label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+                label.action = visualization_msgs::Marker::ADD;
+                label.pose.position.x = segment_samples.front()->pose.x;
+                label.pose.position.y = segment_samples.front()->pose.y;
+                label.pose.position.z = 0.20;
+                label.pose.orientation.w = 1.0;
+                label.scale.z = 0.045;
+                label.color = color;
+                label.color.a = 1.0;
+                label.text = "V" + std::to_string(trajectory.plan.vehicle_id) +
+                    " " + missionPhaseName(segment.phase) + " " +
+                    certainty_name;
+                markers.markers.push_back(label);
+                future_mission_marker_keys_.push_back({label.ns, label.id});
+            }
+        }
+        if (!markers.markers.empty()) horizon_marker_pub_.publish(markers);
     }
 
     bool simulationPlanNeedsRefresh() const {
@@ -2189,6 +3678,7 @@ private:
                 }
             }
         }
+        applyClusterAdmissionCounterfactual(dt);
         advanceVehicles(dt);
         diagnoseA1ExitIntrusions();
 
@@ -2672,6 +4162,39 @@ private:
     std::unique_ptr<PathGenerator> generator_;
     std::unique_ptr<forklift_planner::multi_vehicle::TaskAllocator> allocator_;
     std::unique_ptr<forklift_planner::multi_vehicle::RuleEngine> rule_engine_;
+    std::unique_ptr<forklift_planner::multi_vehicle::FutureMissionPlanBuilder>
+        future_mission_plan_builder_;
+    std::unique_ptr<forklift_planner::multi_vehicle::FutureTrajectoryGenerator>
+        future_trajectory_generator_;
+    std::unique_ptr<
+        forklift_planner::multi_vehicle::LegacyPredictionShadowGenerator>
+        legacy_prediction_shadow_generator_;
+    std::unique_ptr<forklift_planner::multi_vehicle::PredictionShadowComparator>
+        prediction_shadow_comparator_;
+    std::unique_ptr<
+        forklift_planner::multi_vehicle::TimedConflictShadowChecker>
+        timed_conflict_shadow_checker_;
+    std::unique_ptr<
+        forklift_planner::multi_vehicle::FutureConflictZoneShadowBuilder>
+        future_conflict_zone_shadow_builder_;
+    std::unique_ptr<
+        forklift_planner::multi_vehicle::FutureConflictClusterShadowBuilder>
+        future_conflict_cluster_shadow_builder_;
+    std::unique_ptr<
+        forklift_planner::multi_vehicle::FutureClusterArbitrationShadow>
+        future_cluster_arbitration_shadow_;
+    std::unique_ptr<
+        forklift_planner::multi_vehicle::FutureClusterAdmissionShadow>
+        future_cluster_admission_shadow_;
+    std::unique_ptr<forklift_planner::multi_vehicle::
+        FutureClusterAdmissionShadowTracker>
+        future_cluster_admission_shadow_tracker_;
+    std::unique_ptr<forklift_planner::multi_vehicle::
+        ClusterAdmissionEvaluator>
+        cluster_admission_evaluator_;
+    std::unique_ptr<forklift_planner::multi_vehicle::
+        ClusterAdmissionCounterfactualSimulator>
+        cluster_admission_counterfactual_simulator_;
     bool one_shot_ = false;  // false: continuously execute B->A1->B transports
     std::unique_ptr<forklift_planner::multi_vehicle::MarkerPublisher> marker_pub_;
     std::unique_ptr<forklift_planner::multi_vehicle::TrafficResourceMap> resource_map_;
@@ -2715,6 +4238,53 @@ private:
     double sim_plan_start_time_ = 0.0;
     forklift_planner::multi_vehicle::RuleEngine::FutureA1Commitment
         future_a1_commitment_;
+    std::vector<FutureMissionTrajectory> future_trajectory_cache_;
+    std::vector<PredictionShadowReport> prediction_shadow_reports_;
+    std::vector<std::vector<
+        forklift_planner::multi_vehicle::LegacyPredictionSample>>
+        legacy_prediction_cache_;
+    std::vector<TimedConflictShadowReport>
+        timed_conflict_shadow_reports_;
+    std::vector<FutureConflictZone> future_conflict_zones_;
+    std::vector<FutureConflictCluster> future_conflict_clusters_;
+    std::vector<ClusterReservationShadow> cluster_arbitration_shadows_;
+    std::vector<ClusterAdmissionShadow> cluster_admission_shadows_;
+    std::vector<ClusterAdmissionConstraint>
+        cluster_admission_constraints_;
+    std::vector<ShadowVehicleState> counterfactual_shadow_states_;
+    unsigned long long cluster_admission_evaluations_ = 0;
+    unsigned long long cluster_admission_valid_count_ = 0;
+    unsigned long long cluster_admission_prevent_count_ = 0;
+    unsigned long long cluster_admission_late_mixing_count_ = 0;
+    unsigned long long dynamic_admission_feasible_count_ = 0;
+    unsigned long long dynamic_admission_infeasible_count_ = 0;
+    bool cluster_counterfactual_shadow_enabled_ = false;
+    unsigned long long counterfactual_stop_vehicle_ticks_ = 0;
+    unsigned long long counterfactual_go_overrides_ = 0;
+    unsigned long long counterfactual_cluster_releases_ = 0;
+    unsigned long long counterfactual_waiter_resumes_ = 0;
+    unsigned long long counterfactual_waiter_entry_violations_ = 0;
+    unsigned long long counterfactual_late_braking_events_ = 0;
+    unsigned long long dynamic_admission_stop_requests_ = 0;
+    unsigned long long dynamic_admission_action_changes_ = 0;
+    double counterfactual_max_cluster_wait_ = 0.0;
+    std::set<std::tuple<int, int, int, int, long long>>
+        dynamic_admission_decision_log_keys_;
+    std::set<std::tuple<int, int, int, int, int, int, long long, long long>>
+        future_conflict_zone_log_keys_;
+    std::vector<std::pair<std::string, int>> future_mission_marker_keys_;
+    std::vector<std::pair<std::string, int>>
+        future_shadow_conflict_marker_keys_;
+    std::vector<std::pair<std::string, int>>
+        future_conflict_zone_marker_keys_;
+    std::vector<std::pair<std::string, int>>
+        future_conflict_cluster_marker_keys_;
+    std::vector<std::pair<std::string, int>>
+        future_cluster_arbitration_marker_keys_;
+    std::vector<std::pair<std::string, int>>
+        future_cluster_admission_marker_keys_;
+    std::vector<std::pair<std::string, int>>
+        future_cluster_counterfactual_marker_keys_;
     
     double rb_full_horizon_ = 180.0;                    // 一次性模式:全程推演上限时长(s),尾部静止点会裁掉
     bool one_shot_published_ = false;                   // 一次性轨迹是否已全部发完(防重复发)
@@ -2741,6 +4311,16 @@ private:
     unsigned long long tick_count_ = 0;
     std::set<std::pair<int, int>> active_a1_exit_intrusions_;
     double sim_time_ = 0.0;
+
+    // Phase 6.2 diagnostic counters only; none feeds vehicle decisions.
+    unsigned long long batch_stop_vehicle_ticks_ = 0;
+    unsigned long long batch_wait_samples_ = 0;
+    double batch_wait_sum_ = 0.0;
+    unsigned long long batch_first_wedge_count_ = 0;
+    unsigned long long batch_deadlock_episodes_ = 0;
+    bool batch_deadlock_episode_active_ = false;
+    double batch_max_observed_wait_ = 0.0;
+    int batch_max_observed_wait_vehicle_ = -1;
 
     // 无头批处理(快速回归)统计。确定性仿真:同种子同代码必得同结果,故脱离 RViz、
     // 不按实时狂跑 N 拍即可在几秒内覆盖数小时仿真,直接数碰撞。
@@ -2999,10 +4579,29 @@ public:
                     rule_engine_->decide(agents_, dt);
                 }
             }
+            applyClusterAdmissionCounterfactual(dt);
             const unsigned long long guards_before = hard_guard_events_;
             advanceVehicles(dt);
             diagnoseA1ExitIntrusions();
             const bool new_collision = hard_guard_events_ > guards_before;
+
+            for (const VehicleAgent& vehicle : agents_) {
+                if (vehicle.action == VehicleAction::STOP) {
+                    ++batch_stop_vehicle_ticks_;
+                }
+                batch_wait_sum_ += vehicle.wait_time;
+                ++batch_wait_samples_;
+                if (vehicle.wait_time > batch_max_observed_wait_) {
+                    batch_max_observed_wait_ = vehicle.wait_time;
+                    batch_max_observed_wait_vehicle_ = vehicle.id;
+                }
+            }
+            const bool deadlock_now =
+                !findDeadlockMembers(25.0).empty();
+            if (deadlock_now && !batch_deadlock_episode_active_) {
+                ++batch_deadlock_episodes_;
+            }
+            batch_deadlock_episode_active_ = deadlock_now;
 
             hist.push_back(fleetSnapshot());
             if (hist.size() > kHist) hist.pop_front();
@@ -3064,6 +4663,7 @@ public:
                     if (v.wait_time > mw) { mw = v.wait_time; sid = v.id; }
                 if (mw > 25.0 && sid >= 0) {
                     wedge_dumped = true;
+                    ++batch_first_wedge_count_;
                     ROS_ERROR("[FIRST-WEDGE] @tick=%llu sim_t=%.1fs 最久=V%d wait=%.1fs"
                               " —— 回放前 %zu 拍历史 + 卡死车几何 ===",
                               tick_count_, sim_time_, sid, mw, hist.size());
@@ -3110,6 +4710,66 @@ public:
                  tick_count_, sim_time_, hard_guard_events_, first_guard_tick_,
                  pairs.c_str(), deadlock_ticks_, deadlock_recoveries_, max_wait,
                  stuck_id);
+        std::ostringstream tasks;
+        tasks << "[";
+        for (std::size_t i = 0; i < agents_.size(); ++i) {
+            if (i > 0) tasks << ",";
+            tasks << "V" << agents_[i].id << ":"
+                  << agents_[i].task_count;
+        }
+        tasks << "]";
+        const double average_wait = batch_wait_samples_ > 0
+            ? batch_wait_sum_ / static_cast<double>(batch_wait_samples_)
+            : 0.0;
+        const char* regression_source =
+            cluster_counterfactual_shadow_enabled_
+                ? "COUNTERFACTUAL" : "REAL";
+        ROS_WARN("[PHASE62_REGRESSION] source=%s tasks=%s "
+                 "max_wait=%.3f average_vehicle_tick_wait=%.6f "
+                 "stop_vehicle_ticks=%llu first_wedge_events=%llu "
+                 "deadlock_episodes=%llu deadlock_detection_ticks=%llu "
+                 "hard_guard_collisions=%llu recovery=%llu",
+                 regression_source, tasks.str().c_str(),
+                 batch_max_observed_wait_, average_wait,
+                 batch_stop_vehicle_ticks_, batch_first_wedge_count_,
+                 batch_deadlock_episodes_, deadlock_ticks_,
+                 hard_guard_events_, deadlock_recoveries_);
+        ROS_WARN("[PHASE62_REGRESSION] source=SHADOW "
+                 "admission_evaluations=%llu admission_valid=%llu "
+                 "prevent_zone_mixing=%llu late_mixing_observed=%llu "
+                 "closed_loop_tasks=unknown closed_loop_wait=unknown "
+                 "closed_loop_deadlock=unknown",
+                 cluster_admission_evaluations_,
+                 cluster_admission_valid_count_,
+                 cluster_admission_prevent_count_,
+                 cluster_admission_late_mixing_count_);
+        ROS_WARN("[PHASE63_REGRESSION] source=%s sim_time=%.1f "
+                 "tasks=%s max_continuous_wait=%.3f(V%d) "
+                 "average_vehicle_tick_wait=%.6f stop_vehicle_ticks=%llu "
+                 "first_wedge_events=%llu deadlock_episodes=%llu "
+                 "deadlock_detection_ticks=%llu hard_guard_collisions=%llu "
+                 "recovery=%llu shadow_stop_ticks=%llu go_overrides=%llu "
+                 "cluster_releases=%llu waiter_resumes=%llu "
+                 "waiter_entry_violations=%llu late_braking_events=%llu "
+                 "dynamic_feasible=%llu dynamic_infeasible=%llu "
+                 "dynamic_stop_requests=%llu dynamic_action_changes=%llu "
+                 "max_cluster_wait=%.3f",
+                 regression_source, sim_time_, tasks.str().c_str(),
+                 batch_max_observed_wait_, batch_max_observed_wait_vehicle_,
+                 average_wait, batch_stop_vehicle_ticks_,
+                 batch_first_wedge_count_, batch_deadlock_episodes_,
+                 deadlock_ticks_, hard_guard_events_, deadlock_recoveries_,
+                 counterfactual_stop_vehicle_ticks_,
+                 counterfactual_go_overrides_,
+                 counterfactual_cluster_releases_,
+                 counterfactual_waiter_resumes_,
+                 counterfactual_waiter_entry_violations_,
+                 counterfactual_late_braking_events_,
+                 dynamic_admission_feasible_count_,
+                 dynamic_admission_infeasible_count_,
+                 dynamic_admission_stop_requests_,
+                 dynamic_admission_action_changes_,
+                 counterfactual_max_cluster_wait_);
         return hard_guard_events_ > 0;
     }
     bool batchMode() const { return cfg_batch_ticks_ > 0; }

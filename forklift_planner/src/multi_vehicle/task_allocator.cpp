@@ -1187,6 +1187,21 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
     return true;
 }
 
+bool TaskAllocator::previewPickupTrack(int slot, PathTrack& out) const {
+    if (slot < 0 || slot >= static_cast<int>(map_.slots().size())) {
+        return false;
+    }
+    // Shadow prediction must not trigger path generation or catalog writes.
+    // If the runtime cache has not already been prepared, the future leg is
+    // UNKNOWN for this horizon.
+    if (!a1_leg_cache_ready_) return false;
+    const DepotLegCache& leg =
+        b_to_a1_leg_cache_.at(static_cast<size_t>(slot));
+    if (!leg.ready || !leg.valid || leg.path.empty()) return false;
+    out.set(leg.path);
+    return !out.empty();
+}
+
 bool TaskAllocator::tryPrepareFromA1(VehicleAgent& vehicle, int target,
                                      bool require_no_arc) {
     if (target < 0 ||

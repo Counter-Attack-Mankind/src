@@ -54,7 +54,16 @@ target_link_libraries(two_vehicle_sim_node
 
 add_executable(multi_vehicle_patrol_node
   ${PATH_GENERATOR_SOURCES}
+  src/multi_vehicle/cluster_admission_counterfactual_simulator.cpp
+  src/multi_vehicle/dynamic_cluster_admission_shadow.cpp
   src/multi_vehicle/footprint.cpp
+  src/multi_vehicle/future_cluster_admission_shadow.cpp
+  src/multi_vehicle/future_cluster_arbitration_shadow.cpp
+  src/multi_vehicle/future_conflict_cluster_shadow.cpp
+  src/multi_vehicle/future_conflict_zone_shadow.cpp
+  src/multi_vehicle/future_mission_trajectory.cpp
+  src/multi_vehicle/prediction_shadow_comparator.cpp
+  src/multi_vehicle/timed_conflict_shadow_checker.cpp
   src/multi_vehicle/marker_publisher.cpp
   src/multi_vehicle/multi_vehicle_config.cpp
   src/multi_vehicle/path_track.cpp
@@ -85,6 +94,114 @@ if(CATKIN_ENABLE_TESTING)
     test/future_a1_policy_test.cpp
   )
   add_test(NAME future_a1_policy_test COMMAND future_a1_policy_test)
+
+  add_executable(future_mission_trajectory_test
+    src/multi_vehicle/footprint.cpp
+    src/multi_vehicle/future_mission_trajectory.cpp
+    src/multi_vehicle/path_track.cpp
+    test/future_mission_trajectory_test.cpp
+  )
+  add_dependencies(future_mission_trajectory_test ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(future_mission_trajectory_test ${catkin_LIBRARIES})
+  add_test(NAME future_mission_trajectory_test
+           COMMAND future_mission_trajectory_test)
+
+  add_executable(prediction_shadow_comparator_test
+    src/multi_vehicle/footprint.cpp
+    src/multi_vehicle/future_mission_trajectory.cpp
+    src/multi_vehicle/path_track.cpp
+    src/multi_vehicle/prediction_shadow_comparator.cpp
+    test/prediction_shadow_comparator_test.cpp
+  )
+  add_dependencies(prediction_shadow_comparator_test ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(prediction_shadow_comparator_test ${catkin_LIBRARIES})
+  add_test(NAME prediction_shadow_comparator_test
+           COMMAND prediction_shadow_comparator_test)
+
+  add_executable(timed_conflict_shadow_checker_test
+    src/multi_vehicle/footprint.cpp
+    src/multi_vehicle/future_conflict_zone_shadow.cpp
+    src/multi_vehicle/future_mission_trajectory.cpp
+    src/multi_vehicle/path_track.cpp
+    src/multi_vehicle/prediction_shadow_comparator.cpp
+    src/multi_vehicle/timed_conflict_shadow_checker.cpp
+    test/timed_conflict_shadow_checker_test.cpp
+  )
+  add_dependencies(timed_conflict_shadow_checker_test ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(timed_conflict_shadow_checker_test ${catkin_LIBRARIES})
+  add_test(NAME timed_conflict_shadow_checker_test
+           COMMAND timed_conflict_shadow_checker_test)
+
+  add_executable(future_conflict_zone_shadow_test
+    src/multi_vehicle/footprint.cpp
+    src/multi_vehicle/future_conflict_zone_shadow.cpp
+    src/multi_vehicle/future_mission_trajectory.cpp
+    src/multi_vehicle/path_track.cpp
+    test/future_conflict_zone_shadow_test.cpp
+  )
+  add_dependencies(future_conflict_zone_shadow_test ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(future_conflict_zone_shadow_test ${catkin_LIBRARIES})
+  add_test(NAME future_conflict_zone_shadow_test
+           COMMAND future_conflict_zone_shadow_test)
+
+  add_executable(future_conflict_cluster_shadow_test
+    src/multi_vehicle/future_conflict_cluster_shadow.cpp
+    test/future_conflict_cluster_shadow_test.cpp
+  )
+  add_dependencies(future_conflict_cluster_shadow_test
+                   ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(future_conflict_cluster_shadow_test
+                        ${catkin_LIBRARIES})
+  add_test(NAME future_conflict_cluster_shadow_test
+           COMMAND future_conflict_cluster_shadow_test)
+
+  add_executable(future_cluster_arbitration_shadow_test
+    src/multi_vehicle/future_cluster_arbitration_shadow.cpp
+    test/future_cluster_arbitration_shadow_test.cpp
+  )
+  add_dependencies(future_cluster_arbitration_shadow_test
+                   ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(future_cluster_arbitration_shadow_test
+                        ${catkin_LIBRARIES})
+  add_test(NAME future_cluster_arbitration_shadow_test
+           COMMAND future_cluster_arbitration_shadow_test)
+
+  add_executable(future_cluster_admission_shadow_test
+    src/multi_vehicle/future_cluster_admission_shadow.cpp
+    src/multi_vehicle/future_cluster_arbitration_shadow.cpp
+    test/future_cluster_admission_shadow_test.cpp
+  )
+  add_dependencies(future_cluster_admission_shadow_test
+                   ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(future_cluster_admission_shadow_test
+                        ${catkin_LIBRARIES})
+  add_test(NAME future_cluster_admission_shadow_test
+           COMMAND future_cluster_admission_shadow_test)
+
+  add_executable(cluster_admission_counterfactual_simulator_test
+    src/multi_vehicle/cluster_admission_counterfactual_simulator.cpp
+    src/multi_vehicle/dynamic_cluster_admission_shadow.cpp
+    src/multi_vehicle/path_track.cpp
+    test/cluster_admission_counterfactual_simulator_test.cpp
+  )
+  add_dependencies(cluster_admission_counterfactual_simulator_test
+                   ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(cluster_admission_counterfactual_simulator_test
+                        ${catkin_LIBRARIES})
+  add_test(NAME cluster_admission_counterfactual_simulator_test
+           COMMAND cluster_admission_counterfactual_simulator_test)
+
+  add_executable(dynamic_cluster_admission_shadow_test
+    src/multi_vehicle/dynamic_cluster_admission_shadow.cpp
+    src/multi_vehicle/path_track.cpp
+    test/dynamic_cluster_admission_shadow_test.cpp
+  )
+  add_dependencies(dynamic_cluster_admission_shadow_test
+                   ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(dynamic_cluster_admission_shadow_test
+                        ${catkin_LIBRARIES})
+  add_test(NAME dynamic_cluster_admission_shadow_test
+           COMMAND dynamic_cluster_admission_shadow_test)
 endif()
 
 install(TARGETS planner_node two_vehicle_sim_node multi_vehicle_patrol_node

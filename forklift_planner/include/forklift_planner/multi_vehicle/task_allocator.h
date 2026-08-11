@@ -85,6 +85,9 @@ public:
 
     bool hasValidOutbound(int slot) const;
     bool hasValidPickupLeg(int slot) const;
+    // Read-only lifecycle preview. It returns the already validated cached
+    // B->A1 path and does not select a task, mutate a vehicle, or advance RNG.
+    bool previewPickupTrack(int slot, PathTrack& out) const;
 
     // Independent A1 facility definition.
     Slot a1PickupSlot() const;
