@@ -68,6 +68,12 @@ target_link_libraries(multi_vehicle_patrol_node
   ${catkin_LIBRARIES}
 )
 
+catkin_install_python(PROGRAMS
+  scripts/rolling_rviz_bag_recorder.py
+  scripts/replay_rviz_snapshot.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
 # 注:实车桥已并入 multi_vehicle_patrol_node(real_mode 开关,一份代码两个模式),
 # 独立的 multi_vehicle_realbridge_node 已退役(避免重复实现走样)。
 

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <map>
 #include <sstream>
 
 #include "forklift_planner/multi_vehicle/footprint.h"
@@ -29,6 +30,23 @@ std_msgs::ColorRGBA rgba(float r, float g, float b, float a = 1.0f) {
     c.b = b;
     c.a = a;
     return c;
+}
+
+int stableZoneMarkerId(const ConflictMarker& marker) {
+    // FNV-1a over diagnostic identity. The sign bit is cleared because RViz
+    // marker IDs are signed int32. Identity stays fixed while active-zone
+    // positions are allowed to renumber after filtering.
+    uint32_t hash = 2166136261u;
+    for (int value : {marker.vehicle_a, marker.vehicle_b,
+                      marker.path_gen_a, marker.path_gen_b,
+                      marker.raw_zone_index}) {
+        const uint32_t word = static_cast<uint32_t>(value);
+        for (int shift = 0; shift < 32; shift += 8) {
+            hash ^= (word >> shift) & 0xffu;
+            hash *= 16777619u;
+        }
+    }
+    return static_cast<int>(hash & 0x7fffffffu);
 }
 
 RoughWp displayPose(const VehicleAgent& v) {
@@ -319,8 +337,7 @@ void MarkerPublisher::addConflictMarkers(
     const char* following_label_ns = "following_explanation";
     const char* potential_zone_ns = "potential_conflict_zone_overlap";
     const char* potential_zone_label_ns = "potential_conflict_zone_explanation";
-    const char* reservation_ns = "conflict_reservation_overlap";
-    const char* reservation_label_ns = "conflict_reservation_explanation";
+    const char* zone_aabb_ns = "conflict_zone_aabb";
     auto deleteMarker = [&](const char* marker_ns, int id) {
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
@@ -353,10 +370,12 @@ void MarkerPublisher::addConflictMarkers(
                       last_potential_conflict_zone_marker_count_);
         deleteMarkers(potential_zone_label_ns,
                       last_potential_conflict_zone_marker_count_);
-        deleteMarkers(reservation_ns,
-                      last_conflict_reservation_marker_count_);
-        deleteMarkers(reservation_label_ns,
-                      last_conflict_reservation_marker_count_);
+        for (int id : last_zone_marker_ids_) {
+            deleteMarker(potential_zone_ns, id);
+            deleteMarker(potential_zone_label_ns, id);
+            deleteMarker(zone_aabb_ns, id);
+        }
+        last_zone_marker_ids_.clear();
         last_same_direction_conflict_marker_count_ = 0;
         last_crossing_opposing_conflict_marker_count_ = 0;
         last_potential_conflict_zone_marker_count_ = 0;
@@ -367,19 +386,43 @@ void MarkerPublisher::addConflictMarkers(
     int same_id = 0;
     int mutual_id = 0;
     int potential_zone_id = 0;
-    int reservation_id = 0;
+    struct ZoneSelection {
+        int rank = 0;  // 0=POTENTIAL, 1=TIMED, 2=RESERVED
+        int holder = -1;
+        int waiter = -1;
+    };
+    std::map<int, ZoneSelection> selected;
+    auto selectZone = [&](const ConflictMarker& marker, int rank) {
+        if (marker.raw_zone_index < 0) return;
+        const int id = stableZoneMarkerId(marker);
+        ZoneSelection& state = selected[id];
+        if (rank >= state.rank) {
+            state.rank = rank;
+            state.holder = marker.holder_id;
+            state.waiter = marker.waiter_id;
+        }
+    };
+    for (const ConflictMarker& marker : conflicts) {
+        if (marker.kind == ConflictMarkerKind::CROSSING_OR_OPPOSING) {
+            selectZone(marker, 1);
+        }
+    }
+    for (const ConflictMarker& marker : resource_markers) {
+        if (marker.kind == ConflictMarkerKind::CONFLICT_RESERVATION) {
+            selectZone(marker, 2);
+        }
+    }
 
-    auto addSpatialResource = [&](const ConflictMarker& c, int marker_id,
-                                  bool reservation) {
+    std::set<int> current_zone_ids;
+    auto addSpatialResource = [&](const ConflictMarker& c, int marker_id) {
         const ros::Time now = ros::Time::now();
-        const char* geometry_ns = reservation ? reservation_ns
-                                              : potential_zone_ns;
-        const char* label_ns = reservation ? reservation_label_ns
-                                           : potential_zone_label_ns;
+        current_zone_ids.insert(marker_id);
+        const ZoneSelection state = selected.count(marker_id)
+            ? selected.at(marker_id) : ZoneSelection{};
         visualization_msgs::Marker geometry;
         geometry.header.frame_id = pp_.frame_id;
         geometry.header.stamp = now;
-        geometry.ns = geometry_ns;
+        geometry.ns = potential_zone_ns;
         geometry.id = marker_id;
         geometry.type = visualization_msgs::Marker::TRIANGLE_LIST;
         geometry.action = visualization_msgs::Marker::ADD;
@@ -387,10 +430,8 @@ void MarkerPublisher::addConflictMarkers(
         geometry.scale.x = 1.0;
         geometry.scale.y = 1.0;
         geometry.scale.z = 1.0;
-        geometry.color = reservation
-            ? rgba(1.00f, 0.70f, 0.05f, 0.34f)
-            : rgba(0.05f, 0.55f, 1.00f, 0.20f);
-        const double z = reservation ? 0.052 : 0.026;
+        geometry.color = rgba(0.05f, 0.55f, 1.00f, 0.20f);
+        const double z = 0.026;
         for (const auto& polygon : c.spatial_overlap_polygons) {
             if (polygon.size() < 3) continue;
             for (size_t p = 1; p + 1 < polygon.size(); ++p) {
@@ -405,39 +446,61 @@ void MarkerPublisher::addConflictMarkers(
         if (!geometry.points.empty()) {
             arr.markers.push_back(geometry);
         } else {
-            deleteMarker(geometry_ns, marker_id);
+            deleteMarker(potential_zone_ns, marker_id);
+        }
+
+        visualization_msgs::Marker aabb;
+        aabb.header = geometry.header;
+        aabb.ns = zone_aabb_ns;
+        aabb.id = marker_id;
+        aabb.type = visualization_msgs::Marker::LINE_STRIP;
+        aabb.action = visualization_msgs::Marker::ADD;
+        aabb.pose.orientation.w = 1.0;
+        aabb.scale.x = 0.016;
+        aabb.color = state.rank > 0
+            ? rgba(1.00f, 0.10f, 0.08f, 1.0f)
+            : rgba(1.00f, 0.55f, 0.08f, 1.0f);
+        if (c.zone_aabb_valid) {
+            const double x0 = c.x - 0.5 * c.scale_x;
+            const double x1 = c.x + 0.5 * c.scale_x;
+            const double y0 = c.y - 0.5 * c.scale_y;
+            const double y1 = c.y + 0.5 * c.scale_y;
+            aabb.points.push_back(pt3(x0, y0, 0.062));
+            aabb.points.push_back(pt3(x1, y0, 0.062));
+            aabb.points.push_back(pt3(x1, y1, 0.062));
+            aabb.points.push_back(pt3(x0, y1, 0.062));
+            aabb.points.push_back(pt3(x0, y0, 0.062));
+            arr.markers.push_back(aabb);
+        } else {
+            deleteMarker(zone_aabb_ns, marker_id);
         }
 
         visualization_msgs::Marker label;
         label.header = geometry.header;
-        label.ns = label_ns;
+        label.ns = potential_zone_label_ns;
         label.id = marker_id;
         label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
         label.action = visualization_msgs::Marker::ADD;
         label.pose.position.x = c.x;
         label.pose.position.y = c.y;
-        label.pose.position.z = reservation ? 0.23 : 0.19;
+        label.pose.position.z = 0.19;
         label.pose.orientation.w = 1.0;
         label.scale.z = 0.055;
-        label.color = reservation
-            ? rgba(1.00f, 0.82f, 0.18f, 1.0f)
-            : rgba(0.20f, 0.78f, 1.00f, 1.0f);
+        label.color = state.rank > 0
+            ? rgba(1.00f, 0.35f, 0.20f, 1.0f)
+            : rgba(1.00f, 0.72f, 0.20f, 1.0f);
         std::ostringstream text;
         text << std::fixed << std::setprecision(3);
-        if (reservation) {
-            text << "RESERVATION V" << c.vehicle_a << "-V" << c.vehicle_b
-                 << " zone=";
-            if (c.zone_index >= 0) text << c.zone_index;
-            else text << "unknown";
-            text << " holder=V" << c.holder_id
-                 << " waiter=V" << c.waiter_id;
-        } else {
-            text << "CONFLICT ZONE V" << c.vehicle_a << "-V"
-                 << c.vehicle_b << " zone=" << c.zone_index;
-        }
-        text << "\nV" << c.vehicle_a << " s=[" << c.s_a_enter << ","
+        text << "pair=V" << c.vehicle_a << "/V" << c.vehicle_b
+             << " raw_zone=" << c.raw_zone_index
+             << " active_zone=" << c.active_zone_index
+             << "\nV" << c.vehicle_a << " s=[" << c.s_a_enter << ","
              << c.s_a_exit << "] V" << c.vehicle_b << " s=["
-             << c.s_b_enter << "," << c.s_b_exit << "]";
+             << c.s_b_enter << "," << c.s_b_exit << "]"
+             << "\nstate=" << (state.rank == 2 ? "RESERVED" :
+                                state.rank == 1 ? "TIMED" : "POTENTIAL");
+        if (state.holder >= 0) text << " holder=V" << state.holder;
+        if (state.waiter >= 0) text << " waiter=V" << state.waiter;
         label.text = text.str();
         arr.markers.push_back(label);
     };
@@ -454,11 +517,11 @@ void MarkerPublisher::addConflictMarkers(
     for (const ConflictMarker* marker_ptr : all_markers) {
         const ConflictMarker& c = *marker_ptr;
         if (c.kind == ConflictMarkerKind::POTENTIAL_CONFLICT_ZONE) {
-            addSpatialResource(c, potential_zone_id++, false);
+            addSpatialResource(c, stableZoneMarkerId(c));
+            ++potential_zone_id;
             continue;
         }
         if (c.kind == ConflictMarkerKind::CONFLICT_RESERVATION) {
-            addSpatialResource(c, reservation_id++, true);
             continue;
         }
         const bool same_direction =
@@ -623,20 +686,17 @@ void MarkerPublisher::addConflictMarkers(
         deleteMarker(actual_ns, stale);
         deleteMarker(conflict_label_ns, stale);
     }
-    for (int stale = potential_zone_id;
-         stale < last_potential_conflict_zone_marker_count_; ++stale) {
+    for (int stale : last_zone_marker_ids_) {
+        if (current_zone_ids.count(stale) != 0) continue;
         deleteMarker(potential_zone_ns, stale);
         deleteMarker(potential_zone_label_ns, stale);
-    }
-    for (int stale = reservation_id;
-         stale < last_conflict_reservation_marker_count_; ++stale) {
-        deleteMarker(reservation_ns, stale);
-        deleteMarker(reservation_label_ns, stale);
+        deleteMarker(zone_aabb_ns, stale);
     }
     last_same_direction_conflict_marker_count_ = same_id;
     last_crossing_opposing_conflict_marker_count_ = mutual_id;
     last_potential_conflict_zone_marker_count_ = potential_zone_id;
-    last_conflict_reservation_marker_count_ = reservation_id;
+    last_conflict_reservation_marker_count_ = 0;
+    last_zone_marker_ids_ = std::move(current_zone_ids);
 }
 
 void MarkerPublisher::addOriginAxes(visualization_msgs::MarkerArray& arr) const {

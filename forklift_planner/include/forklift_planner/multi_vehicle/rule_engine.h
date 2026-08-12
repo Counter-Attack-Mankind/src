@@ -63,7 +63,14 @@ struct ConflictMarker {
     // timed_overlaps so RViz cannot confuse potential/locked resources with
     // a time-synchronised predicted collision.
     std::vector<std::vector<Point>> spatial_overlap_polygons;
-    int zone_index = -1;
+    // Diagnostic identity only. raw_zone_index is stable for one
+    // (vehicle pair, path generation pair); active_zone_index is the current
+    // findConflictZones() vector position after cleared zones are filtered.
+    int raw_zone_index = -1;
+    int active_zone_index = -1;
+    int path_gen_a = -1;
+    int path_gen_b = -1;
+    bool zone_aabb_valid = false;
     double s_a_enter = 0.0;
     double s_a_exit = 0.0;
     double s_b_enter = 0.0;
@@ -132,6 +139,13 @@ public:
         double x = 0.0;
         double y = 0.0;
         double first_conflict_t = 0.0;
+        // RViz/debug metadata. These fields never participate in arbitration.
+        int raw_zone_index = -1;
+        double aabb_min_x = 0.0;
+        double aabb_min_y = 0.0;
+        double aabb_max_x = 0.0;
+        double aabb_max_y = 0.0;
+        bool aabb_valid = false;
     };
 
     // Multi-zone A1 departure handoff. Unlike ConflictReservation, this
@@ -205,6 +219,15 @@ private:
         double s_other_exit = 0.0;   // arc exit on other's path
         double x = 0.0;
         double y = 0.0;
+        // Stable cache index and the exact union AABB of every overlap
+        // polygon aggregated into this zone. Diagnostic-only: no rule reads
+        // these fields.
+        int raw_index = -1;
+        double aabb_min_x = 0.0;
+        double aabb_min_y = 0.0;
+        double aabb_max_x = 0.0;
+        double aabb_max_y = 0.0;
+        bool aabb_valid = false;
         // 块内两路径是否「同向」(正对角带=同车道跟车;否则交叉/对向)。由静态几何在
         // 块中点测两路径行进朝向算定 → 稳定不随当前位姿闪烁(对称,与 self/other 朝向无关)。
         bool same_dir = false;

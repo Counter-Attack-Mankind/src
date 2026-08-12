@@ -114,6 +114,11 @@ struct OverlapSample {
     double s_other = 0.0;
     double x = 0.0;
     double y = 0.0;
+    double min_x = 0.0;
+    double min_y = 0.0;
+    double max_x = 0.0;
+    double max_y = 0.0;
+    bool bounds_valid = false;
 };
 
 const char* missionPhaseName(MissionPhase phase) {
@@ -153,7 +158,11 @@ bool sameReservation(const RuleEngine::ConflictReservation& a,
            a.enter_lo == b.enter_lo && a.exit_lo == b.exit_lo &&
            a.enter_hi == b.enter_hi && a.exit_hi == b.exit_hi &&
            a.x == b.x && a.y == b.y &&
-           a.first_conflict_t == b.first_conflict_t;
+           a.first_conflict_t == b.first_conflict_t &&
+           a.raw_zone_index == b.raw_zone_index &&
+           a.aabb_min_x == b.aabb_min_x && a.aabb_min_y == b.aabb_min_y &&
+           a.aabb_max_x == b.aabb_max_x && a.aabb_max_y == b.aabb_max_y &&
+           a.aabb_valid == b.aabb_valid;
 }
 
 bool sameDepartureCluster(
@@ -460,9 +469,24 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
 
             const RoughWp ps = self.track.poseAtS(ss_clamped);
             const RoughWp po = other.track.poseAtS(so_clamped);
-            row.push_back(OverlapSample{ss_clamped, so_clamped,
-                                        0.5 * (ps.x + po.x),
-                                        0.5 * (ps.y + po.y)});
+            OverlapSample sample;
+            sample.s_self = ss_clamped;
+            sample.s_other = so_clamped;
+            sample.x = 0.5 * (ps.x + po.x);
+            sample.y = 0.5 * (ps.y + po.y);
+            const auto polygon = intersectObbs(obb_s, obb_o);
+            if (polygon.size() >= 3) {
+                sample.min_x = sample.max_x = polygon.front().x;
+                sample.min_y = sample.max_y = polygon.front().y;
+                for (const auto& point : polygon) {
+                    sample.min_x = std::min(sample.min_x, point.x);
+                    sample.min_y = std::min(sample.min_y, point.y);
+                    sample.max_x = std::max(sample.max_x, point.x);
+                    sample.max_y = std::max(sample.max_y, point.y);
+                }
+                sample.bounds_valid = true;
+            }
+            row.push_back(sample);
         }
 
         if (row.empty()) continue;
@@ -478,12 +502,31 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
                 z.s_other_exit = sample.s_other;
                 z.x = sample.x;
                 z.y = sample.y;
+                z.aabb_min_x = sample.min_x;
+                z.aabb_min_y = sample.min_y;
+                z.aabb_max_x = sample.max_x;
+                z.aabb_max_y = sample.max_y;
+                z.aabb_valid = sample.bounds_valid;
                 row_zones.push_back(z);
             } else {
                 ConflictZone& z = row_zones.back();
                 z.s_other_exit = sample.s_other;
                 z.x = 0.5 * (z.x + sample.x);
                 z.y = 0.5 * (z.y + sample.y);
+                if (sample.bounds_valid) {
+                    if (!z.aabb_valid) {
+                        z.aabb_min_x = sample.min_x;
+                        z.aabb_min_y = sample.min_y;
+                        z.aabb_max_x = sample.max_x;
+                        z.aabb_max_y = sample.max_y;
+                    } else {
+                        z.aabb_min_x = std::min(z.aabb_min_x, sample.min_x);
+                        z.aabb_min_y = std::min(z.aabb_min_y, sample.min_y);
+                        z.aabb_max_x = std::max(z.aabb_max_x, sample.max_x);
+                        z.aabb_max_y = std::max(z.aabb_max_y, sample.max_y);
+                    }
+                    z.aabb_valid = true;
+                }
             }
         }
 
@@ -503,6 +546,20 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
                 z.s_other_exit = std::max(z.s_other_exit, row_zone.s_other_exit);
                 z.x = 0.5 * (z.x + row_zone.x);
                 z.y = 0.5 * (z.y + row_zone.y);
+                if (row_zone.aabb_valid) {
+                    if (!z.aabb_valid) {
+                        z.aabb_min_x = row_zone.aabb_min_x;
+                        z.aabb_min_y = row_zone.aabb_min_y;
+                        z.aabb_max_x = row_zone.aabb_max_x;
+                        z.aabb_max_y = row_zone.aabb_max_y;
+                    } else {
+                        z.aabb_min_x = std::min(z.aabb_min_x, row_zone.aabb_min_x);
+                        z.aabb_min_y = std::min(z.aabb_min_y, row_zone.aabb_min_y);
+                        z.aabb_max_x = std::max(z.aabb_max_x, row_zone.aabb_max_x);
+                        z.aabb_max_y = std::max(z.aabb_max_y, row_zone.aabb_max_y);
+                    }
+                    z.aabb_valid = true;
+                }
                 merged = true;
                 break;
             }
@@ -521,7 +578,9 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
         if (v.track.typeAtS(s) == WpType::REVERSE) h += kPi;
         return h;
     };
-    for (ConflictZone& z : zones) {
+    for (size_t raw_index = 0; raw_index < zones.size(); ++raw_index) {
+        ConflictZone& z = zones[raw_index];
+        z.raw_index = static_cast<int>(raw_index);
         const double hs =
             pathHeadingAtS(self, 0.5 * (z.s_self_enter + z.s_self_exit));
         const double ho =
@@ -631,8 +690,9 @@ std::vector<ConflictMarker> RuleEngine::conflictResourceMarkers(
     auto buildPolygons = [&](const VehicleAgent& self,
                              const VehicleAgent& other,
                              const ConflictZone& zone) {
-        // ConflictZone stores only a compressed (s_self,s_other) rectangle.
-        // Re-run the same OBB predicate inside that rectangle for display;
+        // ConflictZone stores compressed arc intervals and the diagnostic
+        // union AABB, but not every source polygon. Re-run the same OBB
+        // predicate inside the arc rectangle for the blue display geometry;
         // non-overlapping combinations inside the compressed rectangle are
         // explicitly discarded and never rendered.
         std::map<std::pair<long long, long long>,
@@ -729,7 +789,10 @@ std::vector<ConflictMarker> RuleEngine::conflictResourceMarkers(
         ConflictMarker marker;
         marker.vehicle_a = a.id;
         marker.vehicle_b = b.id;
-        marker.zone_index = zone_index;
+        marker.raw_zone_index = zone.raw_index;
+        marker.active_zone_index = zone_index;
+        marker.path_gen_a = a.path_gen;
+        marker.path_gen_b = b.path_gen;
         marker.s_a_enter = zone.s_self_enter;
         marker.s_a_exit = zone.s_self_exit;
         marker.s_b_enter = zone.s_other_enter;
@@ -739,24 +802,12 @@ std::vector<ConflictMarker> RuleEngine::conflictResourceMarkers(
         marker.waiter_id = waiter_id;
         marker.spatial_overlap_polygons = polygonsForZone(a, b, zone);
 
-        double x_min = std::numeric_limits<double>::infinity();
-        double y_min = std::numeric_limits<double>::infinity();
-        double x_max = -std::numeric_limits<double>::infinity();
-        double y_max = -std::numeric_limits<double>::infinity();
-        for (const auto& polygon : marker.spatial_overlap_polygons) {
-            for (const auto& point : polygon) {
-                x_min = std::min(x_min, point.x);
-                y_min = std::min(y_min, point.y);
-                x_max = std::max(x_max, point.x);
-                y_max = std::max(y_max, point.y);
-            }
-        }
-        if (std::isfinite(x_min) && std::isfinite(y_min) &&
-            std::isfinite(x_max) && std::isfinite(y_max)) {
-            marker.x = 0.5 * (x_min + x_max);
-            marker.y = 0.5 * (y_min + y_max);
-            marker.scale_x = std::max(0.01, x_max - x_min);
-            marker.scale_y = std::max(0.01, y_max - y_min);
+        if (zone.aabb_valid) {
+            marker.x = 0.5 * (zone.aabb_min_x + zone.aabb_max_x);
+            marker.y = 0.5 * (zone.aabb_min_y + zone.aabb_max_y);
+            marker.scale_x = std::max(0.01, zone.aabb_max_x - zone.aabb_min_x);
+            marker.scale_y = std::max(0.01, zone.aabb_max_y - zone.aabb_min_y);
+            marker.zone_aabb_valid = true;
         } else {
             marker.x = zone.x;
             marker.y = zone.y;
@@ -796,6 +847,12 @@ std::vector<ConflictMarker> RuleEngine::conflictResourceMarkers(
             reserved_zone.s_other_exit = a_is_lo ? r.exit_hi : r.exit_lo;
             reserved_zone.x = r.x;
             reserved_zone.y = r.y;
+            reserved_zone.raw_index = r.raw_zone_index;
+            reserved_zone.aabb_min_x = r.aabb_min_x;
+            reserved_zone.aabb_min_y = r.aabb_min_y;
+            reserved_zone.aabb_max_x = r.aabb_max_x;
+            reserved_zone.aabb_max_y = r.aabb_max_y;
+            reserved_zone.aabb_valid = r.aabb_valid;
             int reserved_zone_index = -1;
             for (size_t zone_index = 0; zone_index < zones.size();
                  ++zone_index) {
@@ -887,6 +944,20 @@ void RuleEngine::recordConflictZones(
         marker.scale_y = std::max(0.01, y_max - y_min + 2.0 * pad);
         marker.vehicle_a = self.id;
         marker.vehicle_b = other.id;
+        marker.path_gen_a = self.path_gen;
+        marker.path_gen_b = other.path_gen;
+        marker.raw_zone_index = z.raw_index;
+        marker.s_a_enter = z.s_self_enter;
+        marker.s_a_exit = z.s_self_exit;
+        marker.s_b_enter = z.s_other_enter;
+        marker.s_b_exit = z.s_other_exit;
+        const auto active_zones = findConflictZones(self, other);
+        for (size_t active = 0; active < active_zones.size(); ++active) {
+            if (active_zones[active].raw_index == z.raw_index) {
+                marker.active_zone_index = static_cast<int>(active);
+                break;
+            }
+        }
         marker.follower_id = follower_id;
         marker.leader_id = leader_id;
         marker.holder_id = holder_id;
@@ -1343,6 +1414,12 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         z.s_other_exit = a_is_lo ? r.exit_hi : r.exit_lo;
         z.x = r.x;
         z.y = r.y;
+        z.raw_index = r.raw_zone_index;
+        z.aabb_min_x = r.aabb_min_x;
+        z.aabb_min_y = r.aabb_min_y;
+        z.aabb_max_x = r.aabb_max_x;
+        z.aabb_max_y = r.aabb_max_y;
+        z.aabb_valid = r.aabb_valid;
         return z;
     };
 
@@ -1704,6 +1781,12 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             r.x = zone.x;
             r.y = zone.y;
             r.first_conflict_t = event.first_t;
+            r.raw_zone_index = zone.raw_index;
+            r.aabb_min_x = zone.aabb_min_x;
+            r.aabb_min_y = zone.aabb_min_y;
+            r.aabb_max_x = zone.aabb_max_x;
+            r.aabb_max_y = zone.aabb_max_y;
+            r.aabb_valid = zone.aabb_valid;
             conflict_reservations_[key] = r;
             logConflictReservation(coord_log_sink_, key, "create", r);
 

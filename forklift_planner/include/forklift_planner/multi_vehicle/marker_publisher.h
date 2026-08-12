@@ -4,6 +4,7 @@
 #include <visualization_msgs/MarkerArray.h>
 
 #include <vector>
+#include <set>
 
 #include "forklift_map/map_param.h"
 #include "forklift_map/map_types.h"
@@ -61,6 +62,7 @@ private:
     mutable int last_crossing_opposing_conflict_marker_count_ = 0;
     mutable int last_potential_conflict_zone_marker_count_ = 0;
     mutable int last_conflict_reservation_marker_count_ = 0;
+    mutable std::set<int> last_zone_marker_ids_;
     mutable int publish_seq_ = 0;
 };
 

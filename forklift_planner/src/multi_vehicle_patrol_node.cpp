@@ -75,6 +75,16 @@ public:
         nh_.param<std::string>("coord_log_file", coord_log_file_,
                                debug_log_dir_ +
                                    "/multi_vehicle_coordination.log");
+        nh_.param("snapshot_debug_enabled", snapshot_debug_enabled_, false);
+        nh_.param("debug_timeline_start", debug_timeline_start_, -1.0);
+        nh_.param("debug_timeline_end", debug_timeline_end_, -1.0);
+        nh_.param<std::string>("snapshot_trigger_topic",
+                               snapshot_trigger_topic_,
+                               "/forklift_planner/debug_snapshot_trigger");
+        if (snapshot_debug_enabled_) {
+            snapshot_trigger_pub_ = nh_.advertise<std_msgs::String>(
+                snapshot_trigger_topic_, 2, false);
+        }
         onset_log_file_ = debug_log_dir_ + "/forklift_onset.log";
         realbridge_positions_file_ =
             debug_log_dir_ + "/realbridge_positions.txt";
@@ -964,6 +974,25 @@ private:
         sim_plan_valid_ = !sim_plan_frames_.empty();
         sim_plan_start_time_ = sim_time_;
         ++sim_plan_id_;
+        if (debug_timeline_start_ >= 0.0 &&
+            sim_time_ >= debug_timeline_start_ - rb_horizon_ &&
+            sim_time_ <= debug_timeline_end_) {
+            for (size_t vehicle = 0; vehicle < trajs.size(); ++vehicle) {
+                std::ostringstream line;
+                line << std::fixed << std::setprecision(3)
+                     << "[TIMELINE_PRED] plan=" << sim_plan_id_
+                     << " start=" << sim_time_ << " V" << vehicle;
+                const auto& points = trajs[vehicle].points;
+                const size_t stride = std::max<size_t>(
+                    1, static_cast<size_t>(std::lround(pp_.update_rate)));
+                for (size_t sample = 0; sample < points.size(); sample += stride) {
+                    const auto& point = points[sample];
+                    line << " t" << point.time << "=(" << point.x << ","
+                         << point.y << ",v=" << point.velocity << ")";
+                }
+                coordLog(line.str());
+            }
+        }
         logFutureA1Transition(previous_commitment, commitment, arrivals,
                               change_reason);
         ROS_INFO("[sim_plan] built plan=%llu start=%.2f horizon=%.2f "
@@ -2144,6 +2173,7 @@ private:
             rule_engine_->decide(agents_, dt);      //规则调度---决策
             realAdvance(dt);        //  用真实位姿更新车辆状态---执行
             if (tick_count_ % 5 == 0) runDeadlockRecovery();        //5*0.1=0.5s进行一次死锁检测
+            updateSnapshotWedgeTrigger();
             if (force_horizon_refresh_ ||
                 tick_count_ % rb_horizon_refresh_ == 0) {
                 publishHorizon();   // 新航段立即发布；否则20*0.1=2s刷新
@@ -2191,10 +2221,12 @@ private:
         }
         advanceVehicles(dt);
         diagnoseA1ExitIntrusions();
+        recordDebugTimelineTick();
 
 
         //4. 仿真模式---一次性触发完成
         if (tick_count_ % 5 == 0) runDeadlockRecovery();
+        updateSnapshotWedgeTrigger();
 
         if (rb_one_shot_traj_) {    
             if (!one_shot_published_) one_shot_published_ = publishFullTrajectories();
@@ -2696,6 +2728,14 @@ private:
     std::vector<ros::Publisher> traj_pubs_, speed_pubs_;// /traj_i(路径) + /coord_speed_i(实时速度)
     std::vector<ros::Publisher> state_pubs_;            // /coord_state_i(只读调试:停车原因)
     ros::Publisher horizon_marker_pub_;                 // 推演 5s 轨迹的 RViz 可视化(LINE_STRIP/车)
+    ros::Publisher snapshot_trigger_pub_;
+    bool snapshot_debug_enabled_ = false;
+    double debug_timeline_start_ = -1.0;
+    double debug_timeline_end_ = -1.0;
+    std::string snapshot_trigger_topic_;
+    bool snapshot_wedge_active_ = false;
+    unsigned long long snapshot_last_trigger_tick_ = 0;
+    std::set<std::string> snapshot_deadlock_signatures_;
     ros::Subscriber start_sub_, estop_sub_;             // /rb_start(Enter开跑) /estop(空格急停切换)
     bool rb_started_ = false;                           // 摆位完成、按Enter后才推进
     bool rb_estop_ = false;                             // 操作员急停:true=全车瞬时停
@@ -2756,6 +2796,113 @@ private:
     std::map<int, double> last_replan_t_;             // 车id→上次重规划 sim_t(冷却用)
 
 public:
+    void recordDebugTimelineTick() {
+        if (debug_timeline_start_ < 0.0 ||
+            sim_time_ + 1e-9 < debug_timeline_start_ ||
+            sim_time_ - 1e-9 > debug_timeline_end_) {
+            return;
+        }
+        for (const VehicleAgent& vehicle : agents_) {
+            std::ostringstream line;
+            line << std::fixed << std::setprecision(3)
+                 << "[TIMELINE_STATE] tick=" << tick_count_
+                 << " sim_t=" << sim_time_
+                 << " plan=" << sim_plan_id_
+                 << " frame=" << coord_log_frame_id_
+                 << " V" << vehicle.id
+                 << " phase=" << missionPhaseName(vehicle.mission_phase)
+                 << " gen=" << vehicle.path_gen
+                 << " s=" << vehicle.path_s
+                 << " speed=" << vehicle.current_speed
+                 << " action=" << actionName(vehicle.action)
+                 << " reason=" << vehicle.reason
+                 << " blocker=" << vehicle.blocker_id
+                 << " wait=" << vehicle.wait_time;
+            coordLog(line.str());
+        }
+        const auto resources = rule_engine_->conflictResourceMarkers(agents_);
+        for (const auto& marker : resources) {
+            std::ostringstream line;
+            line << std::fixed << std::setprecision(3)
+                 << "[TIMELINE_ZONE] tick=" << tick_count_
+                 << " sim_t=" << sim_time_
+                 << " kind="
+                 << (marker.kind == forklift_planner::multi_vehicle::
+                         ConflictMarkerKind::CONFLICT_RESERVATION
+                         ? "RESERVED" : "POTENTIAL")
+                 << " pair=V" << marker.vehicle_a << "/V" << marker.vehicle_b
+                 << " raw=" << marker.raw_zone_index
+                 << " active=" << marker.active_zone_index
+                 << " V" << marker.vehicle_a << "=[" << marker.s_a_enter
+                 << "," << marker.s_a_exit << "]"
+                 << " V" << marker.vehicle_b << "=[" << marker.s_b_enter
+                 << "," << marker.s_b_exit << "]"
+                 << " holder=" << marker.holder_id
+                 << " waiter=" << marker.waiter_id;
+            coordLog(line.str());
+        }
+        for (const auto& marker : rule_engine_->conflicts()) {
+            if (marker.kind != forklift_planner::multi_vehicle::
+                                   ConflictMarkerKind::CROSSING_OR_OPPOSING) {
+                continue;
+            }
+            std::ostringstream line;
+            line << std::fixed << std::setprecision(3)
+                 << "[TIMELINE_EVENT] tick=" << tick_count_
+                 << " sim_t=" << sim_time_
+                 << " pair=V" << marker.vehicle_a << "/V" << marker.vehicle_b
+                 << " raw=" << marker.raw_zone_index
+                 << " active=" << marker.active_zone_index
+                 << " first_t=" << marker.t
+                 << " overlaps=" << marker.timed_overlaps.size()
+                 << " holder=" << marker.holder_id
+                 << " waiter=" << marker.waiter_id;
+            if (!marker.timed_overlaps.empty()) {
+                line << " overlap_t=[" << marker.timed_overlaps.front().t
+                     << "," << marker.timed_overlaps.back().t << "]";
+            }
+            coordLog(line.str());
+        }
+    }
+
+    void requestDebugSnapshot(const std::string& event) {
+        if (!snapshot_debug_enabled_ ||
+            snapshot_last_trigger_tick_ == tick_count_) {
+            return;
+        }
+        std_msgs::String message;
+        std::ostringstream text;
+        text << std::fixed << std::setprecision(1)
+             << "event=" << event
+             << " seed=" << cfg_.random_seed
+             << " vehicle_count=" << cfg_.vehicle_count
+             << " sim_t=" << sim_time_
+             << " tick=" << tick_count_;
+        message.data = text.str();
+        snapshot_trigger_pub_.publish(message);
+        snapshot_last_trigger_tick_ = tick_count_;
+        // A formal cycle is also a wedge. Mark the wedge as already captured so
+        // the next tick cannot archive the same scene again as FIRST-WEDGE.
+        if (event.rfind("DEADLOCK_", 0) == 0) {
+            snapshot_wedge_active_ = true;
+        }
+        ROS_WARN("[RVIZ-SNAPSHOT] trigger requested: %s", message.data.c_str());
+    }
+
+    void updateSnapshotWedgeTrigger() {
+        if (!snapshot_debug_enabled_) return;
+        double max_wait = 0.0;
+        for (const VehicleAgent& vehicle : agents_) {
+            max_wait = std::max(max_wait, vehicle.wait_time);
+        }
+        if (max_wait <= 1.0) {
+            snapshot_wedge_active_ = false;
+        } else if (max_wait > 25.0 && !snapshot_wedge_active_) {
+            snapshot_wedge_active_ = true;
+            requestDebugSnapshot("FIRST-WEDGE");
+        }
+    }
+
     // 一辆车的紧凑状态行(诊断用,信息尽量全)。
     std::string vehLine(const VehicleAgent& v) const {
         char buf[256];
@@ -2826,6 +2973,14 @@ public:
         constexpr double kCooldown = 8.0;       // 同一辆两次重规划的最小间隔(给它时间驶离)
         const std::set<int> members = findDeadlockMembers(kDeadlockWait);
         if (members.empty()) return;
+        std::string snapshot_signature;
+        for (int id : members) {
+            if (!snapshot_signature.empty()) snapshot_signature += "-";
+            snapshot_signature += "V" + std::to_string(id);
+        }
+        if (snapshot_deadlock_signatures_.insert(snapshot_signature).second) {
+            requestDebugSnapshot("DEADLOCK_" + snapshot_signature);
+        }
         ++deadlock_ticks_;
         // 选等待最久、且不在冷却期的成员当受害车。
         int victim = -1;
@@ -3002,6 +3157,7 @@ public:
             const unsigned long long guards_before = hard_guard_events_;
             advanceVehicles(dt);
             diagnoseA1ExitIntrusions();
+            recordDebugTimelineTick();
             const bool new_collision = hard_guard_events_ > guards_before;
 
             hist.push_back(fleetSnapshot());
@@ -3081,6 +3237,7 @@ public:
 
             // 死锁看门狗(C):检测持续环 → 受害车从当前位姿重规划脱困。每 5 拍查一次。
             if (k % 5 == 0) runDeadlockRecovery();
+            updateSnapshotWedgeTrigger();
 
             if ((k + 1) % progress == 0) {
                 ROS_INFO("[batch] %llu/%llu ticks (sim_t=%.0fs) hard_guard=%llu",

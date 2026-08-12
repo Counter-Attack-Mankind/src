@@ -1,0 +1,4 @@
+# Runtime diagnostics are intentionally kept outside version control.
+*.bag
+*.bag.active
+forklift_debug_bags/

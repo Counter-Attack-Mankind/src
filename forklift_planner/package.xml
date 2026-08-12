@@ -15,4 +15,6 @@
   <depend>std_msgs</depend>
   <depend>forklift_map</depend>
   <depend>sandbox_msgs</depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>rosbag</exec_depend>
 </package>
