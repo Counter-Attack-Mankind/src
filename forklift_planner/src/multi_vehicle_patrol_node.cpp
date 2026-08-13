@@ -75,6 +75,12 @@ public:
         nh_.param<std::string>("coord_log_file", coord_log_file_,
                                debug_log_dir_ +
                                    "/multi_vehicle_coordination.log");
+        nh_.param("coord_log_enabled", coord_log_enabled_, true);
+        nh_.param("stress_watchdog_enabled", stress_watchdog_enabled_, false);
+        nh_.param("stress_quiet", stress_quiet_, false);
+        nh_.param("stress_progress_timeout", stress_progress_timeout_, 120.0);
+        nh_.param<std::string>("stress_result_file", stress_result_file_, "");
+        nh_.param<std::string>("stress_failure_file", stress_failure_file_, "");
         nh_.param("snapshot_debug_enabled", snapshot_debug_enabled_, false);
         nh_.param("debug_timeline_start", debug_timeline_start_, -1.0);
         nh_.param("debug_timeline_end", debug_timeline_end_, -1.0);
@@ -128,6 +134,11 @@ public:
         horizon_marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>(
             "/forklift_planner/markers", 10);
 
+        if (stress_quiet_) {
+            ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME,
+                                           ros::console::levels::Error);
+            ros::console::notifyLoggerLevelsChanged();
+        }
         if (cfg_.precompute_task_filter) {
             allocator_->buildCache();
         }
@@ -137,6 +148,11 @@ public:
         initAgents();
         visited_slots_.assign(map_->slots().size(), false);
         one_shot_done_.assign(agents_.size(), false);
+        if (stress_quiet_) {
+            ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME,
+                                           ros::console::levels::Error);
+            ros::console::notifyLoggerLevelsChanged();
+        }
         dumpResourceSpans();  // Phase 1.3 验证:打印各车路径经过的资源占用区间
 
         if (cfg_.real_mode) {
@@ -220,6 +236,7 @@ private:
     };
 
     void initCoordLog() {
+        if (!coord_log_enabled_) return;
         std::error_code error;
         std::filesystem::create_directories(debug_log_dir_, error);
         if (error) {
@@ -2712,6 +2729,12 @@ private:
     int target_only_ = -1;  // realbridge debug: -1 = all vehicles, otherwise control only this id
     std::string debug_log_dir_;
     std::string coord_log_file_;
+    bool coord_log_enabled_ = true;
+    bool stress_watchdog_enabled_ = false;
+    bool stress_quiet_ = false;
+    double stress_progress_timeout_ = 120.0;
+    std::string stress_result_file_;
+    std::string stress_failure_file_;
     std::string onset_log_file_;
     std::string realbridge_positions_file_;
     std::ofstream coord_log_;
@@ -2812,6 +2835,9 @@ public:
                  << " V" << vehicle.id
                  << " phase=" << missionPhaseName(vehicle.mission_phase)
                  << " gen=" << vehicle.path_gen
+                 << " task=" << vehicle.task_count
+                 << " slot=" << vehicle.current_slot
+                 << "->" << vehicle.target_slot
                  << " s=" << vehicle.path_s
                  << " speed=" << vehicle.current_speed
                  << " action=" << actionName(vehicle.action)
@@ -3087,6 +3113,145 @@ public:
         f.flush();
     }
 
+    std::string stressSnapshot(bool include_geometry) const {
+        std::ostringstream out;
+        out << std::fixed << std::setprecision(3)
+            << "tick=" << tick_count_ << " sim_t=" << sim_time_;
+        for (const VehicleAgent& v : agents_) {
+            out << "\n  V" << v.id
+                << " mode=" << modeName(v.mode)
+                << " phase=" << missionPhaseName(v.mission_phase)
+                << " gen=" << v.path_gen
+                << " task=" << v.task_count
+                << " slot=" << v.current_slot << "->" << v.target_slot
+                << " s=" << v.path_s
+                << " speed=" << v.current_speed
+                << " action=" << actionName(v.action)
+                << " requested=" << actionName(v.requested_action)
+                << " blocker=" << v.blocker_id
+                << " wait=" << v.wait_time
+                << " reason=" << v.reason;
+        }
+
+        const auto state = rule_engine_->snapshot();
+        for (const auto& item : state.reservations) {
+            const auto& key = item.first;
+            const auto& r = item.second;
+            out << "\n  reservation=V" << key.first << "/V" << key.second
+                << " owner=V" << r.owner_id
+                << " gen=" << r.gen_lo << "/" << r.gen_hi
+                << " lo=[" << r.enter_lo << "," << r.exit_lo << "]"
+                << " hi=[" << r.enter_hi << "," << r.exit_hi << "]"
+                << " raw=" << r.raw_zone_index;
+        }
+        for (const auto& item : state.departure_clusters) {
+            const auto& c = item.second;
+            out << "\n  departure_cluster=V" << item.first.first << "/V"
+                << item.first.second << " owner=V" << c.owner_id
+                << " owner_gen=" << c.owner_path_gen
+                << " other=V" << c.other_id
+                << " other_gen=" << c.other_path_gen
+                << " active=" << (c.active ? 1 : 0)
+                << " intervals=" << c.intervals.size()
+                << " stop_boundary=" << c.waiter_stop_boundary_s
+                << " stop_s=" << c.waiter_stop_s
+                << " release=" << c.owner_release_exit_s << "/"
+                << c.other_release_exit_s;
+        }
+        const auto& future = rule_engine_->futureA1Commitment();
+        out << "\n  future_a1=";
+        if (future.valid()) {
+            out << "owner=V" << future.owner_id
+                << " gen=" << future.owner_path_gen
+                << " arrival=" << future.predicted_a1_arrival_time
+                << " to_b=" << future.predicted_to_b_time;
+        } else {
+            out << "none";
+        }
+
+        if (include_geometry) {
+            const auto markers = rule_engine_->conflictResourceMarkers(agents_);
+            for (const auto& m : markers) {
+                out << "\n  zone="
+                    << (m.kind == forklift_planner::multi_vehicle::
+                            ConflictMarkerKind::CONFLICT_RESERVATION
+                            ? "RESERVED" : "POTENTIAL")
+                    << " pair=V" << m.vehicle_a << "/V" << m.vehicle_b
+                    << " raw=" << m.raw_zone_index
+                    << " active=" << m.active_zone_index
+                    << " a=[" << m.s_a_enter << "," << m.s_a_exit << "]"
+                    << " b=[" << m.s_b_enter << "," << m.s_b_exit << "]"
+                    << " holder=" << m.holder_id
+                    << " waiter=" << m.waiter_id;
+            }
+        }
+        return out.str();
+    }
+
+    void ensureParentDirectory(const std::string& file) const {
+        if (file.empty()) return;
+        const std::filesystem::path parent =
+            std::filesystem::path(file).parent_path();
+        if (parent.empty()) return;
+        std::error_code error;
+        std::filesystem::create_directories(parent, error);
+        if (error) {
+            ROS_ERROR("[stress] cannot create result directory %s: %s",
+                      parent.string().c_str(), error.message().c_str());
+        }
+    }
+
+    void writeStressResult(const std::string& status,
+                           const std::string& failure_type,
+                           const std::vector<double>& max_wait,
+                           unsigned long long wedge_episodes,
+                           unsigned long long reciprocal_cycles) const {
+        if (stress_result_file_.empty()) return;
+        ensureParentDirectory(stress_result_file_);
+        std::ofstream out(stress_result_file_, std::ios::trunc);
+        if (!out) {
+            ROS_ERROR("[stress] cannot write result file %s",
+                      stress_result_file_.c_str());
+            return;
+        }
+        out << "status=" << status << "\n"
+            << "failure_type=" << (failure_type.empty() ? "none" : failure_type)
+            << "\nseed=" << cfg_.random_seed
+            << "\nvehicle_count=" << agents_.size()
+            << "\nticks=" << tick_count_
+            << "\nsim_time_s=" << std::fixed << std::setprecision(3) << sim_time_
+            << "\nhard_guard_events=" << hard_guard_events_
+            << "\ndeadlock_ticks=" << deadlock_ticks_
+            << "\ndeadlock_recoveries=" << deadlock_recoveries_
+            << "\nreciprocal_cycle_events=" << reciprocal_cycles
+            << "\nwedge_episodes=" << wedge_episodes << "\n";
+        for (size_t i = 0; i < agents_.size(); ++i) {
+            out << "V" << agents_[i].id << "_tasks=" << agents_[i].task_count
+                << "\nV" << agents_[i].id << "_max_wait_s="
+                << (i < max_wait.size() ? max_wait[i] : 0.0) << "\n";
+        }
+    }
+
+    void writeStressFailure(const std::string& failure_type,
+                            const std::deque<std::string>& ring) const {
+        if (stress_failure_file_.empty()) return;
+        ensureParentDirectory(stress_failure_file_);
+        std::ofstream out(stress_failure_file_, std::ios::trunc);
+        if (!out) {
+            ROS_ERROR("[stress] cannot write failure file %s",
+                      stress_failure_file_.c_str());
+            return;
+        }
+        out << "failure_type=" << failure_type
+            << "\nseed=" << cfg_.random_seed
+            << "\nring_seconds=120"
+            << "\nprogress_timeout_s=" << stress_progress_timeout_
+            << "\n\n===== PRE-FAILURE RING =====\n";
+        for (const std::string& frame : ring) out << frame << "\n---\n";
+        out << "===== FAILURE GEOMETRY =====\n"
+            << stressSnapshot(true) << "\n";
+    }
+
     // 找「所有」持续死锁环的成员并集:对每辆车跟 blocker 链,若绕回自身则其环成员全部入集。
     std::set<int> findDeadlockMembers(double min_wait) const {
         auto idxOf = [&](int id) -> int {
@@ -3125,7 +3290,9 @@ public:
     // dump 全队历史+碰撞对几何,并对其后 kPost 拍逐拍详打;结尾 dump 永久楔死现场。
     bool runBatch(unsigned long long ticks) {
         const double dt = 1.0 / pp_.update_rate;
-        std::ofstream(onset_log_file_, std::ios::trunc);
+        if (!stress_watchdog_enabled_) {
+            std::ofstream(onset_log_file_, std::ios::trunc);
+        }
         const unsigned long long progress = ticks / 10 ? ticks / 10 : 1;
         constexpr size_t kHist = 80;    // 碰撞前回看的拍数
         constexpr unsigned long long kPost = 150;  // 碰撞后逐拍详打的拍数
@@ -3134,6 +3301,36 @@ public:
         bool wedge_dumped = false;
         bool multiwedge_dumped = false;
         unsigned long long verbose_until = 0;
+        const size_t stress_ring_limit = std::max<size_t>(
+            1, static_cast<size_t>(std::ceil(120.0 * pp_.update_rate)));
+        std::deque<std::string> stress_ring;
+        std::vector<double> max_wait_by_vehicle(agents_.size(), 0.0);
+        std::vector<double> last_progress_time(agents_.size(), sim_time_);
+        std::vector<double> previous_path_s(agents_.size(), 0.0);
+        std::vector<int> previous_path_gen(agents_.size(), -1);
+        std::vector<int> previous_task_count(agents_.size(), -1);
+        std::vector<MissionPhase> previous_phase(agents_.size(),
+                                                 MissionPhase::DIRECT_TO_B);
+        for (size_t i = 0; i < agents_.size(); ++i) {
+            previous_path_s[i] = agents_[i].path_s;
+            previous_path_gen[i] = agents_[i].path_gen;
+            previous_task_count[i] = agents_[i].task_count;
+            previous_phase[i] = agents_[i].mission_phase;
+        }
+        bool wedge_active = false;
+        unsigned long long wedge_episodes = 0;
+        unsigned long long reciprocal_cycles = 0;
+        unsigned long long completed_ticks = 0;
+
+        auto fail_stress = [&](const std::string& failure_type) {
+            writeStressFailure(failure_type, stress_ring);
+            writeStressResult("FAIL", failure_type, max_wait_by_vehicle,
+                              wedge_episodes, reciprocal_cycles);
+            ROS_ERROR("[stress] FAIL seed=%d type=%s tick=%llu sim_t=%.3f",
+                      cfg_.random_seed, failure_type.c_str(), tick_count_,
+                      sim_time_);
+            return true;
+        };
 
         for (unsigned long long k = 0; k < ticks && ros::ok(); ++k) {
             ++tick_count_;
@@ -3159,11 +3356,73 @@ public:
             diagnoseA1ExitIntrusions();
             recordDebugTimelineTick();
             const bool new_collision = hard_guard_events_ > guards_before;
+            ++completed_ticks;
 
-            hist.push_back(fleetSnapshot());
-            if (hist.size() > kHist) hist.pop_front();
+            bool path_generation_changed = false;
+            double current_max_wait = 0.0;
+            for (size_t i = 0; i < agents_.size(); ++i) {
+                const VehicleAgent& v = agents_[i];
+                max_wait_by_vehicle[i] =
+                    std::max(max_wait_by_vehicle[i], v.wait_time);
+                current_max_wait = std::max(current_max_wait, v.wait_time);
+                const bool progressed =
+                    std::abs(v.path_s - previous_path_s[i]) > 1e-4 ||
+                    v.path_gen != previous_path_gen[i] ||
+                    v.task_count != previous_task_count[i] ||
+                    v.mission_phase != previous_phase[i];
+                path_generation_changed = path_generation_changed ||
+                    v.path_gen != previous_path_gen[i];
+                if (progressed || v.mode != VehicleMode::ACTIVE) {
+                    last_progress_time[i] = sim_time_;
+                }
+                previous_path_s[i] = v.path_s;
+                previous_path_gen[i] = v.path_gen;
+                previous_task_count[i] = v.task_count;
+                previous_phase[i] = v.mission_phase;
+            }
+            if (current_max_wait > 25.0 && !wedge_active) {
+                wedge_active = true;
+                ++wedge_episodes;
+            } else if (current_max_wait <= 1e-9) {
+                wedge_active = false;
+            }
 
-            if (new_collision && !first_dumped) {
+            if (stress_watchdog_enabled_) {
+                stress_ring.push_back(stressSnapshot(path_generation_changed));
+                if (stress_ring.size() > stress_ring_limit) stress_ring.pop_front();
+
+                if (new_collision) return fail_stress("HARD_GUARD");
+
+                if (agents_.size() == 2 &&
+                    agents_[0].action == VehicleAction::STOP &&
+                    agents_[1].action == VehicleAction::STOP &&
+                    agents_[0].blocker_id == agents_[1].id &&
+                    agents_[1].blocker_id == agents_[0].id) {
+                    ++reciprocal_cycles;
+                    return fail_stress("RECIPROCAL_WAIT_CYCLE");
+                }
+
+                const std::set<int> formal_deadlock = findDeadlockMembers(25.0);
+                if (!formal_deadlock.empty()) {
+                    return fail_stress("FORMAL_DEADLOCK");
+                }
+
+                for (size_t i = 0; i < agents_.size(); ++i) {
+                    if (agents_[i].mode == VehicleMode::ACTIVE &&
+                        sim_time_ - last_progress_time[i] >=
+                            stress_progress_timeout_) {
+                        return fail_stress("NO_PROGRESS_V" +
+                                           std::to_string(agents_[i].id));
+                    }
+                }
+            }
+
+            if (!stress_quiet_) {
+                hist.push_back(fleetSnapshot());
+                if (hist.size() > kHist) hist.pop_front();
+            }
+
+            if (!stress_quiet_ && new_collision && !first_dumped) {
                 first_dumped = true;
                 verbose_until = tick_count_ + kPost;
                 std::string cp;
@@ -3199,7 +3458,7 @@ public:
 
             // 多车紧楔 onset(24h 杀手):≥3 车持续闭环(wait≥15s)首次出现 → 一次性 dump 到
             // 持久文件 + 历史。这是 B(40s前瞻)够不着、recovery 治不了的那类,要抓它怎么形成的。
-            if (!multiwedge_dumped) {
+            if (!stress_quiet_ && !multiwedge_dumped) {
                 const std::set<int> mw3 = findDeadlockMembers(15.0);
                 if (mw3.size() >= 3) {
                     multiwedge_dumped = true;
@@ -3214,7 +3473,7 @@ public:
             }
 
             // 楔死现场一次性诊断:任一车 wait 首次超阈值 → 回放历史 + 全队 + 卡死车几何。
-            if (!wedge_dumped) {
+            if (!stress_quiet_ && !wedge_dumped) {
                 int sid = -1; double mw = 0.0;
                 for (const VehicleAgent& v : agents_)
                     if (v.wait_time > mw) { mw = v.wait_time; sid = v.id; }
@@ -3230,7 +3489,7 @@ public:
                 }
             }
 
-            if (tick_count_ <= verbose_until) {
+            if (!stress_quiet_ && tick_count_ <= verbose_until) {
                 ROS_WARN("[POST]\n%s", fleetSnapshot().c_str());
                 for (const auto& q : hard_guard_pairs_) dumpPair(q.first, q.second);
             }
@@ -3239,10 +3498,22 @@ public:
             if (k % 5 == 0) runDeadlockRecovery();
             updateSnapshotWedgeTrigger();
 
-            if ((k + 1) % progress == 0) {
+            if (!stress_quiet_ && (k + 1) % progress == 0) {
                 ROS_INFO("[batch] %llu/%llu ticks (sim_t=%.0fs) hard_guard=%llu",
                          k + 1, ticks, sim_time_, hard_guard_events_);
             }
+        }
+
+        if (stress_watchdog_enabled_ && completed_ticks != ticks) {
+            return fail_stress("INFRASTRUCTURE_STOP");
+        }
+
+        if (stress_watchdog_enabled_) {
+            writeStressResult("PASS", "", max_wait_by_vehicle,
+                              wedge_episodes, reciprocal_cycles);
+            ROS_WARN("[stress] PASS seed=%d ticks=%llu sim_t=%.3f",
+                     cfg_.random_seed, tick_count_, sim_time_);
+            return false;
         }
 
         // 结尾:找等待最久(永久楔死)的车,dump 它与所有其它车的冲突几何 + 全队快照。

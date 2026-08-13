@@ -196,6 +196,11 @@ public:
     };
     SimSnapshot snapshot() const;
     void restore(const SimSnapshot& s);
+    // Read-only stress-test diagnostics. This exposes the current commitment
+    // without creating, changing, or releasing any coordination state.
+    const FutureA1Commitment& futureA1Commitment() const {
+        return future_a1_commitment_;
+    }
     const std::vector<ConflictMarker>& conflicts() const { return conflicts_; }
     // RViz-only resource diagnostics. This reads the current static conflict
     // cache and reservation table; it never creates, updates or releases a

@@ -1,4 +1,5 @@
 #include "forklift_planner/multi_vehicle/rule_engine.h"
+#include "forklift_planner/multi_vehicle/conflict_zone_closure.h"
 
 #include <algorithm>
 #include <array>
@@ -530,42 +531,50 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
             }
         }
 
-        for (const ConflictZone& row_zone : row_zones) {
-            bool merged = false;
-            for (ConflictZone& z : zones) {
-                const bool self_touch =
-                    row_zone.s_self_enter <= z.s_self_exit + kMergeGap;
-                const bool other_touch =
-                    row_zone.s_other_enter <= z.s_other_exit + kMergeGap &&
-                    row_zone.s_other_exit + kMergeGap >= z.s_other_enter;
-                if (!self_touch || !other_touch) continue;
-
-                z.s_self_enter = std::min(z.s_self_enter, row_zone.s_self_enter);
-                z.s_self_exit = std::max(z.s_self_exit, row_zone.s_self_exit);
-                z.s_other_enter = std::min(z.s_other_enter, row_zone.s_other_enter);
-                z.s_other_exit = std::max(z.s_other_exit, row_zone.s_other_exit);
-                z.x = 0.5 * (z.x + row_zone.x);
-                z.y = 0.5 * (z.y + row_zone.y);
-                if (row_zone.aabb_valid) {
-                    if (!z.aabb_valid) {
-                        z.aabb_min_x = row_zone.aabb_min_x;
-                        z.aabb_min_y = row_zone.aabb_min_y;
-                        z.aabb_max_x = row_zone.aabb_max_x;
-                        z.aabb_max_y = row_zone.aabb_max_y;
-                    } else {
-                        z.aabb_min_x = std::min(z.aabb_min_x, row_zone.aabb_min_x);
-                        z.aabb_min_y = std::min(z.aabb_min_y, row_zone.aabb_min_y);
-                        z.aabb_max_x = std::max(z.aabb_max_x, row_zone.aabb_max_x);
-                        z.aabb_max_y = std::max(z.aabb_max_y, row_zone.aabb_max_y);
-                    }
-                    z.aabb_valid = true;
+        const auto touches = [kMergeGap](const ConflictZone& lhs,
+                                         const ConflictZone& rhs) {
+            const bool self_touch =
+                lhs.s_self_enter <= rhs.s_self_exit + kMergeGap &&
+                lhs.s_self_exit + kMergeGap >= rhs.s_self_enter;
+            const bool other_touch =
+                lhs.s_other_enter <= rhs.s_other_exit + kMergeGap &&
+                lhs.s_other_exit + kMergeGap >= rhs.s_other_enter;
+            return self_touch && other_touch;
+        };
+        const auto merge = [](ConflictZone& destination,
+                              const ConflictZone& source) {
+            destination.s_self_enter =
+                std::min(destination.s_self_enter, source.s_self_enter);
+            destination.s_self_exit =
+                std::max(destination.s_self_exit, source.s_self_exit);
+            destination.s_other_enter =
+                std::min(destination.s_other_enter, source.s_other_enter);
+            destination.s_other_exit =
+                std::max(destination.s_other_exit, source.s_other_exit);
+            destination.x = 0.5 * (destination.x + source.x);
+            destination.y = 0.5 * (destination.y + source.y);
+            if (source.aabb_valid) {
+                if (!destination.aabb_valid) {
+                    destination.aabb_min_x = source.aabb_min_x;
+                    destination.aabb_min_y = source.aabb_min_y;
+                    destination.aabb_max_x = source.aabb_max_x;
+                    destination.aabb_max_y = source.aabb_max_y;
+                } else {
+                    destination.aabb_min_x =
+                        std::min(destination.aabb_min_x, source.aabb_min_x);
+                    destination.aabb_min_y =
+                        std::min(destination.aabb_min_y, source.aabb_min_y);
+                    destination.aabb_max_x =
+                        std::max(destination.aabb_max_x, source.aabb_max_x);
+                    destination.aabb_max_y =
+                        std::max(destination.aabb_max_y, source.aabb_max_y);
                 }
-                merged = true;
-                break;
+                destination.aabb_valid = true;
             }
-            if (!merged) {
-                zones.push_back(row_zone);
-            }
+        };
+
+        for (const ConflictZone& row_zone : row_zones) {
+            insertConflictZoneWithClosure(row_zone, zones, touches, merge);
         }
     }
 

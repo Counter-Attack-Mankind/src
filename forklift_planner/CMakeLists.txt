@@ -86,7 +86,25 @@ add_executable(path_debug
 add_dependencies(path_debug ${catkin_EXPORTED_TARGETS})
 target_link_libraries(path_debug ${catkin_LIBRARIES})
 
+# [DIAG] EXP-002: offline ConflictZone geometry probe.  This executable does
+# not participate in the patrol node or change coordination behavior.
+add_executable(conflict_zone_geometry_diag
+  ${PATH_GENERATOR_SOURCES}
+  src/multi_vehicle/footprint.cpp
+  src/multi_vehicle/path_track.cpp
+  tools/conflict_zone_geometry_diag.cpp
+)
+add_dependencies(conflict_zone_geometry_diag ${catkin_EXPORTED_TARGETS})
+target_link_libraries(conflict_zone_geometry_diag
+  ${catkin_LIBRARIES}
+)
+
 if(CATKIN_ENABLE_TESTING)
+  add_executable(conflict_zone_closure_test
+    test/conflict_zone_closure_test.cpp
+  )
+  add_test(NAME conflict_zone_closure_test COMMAND conflict_zone_closure_test)
+
   add_executable(future_a1_policy_test
     test/future_a1_policy_test.cpp
   )
