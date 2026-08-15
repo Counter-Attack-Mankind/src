@@ -34,6 +34,26 @@ SpeedCoordinationCandidate evaluateCandidate(
 
 }  // namespace
 
+DynamicInterventionBand classifyDynamicInterventionBand(
+    double first_conflict_t, const MultiVehicleConfig& config) {
+    if (first_conflict_t >= config.dynamic_speed_far_threshold) {
+        return DynamicInterventionBand::FAR;
+    }
+    if (first_conflict_t >= config.dynamic_speed_near_threshold) {
+        return DynamicInterventionBand::MID;
+    }
+    return DynamicInterventionBand::NEAR;
+}
+
+const char* dynamicInterventionBandName(DynamicInterventionBand band) {
+    switch (band) {
+        case DynamicInterventionBand::NEAR: return "NEAR";
+        case DynamicInterventionBand::MID: return "MID";
+        case DynamicInterventionBand::FAR: return "FAR";
+    }
+    return "UNKNOWN";
+}
+
 PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const std::vector<PotentialConflictZone>& potential_zones,

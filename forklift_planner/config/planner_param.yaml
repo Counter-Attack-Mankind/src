@@ -74,6 +74,12 @@ forklift_planner:
     # 前瞻预测参数
     prediction_horizon: 15.0
     prediction_step: 0.05
+    # Phase 2.2: baseline TimedConflict first_t intervention bands (s).
+    # [far, horizon] stays NOMINAL; [near, far) tries YIELD/CREEP;
+    # [0, near) is near-term and falls back to the legacy safety chain when
+    # speed shaping is insufficient.
+    dynamic_speed_far_threshold: 10.0
+    dynamic_speed_near_threshold: 5.0
 
     # 离散动作速度比例
     creep_ratio: 0.25

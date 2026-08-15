@@ -210,6 +210,10 @@ public:
 
     struct DynamicSpeedMetrics {
         unsigned long long baseline_conflicts = 0;
+        unsigned long long far_deferred = 0;
+        unsigned long long mid_interventions = 0;
+        unsigned long long near_interventions = 0;
+        unsigned long long near_legacy_fallbacks = 0;
         unsigned long long yield_trials = 0;
         unsigned long long yield_clear = 0;
         unsigned long long creep_trials = 0;

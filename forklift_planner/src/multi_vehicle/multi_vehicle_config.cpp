@@ -69,6 +69,12 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     nh.param(ns + "lat_accel_max", c.lat_accel_max, c.lat_accel_max);
     nh.param(ns + "prediction_horizon", c.prediction_horizon, c.prediction_horizon);
     nh.param(ns + "prediction_step", c.prediction_step, c.prediction_step);
+    nh.param(ns + "dynamic_speed_far_threshold",
+             c.dynamic_speed_far_threshold,
+             c.dynamic_speed_far_threshold);
+    nh.param(ns + "dynamic_speed_near_threshold",
+             c.dynamic_speed_near_threshold,
+             c.dynamic_speed_near_threshold);
     nh.param(ns + "creep_ratio", c.creep_ratio, c.creep_ratio);
     nh.param(ns + "yield_ratio", c.yield_ratio, c.yield_ratio);
     nh.param(ns + "boost_ratio", c.boost_ratio, c.boost_ratio);
@@ -141,6 +147,11 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     c.vehicle_count = std::max(1, std::min(c.vehicle_count, 8));
     c.prediction_step = std::max(0.02, c.prediction_step);
     c.prediction_horizon = std::max(c.prediction_step, c.prediction_horizon);
+    c.dynamic_speed_near_threshold =
+        std::max(0.0, c.dynamic_speed_near_threshold);
+    c.dynamic_speed_far_threshold =
+        std::max(c.dynamic_speed_near_threshold,
+                 c.dynamic_speed_far_threshold);
     c.nominal_speed = std::max(0.01, c.nominal_speed);
     c.max_speed = std::max(c.nominal_speed, c.max_speed);
     c.conflict_margin = std::max(0.0, c.conflict_margin);

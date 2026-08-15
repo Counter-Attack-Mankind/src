@@ -93,6 +93,24 @@ int main() {
     config.prediction_horizon = 15.0;
     config.prediction_step = 0.05;
 
+    // Phase 2.2 intervention bands. Boundaries are intentionally inclusive
+    // on the less urgent side: exactly 10 s is FAR and exactly 5 s is MID.
+    constexpr double eps = 1e-6;
+    if (classifyDynamicInterventionBand(
+            10.0, config) != DynamicInterventionBand::FAR ||
+        classifyDynamicInterventionBand(
+            10.0 - eps, config) != DynamicInterventionBand::MID ||
+        classifyDynamicInterventionBand(
+            10.0 + eps, config) != DynamicInterventionBand::FAR ||
+        classifyDynamicInterventionBand(
+            5.0, config) != DynamicInterventionBand::MID ||
+        classifyDynamicInterventionBand(
+            5.0 - eps, config) != DynamicInterventionBand::NEAR ||
+        classifyDynamicInterventionBand(
+            5.0 + eps, config) != DynamicInterventionBand::MID) {
+        return fail("FAR/MID/NEAR boundary classification changed");
+    }
+
     // 1. NOMINAL/NOMINAL conflicts while NOMINAL/YIELD clears the horizon.
     const Scenario yield_clear = makeScenario(
         map_param, config, 0.30, 0.70);

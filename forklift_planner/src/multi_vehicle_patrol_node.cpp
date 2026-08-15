@@ -3587,12 +3587,16 @@ public:
         }
         const auto& dynamic = rule_engine_->dynamicSpeedMetrics();
         ROS_WARN("[BATCH_DYN_SPEED_METRICS] baseline_conflicts=%llu "
+                 "far_deferred=%llu mid_intervention=%llu "
+                 "near_intervention=%llu near_legacy_fallback=%llu "
                  "yield_trials=%llu yield_clear=%llu creep_trials=%llu "
                  "creep_clear=%llu search_failed=%llu near_fallback=%llu "
                  "a1_fallback=%llu existing_reservation=%llu "
                  "nominal_recovery=%llu reservation_create=%llu "
                  "reservation_delete=%llu",
-                 dynamic.baseline_conflicts, dynamic.yield_trials,
+                 dynamic.baseline_conflicts, dynamic.far_deferred,
+                 dynamic.mid_interventions, dynamic.near_interventions,
+                 dynamic.near_legacy_fallbacks, dynamic.yield_trials,
                  dynamic.yield_clear, dynamic.creep_trials,
                  dynamic.creep_clear, dynamic.candidate_search_failed,
                  dynamic.near_fallbacks, dynamic.a1_fallbacks,

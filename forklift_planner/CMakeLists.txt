@@ -154,6 +154,20 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME dynamic_speed_rule_engine_test
            COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
                    $<TARGET_FILE:dynamic_speed_rule_engine_test>)
+
+  add_executable(prediction_execution_consistency_test
+    test/prediction_execution_consistency_test.cpp
+    src/multi_vehicle/footprint.cpp
+    src/multi_vehicle/path_track.cpp
+    src/multi_vehicle/spatiotemporal_interaction.cpp
+  )
+  add_dependencies(prediction_execution_consistency_test
+                   ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(prediction_execution_consistency_test
+                        ${catkin_LIBRARIES})
+  add_test(NAME prediction_execution_consistency_test
+           COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
+                   $<TARGET_FILE:prediction_execution_consistency_test>)
 endif()
 
 install(TARGETS planner_node two_vehicle_sim_node multi_vehicle_patrol_node

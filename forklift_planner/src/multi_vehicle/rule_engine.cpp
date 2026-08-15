@@ -1583,8 +1583,16 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     !a.deadlock_breaker && !b.deadlock_breaker;
                 const int preferred_winner = ordinary
                     ? priorityWinner(a, b) : -1;
+                const DynamicInterventionBand intervention_band =
+                    classifyDynamicInterventionBand(event.first_t, cfg_);
+                const bool far_deferred =
+                    ordinary &&
+                    intervention_band == DynamicInterventionBand::FAR;
+                if (far_deferred) {
+                    ++dynamic_speed_metrics_.far_deferred;
+                }
                 bool near_fallback = false;
-                if (ordinary && preferred_winner >= 0) {
+                if (ordinary && !far_deferred && preferred_winner >= 0) {
                     const VehicleAgent& yielding_vehicle =
                         preferred_winner == a.id ? b : a;
                     const double yielding_entry =
@@ -1596,7 +1604,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 }
 
                 PairSpeedCoordinationResult speed_result;
-                if (ordinary && !near_fallback) {
+                if (ordinary && !far_deferred && !near_fallback) {
                     speed_result = evaluatePairSpeedCoordination(
                         a, b, zones, interaction, mp_, cfg_, horizon,
                         preferred_winner);
@@ -1626,6 +1634,12 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     ++dynamic_speed_metrics_.a1_fallbacks;
                 }
 
+                if (!far_deferred &&
+                    intervention_band == DynamicInterventionBand::NEAR &&
+                    (near_fallback || speed_result.fallback_required)) {
+                    ++dynamic_speed_metrics_.near_legacy_fallbacks;
+                }
+
                 if (coord_log_sink_) {
                     std::ostringstream line;
                     line << std::fixed << std::setprecision(3)
@@ -1633,7 +1647,9 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                          << key.second
                          << " baseline=NOMINAL/NOMINAL"
                          << " baseline_conflict=true"
-                         << " baseline_first_t=" << event.first_t;
+                         << " baseline_first_t=" << event.first_t
+                         << " band="
+                         << dynamicInterventionBandName(intervention_band);
                     for (const SpeedCoordinationCandidate& candidate :
                          speed_result.candidates) {
                         line << " try=" << actionName(candidate.action_a)
@@ -1645,7 +1661,11 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                             line << "@" << *candidate.first_conflict_t;
                         }
                     }
-                    if (speed_result.solved_by_speed_adjustment) {
+                    if (far_deferred) {
+                        line << " selected=NOMINAL/NOMINAL"
+                             << " reason=far_deferred"
+                             << " reservation=not_created";
+                    } else if (speed_result.solved_by_speed_adjustment) {
                         line << " selected="
                              << actionName(speed_result.selected_action_a)
                              << "/"
@@ -1667,7 +1687,24 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     coord_log_sink_(line.str());
                 }
 
+                if (far_deferred) {
+                    recordConflictZones(
+                        a, b, std::vector<ConflictZone>{zone},
+                        ConflictMarkerKind::CROSSING_OR_OPPOSING,
+                        event.first_t, -1, -1, 0.0,
+                        VehicleAction::NOMINAL, preferred_winner,
+                        preferred_winner == a.id ? b.id : a.id,
+                        decimateTimedOverlaps(event.timed_overlaps));
+                    continue;
+                }
+
                 if (speed_result.solved_by_speed_adjustment) {
+                    if (intervention_band == DynamicInterventionBand::MID) {
+                        ++dynamic_speed_metrics_.mid_interventions;
+                    } else if (intervention_band ==
+                               DynamicInterventionBand::NEAR) {
+                        ++dynamic_speed_metrics_.near_interventions;
+                    }
                     const std::string suffix =
                         "_V" + std::to_string(preferred_winner);
                     if (speed_result.selected_action_a !=

@@ -39,6 +39,11 @@ struct MultiVehicleConfig {
 
     double prediction_horizon = 10.0;
     double prediction_step = 0.05;
+    // Phase 2.2 timed-conflict intervention bands.  A first conflict at or
+    // beyond far is deferred to the next rolling refresh; [near, far) uses
+    // dynamic speed shaping; below near is the near-term band.
+    double dynamic_speed_far_threshold = 10.0;
+    double dynamic_speed_near_threshold = 5.0;
 
     double creep_ratio = 0.25;
     double yield_ratio = 0.50;

@@ -9,6 +9,17 @@
 namespace forklift_planner {
 namespace multi_vehicle {
 
+enum class DynamicInterventionBand {
+    NEAR,
+    MID,
+    FAR,
+};
+
+DynamicInterventionBand classifyDynamicInterventionBand(
+    double first_conflict_t, const MultiVehicleConfig& config);
+
+const char* dynamicInterventionBandName(DynamicInterventionBand band);
+
 struct SpeedCoordinationCandidate {
     VehicleAction action_a = VehicleAction::NOMINAL;
     VehicleAction action_b = VehicleAction::NOMINAL;

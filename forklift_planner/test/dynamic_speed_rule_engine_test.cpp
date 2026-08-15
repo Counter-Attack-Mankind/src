@@ -76,6 +76,49 @@ int main() {
         return fail("counterfactual evaluation changed RuleEngine state");
     }
 
+    // Phase 2.2 FAR: even though starting YIELD could clear the eventual
+    // crossing, a baseline conflict at least 10 s away remains NOMINAL and
+    // does not create a new reservation.
+    RuleEngine far_engine(map_param, config);
+    std::vector<VehicleAgent> far_vehicles{
+        crossingVehicle(0, 2.50, false),
+        crossingVehicle(1, 2.90, true)};
+    const PairInteractionResult far_baseline =
+        far_engine.detectPairInteraction(far_vehicles[0], far_vehicles[1],
+                                         15.0);
+    if (!far_baseline.event.valid ||
+        far_baseline.event.first_t < config.dynamic_speed_far_threshold) {
+        return fail("FAR fixture is outside the configured FAR band");
+    }
+    far_engine.decide(far_vehicles, 0.1, 15.0);
+    if (far_engine.dynamicSpeedMetrics().far_deferred == 0 ||
+        far_vehicles[0].requested_action != VehicleAction::NOMINAL ||
+        far_vehicles[1].requested_action != VehicleAction::NOMINAL ||
+        !far_engine.snapshot().reservations.empty() ||
+        hasDynamicReason(far_vehicles)) {
+        return fail("FAR conflict did not remain reservation-free NOMINAL");
+    }
+
+    // Phase 2.2 MID: retain the phase-2 YIELD then CREEP search.
+    RuleEngine mid_engine(map_param, config);
+    std::vector<VehicleAgent> mid_vehicles{
+        crossingVehicle(0, 1.50, false),
+        crossingVehicle(1, 1.90, true)};
+    const PairInteractionResult mid_baseline =
+        mid_engine.detectPairInteraction(mid_vehicles[0], mid_vehicles[1],
+                                         15.0);
+    if (!mid_baseline.event.valid ||
+        mid_baseline.event.first_t < config.dynamic_speed_near_threshold ||
+        mid_baseline.event.first_t >= config.dynamic_speed_far_threshold) {
+        return fail("MID fixture is outside the configured MID band");
+    }
+    mid_engine.decide(mid_vehicles, 0.1, 15.0);
+    if (mid_engine.dynamicSpeedMetrics().mid_interventions == 0 ||
+        !hasDynamicReason(mid_vehicles) ||
+        !mid_engine.snapshot().reservations.empty()) {
+        return fail("MID conflict did not use phase-2 speed shaping");
+    }
+
     // 10. A valid existing reservation remains on the legacy path.
     RuleEngine reserved_engine(map_param, config);
     std::vector<VehicleAgent> reserved_vehicles{
@@ -142,6 +185,9 @@ int main() {
         recovery[1].reason.rfind("dynamic_speed_", 0) != 0 ||
         !recovery_engine.snapshot().reservations.empty()) {
         return fail("cycle 1 did not select reservation-free YIELD");
+    }
+    if (recovery_engine.dynamicSpeedMetrics().near_interventions == 0) {
+        return fail("NEAR speed intervention was not classified");
     }
     const auto prefix_a = predictTrajectory(
         recovery[0], map_param, config, VehicleAction::NOMINAL, 2.0);
