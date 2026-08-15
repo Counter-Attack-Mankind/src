@@ -1,0 +1,31 @@
+<launch>
+  <!-- Phase-2 reproducible two-vehicle validation. This launch only
+       overrides experiment identity and output locations; production
+       planner parameters continue to come from planner_param.yaml. -->
+  <arg name="minutes" default="10"/>
+  <arg name="coord_log_file" default="/tmp/phase2_coordination.log"/>
+  <arg name="debug_log_dir" default="/tmp/phase2_debug"/>
+
+  <param name="/use_sim_time" value="false"/>
+  <rosparam command="load" file="$(find forklift_map)/config/map_param.yaml"/>
+  <rosparam command="load" file="$(find forklift_planner)/config/planner_param.yaml"/>
+
+  <param name="/forklift_planner/multi_vehicle/vehicle_count" value="2"/>
+  <param name="/forklift_planner/multi_vehicle/random_seed" value="2026"/>
+  <param name="/forklift_planner/multi_vehicle/reproducible_task_random"
+         value="true"/>
+  <param name="/forklift_planner/multi_vehicle/save_a1_cycle_catalog"
+         value="false"/>
+  <param name="/forklift_planner/multi_vehicle/real_mode" value="false"/>
+
+  <node pkg="forklift_planner"
+        type="multi_vehicle_patrol_node"
+        name="multi_vehicle_patrol_node"
+        output="screen" required="true">
+    <param name="target_only" value="-1"/>
+    <param name="one_shot" value="false"/>
+    <param name="batch_minutes" value="$(arg minutes)"/>
+    <param name="coord_log_file" value="$(arg coord_log_file)"/>
+    <param name="debug_log_dir" value="$(arg debug_log_dir)"/>
+  </node>
+</launch>

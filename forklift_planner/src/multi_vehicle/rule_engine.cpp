@@ -1211,9 +1211,11 @@ PairInteractionResult RuleEngine::detectPairInteraction(
     double prediction_horizon) const {
     const std::vector<ConflictZone> zones = findConflictZones(a, b);
     const auto prediction_a =
-        predictBaselineTrajectory(a, mp_, cfg_, prediction_horizon);
+        predictTrajectory(a, mp_, cfg_, VehicleAction::NOMINAL,
+                          prediction_horizon);
     const auto prediction_b =
-        predictBaselineTrajectory(b, mp_, cfg_, prediction_horizon);
+        predictTrajectory(b, mp_, cfg_, VehicleAction::NOMINAL,
+                          prediction_horizon);
     return detectPairInteractionFromPredictions(
         a, b, zones, prediction_a, prediction_b);
 }
@@ -1232,7 +1234,8 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
     for (size_t i = 0; i < vehicles.size(); ++i) {
         if (vehicles[i].active() && !vehicles[i].track.empty()) {
             predictions[i] =
-                predictBaselineTrajectory(vehicles[i], mp_, cfg_, horizon);
+                predictTrajectory(vehicles[i], mp_, cfg_,
+                                  VehicleAction::NOMINAL, horizon);
         }
     }
 
@@ -1273,6 +1276,21 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                                other_id);
         }
     };
+    const bool dynamic_speed_enabled = vehicles.size() == 2;
+    auto logNominalRecovery = [&](const std::pair<int, int>& key) {
+        if (!dynamic_speed_enabled) return;
+        const auto previous = previous_dynamic_actions_.find(key);
+        if (previous == previous_dynamic_actions_.end()) return;
+        ++dynamic_speed_metrics_.nominal_recoveries;
+        if (!coord_log_sink_) return;
+        std::ostringstream line;
+        line << "[DYN-SPEED] pair=V" << key.first << "-V" << key.second
+             << " baseline=NOMINAL/NOMINAL baseline_conflict=false"
+             << " previous_action=" << actionName(previous->second)
+             << " selected=NOMINAL/NOMINAL"
+             << " reason=rolling_recovery";
+        coord_log_sink_(line.str());
+    };
 
     // Drop event reservations when a participant or its route changes.
     for (auto it = conflict_reservations_.begin();
@@ -1283,6 +1301,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         if (lo == nullptr || hi == nullptr || !lo->active() || !hi->active() ||
             lo->path_gen != r.gen_lo || hi->path_gen != r.gen_hi) {
             logConflictReservation(coord_log_sink_, it->first, "delete", r);
+            ++dynamic_speed_metrics_.reservation_deletes;
             it = conflict_reservations_.erase(it);
         } else {
             ++it;
@@ -1396,10 +1415,12 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             const bool a_is_lo = a.id == key.first;
             const std::vector<ConflictZone> zones = findConflictZones(a, b);
             if (zones.empty()) {
+                logNominalRecovery(key);
                 const auto old = conflict_reservations_.find(key);
                 if (old != conflict_reservations_.end()) {
                     logConflictReservation(coord_log_sink_, key, "delete",
                                            old->second);
+                    ++dynamic_speed_metrics_.reservation_deletes;
                     conflict_reservations_.erase(old);
                 }
                 continue;
@@ -1412,6 +1433,18 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             // crossing of the same pair of complete paths.
             auto reservation_it = conflict_reservations_.find(key);
             if (reservation_it != conflict_reservations_.end()) {
+                if (dynamic_speed_enabled) {
+                    ++dynamic_speed_metrics_.existing_reservation_skips;
+                    if (coord_log_sink_) {
+                        std::ostringstream line;
+                        line << "[DYN-SPEED] pair=V" << key.first << "-V"
+                             << key.second
+                             << " candidate_search=SKIPPED"
+                             << " reason=existing_reservation"
+                             << " fallback=legacy";
+                        coord_log_sink_(line.str());
+                    }
+                }
                 ConflictReservation& r = reservation_it->second;
                 VehicleAgent& lo = a_is_lo ? a : b;
                 VehicleAgent& hi = a_is_lo ? b : a;
@@ -1447,6 +1480,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
 
                 if (owner.path_s > owner_exit + 1e-9) {
                     logConflictReservation(coord_log_sink_, key, "delete", r);
+                    ++dynamic_speed_metrics_.reservation_deletes;
                     conflict_reservations_.erase(reservation_it);
                 } else {
                     const std::vector<ConflictMarker::TimedOverlap>
@@ -1492,7 +1526,10 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             }
 
             const TimedConflictEvent& event = interaction.event;
-            if (!event.valid) continue;
+            if (!event.valid) {
+                logNominalRecovery(key);
+                continue;
+            }
 
             pairwise_managed_pairs_.insert(key);
 
@@ -1502,6 +1539,164 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 insideInterval(a, zone.s_self_enter, zone.s_self_exit);
             const bool b_inside =
                 insideInterval(b, zone.s_other_enter, zone.s_other_exit);
+            bool a_inside_any_zone = false;
+            bool b_inside_any_zone = false;
+            for (const ConflictZone& candidate_zone : zones) {
+                a_inside_any_zone = a_inside_any_zone || insideInterval(
+                    a, candidate_zone.s_self_enter,
+                    candidate_zone.s_self_exit);
+                b_inside_any_zone = b_inside_any_zone || insideInterval(
+                    b, candidate_zone.s_other_enter,
+                    candidate_zone.s_other_exit);
+            }
+            int departure_cluster_owner = -1;
+            int future_owner = -1;
+            const bool a_a1_departure =
+                a.a1_departure_committed &&
+                a.path_s < a.a1_departure_priority_until_s - 1e-9;
+            const bool b_a1_departure =
+                b.a1_departure_committed &&
+                b.path_s < b.a1_departure_priority_until_s - 1e-9;
+            if (!a_inside && !b_inside) {
+                departure_cluster_owner =
+                    departureClusterOwnerForPair(a, b);
+                future_owner = futureA1OwnerForPair(a, b);
+            }
+            const bool future_a1_pair =
+                future_a1_commitment_.valid() &&
+                ((a.id == future_a1_commitment_.owner_id &&
+                  a.path_gen == future_a1_commitment_.owner_path_gen) ||
+                 (b.id == future_a1_commitment_.owner_id &&
+                  b.path_gen == future_a1_commitment_.owner_path_gen));
+            const bool a1_related =
+                departure_cluster_commitments_.count(key) != 0 ||
+                future_a1_pair || a_a1_departure || b_a1_departure ||
+                departure_cluster_owner >= 0 || future_owner >= 0;
+            const bool a_terminal = terminalDocking(a);
+            const bool b_terminal = terminalDocking(b);
+
+            if (dynamic_speed_enabled) {
+                ++dynamic_speed_metrics_.baseline_conflicts;
+                const bool ordinary =
+                    !a_inside_any_zone && !b_inside_any_zone && !a1_related &&
+                    !a_terminal && !b_terminal &&
+                    !a.deadlock_breaker && !b.deadlock_breaker;
+                const int preferred_winner = ordinary
+                    ? priorityWinner(a, b) : -1;
+                bool near_fallback = false;
+                if (ordinary && preferred_winner >= 0) {
+                    const VehicleAgent& yielding_vehicle =
+                        preferred_winner == a.id ? b : a;
+                    const double yielding_entry =
+                        preferred_winner == a.id
+                            ? zone.s_other_enter : zone.s_self_enter;
+                    near_fallback = hasInsufficientBrakingMargin(
+                        yielding_vehicle, yielding_entry, cfg_, dt,
+                        kStopBuffer);
+                }
+
+                PairSpeedCoordinationResult speed_result;
+                if (ordinary && !near_fallback) {
+                    speed_result = evaluatePairSpeedCoordination(
+                        a, b, zones, interaction, mp_, cfg_, horizon,
+                        preferred_winner);
+                    for (const SpeedCoordinationCandidate& candidate :
+                         speed_result.candidates) {
+                        const bool yield_trial =
+                            candidate.action_a == VehicleAction::YIELD ||
+                            candidate.action_b == VehicleAction::YIELD;
+                        if (yield_trial) {
+                            ++dynamic_speed_metrics_.yield_trials;
+                            if (candidate.conflict_free) {
+                                ++dynamic_speed_metrics_.yield_clear;
+                            }
+                        } else {
+                            ++dynamic_speed_metrics_.creep_trials;
+                            if (candidate.conflict_free) {
+                                ++dynamic_speed_metrics_.creep_clear;
+                            }
+                        }
+                    }
+                    if (speed_result.fallback_required) {
+                        ++dynamic_speed_metrics_.candidate_search_failed;
+                    }
+                } else if (near_fallback) {
+                    ++dynamic_speed_metrics_.near_fallbacks;
+                } else if (a1_related) {
+                    ++dynamic_speed_metrics_.a1_fallbacks;
+                }
+
+                if (coord_log_sink_) {
+                    std::ostringstream line;
+                    line << std::fixed << std::setprecision(3)
+                         << "[DYN-SPEED] pair=V" << key.first << "-V"
+                         << key.second
+                         << " baseline=NOMINAL/NOMINAL"
+                         << " baseline_conflict=true"
+                         << " baseline_first_t=" << event.first_t;
+                    for (const SpeedCoordinationCandidate& candidate :
+                         speed_result.candidates) {
+                        line << " try=" << actionName(candidate.action_a)
+                             << "/" << actionName(candidate.action_b)
+                             << ":"
+                             << (candidate.conflict_free
+                                     ? "CLEAR" : "CONFLICT");
+                        if (candidate.first_conflict_t) {
+                            line << "@" << *candidate.first_conflict_t;
+                        }
+                    }
+                    if (speed_result.solved_by_speed_adjustment) {
+                        line << " selected="
+                             << actionName(speed_result.selected_action_a)
+                             << "/"
+                             << actionName(speed_result.selected_action_b)
+                             << " reason=" << speed_result.reason
+                             << " reservation=not_created";
+                    } else {
+                        const char* skip_reason = near_fallback
+                            ? "insufficient_braking_margin"
+                            : (a1_related ? "a1_protected"
+                               : (!ordinary ? "legacy_special_case"
+                                  : speed_result.reason.c_str()));
+                        line << " candidate_search="
+                             << (ordinary && !near_fallback
+                                     ? "FAILED" : "SKIPPED")
+                             << " reason=" << skip_reason
+                             << " fallback=legacy";
+                    }
+                    coord_log_sink_(line.str());
+                }
+
+                if (speed_result.solved_by_speed_adjustment) {
+                    const std::string suffix =
+                        "_V" + std::to_string(preferred_winner);
+                    if (speed_result.selected_action_a !=
+                        VehicleAction::NOMINAL) {
+                        applyActionRequest(
+                            a, speed_result.selected_action_a,
+                            "dynamic_speed_" + std::string(actionName(
+                                speed_result.selected_action_a)) + suffix,
+                            b.id);
+                    }
+                    if (speed_result.selected_action_b !=
+                        VehicleAction::NOMINAL) {
+                        applyActionRequest(
+                            b, speed_result.selected_action_b,
+                            "dynamic_speed_" + std::string(actionName(
+                                speed_result.selected_action_b)) + suffix,
+                            a.id);
+                    }
+                    recordConflictZones(
+                        a, b, std::vector<ConflictZone>{zone},
+                        ConflictMarkerKind::CROSSING_OR_OPPOSING,
+                        event.first_t, -1, -1, 0.0,
+                        VehicleAction::NOMINAL, preferred_winner,
+                        preferred_winner == a.id ? b.id : a.id,
+                        decimateTimedOverlaps(event.timed_overlaps));
+                    continue;
+                }
+            }
+
             int holder = -1;
             if (a_inside != b_inside) {
                 holder = a_inside ? a.id : b.id;
@@ -1518,15 +1713,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     holder = priorityWinner(a, b);
                 }
             } else {
-                const int departure_cluster_owner =
-                    departureClusterOwnerForPair(a, b);
-                const int future_owner = futureA1OwnerForPair(a, b);
-                const bool a_a1_departure =
-                    a.a1_departure_committed &&
-                    a.path_s < a.a1_departure_priority_until_s - 1e-9;
-                const bool b_a1_departure =
-                    b.a1_departure_committed &&
-                    b.path_s < b.a1_departure_priority_until_s - 1e-9;
                 if (departure_cluster_owner >= 0) {
                     holder = departure_cluster_owner;
                 } else if (future_owner >= 0) {
@@ -1539,8 +1725,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     // an impossible late stop.
                     holder = a_a1_departure ? a.id : b.id;
                 } else {
-                    const bool a_terminal = terminalDocking(a);
-                    const bool b_terminal = terminalDocking(b);
                     if (a_terminal != b_terminal) {
                         holder = a_terminal ? a.id : b.id;
                     } else {
@@ -1612,6 +1796,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             r.aabb_max_y = zone.aabb_max_y;
             r.aabb_valid = zone.aabb_valid;
             conflict_reservations_[key] = r;
+            ++dynamic_speed_metrics_.reservation_creates;
             logConflictReservation(coord_log_sink_, key, "create", r);
 
             if (holder == a.id) {
@@ -2482,8 +2667,17 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
     refreshResourceSpans(vehicles);  // Phase 2:刷新每车路径的资源占用缓存
 
     previous_following_followers_.clear();
+    previous_dynamic_actions_.clear();
     for (const VehicleAgent& v : vehicles) {
         if (v.blocker_id < 0) continue;
+        if (v.reason.rfind("dynamic_speed_", 0) == 0 &&
+            (v.action == VehicleAction::YIELD ||
+             v.action == VehicleAction::CREEP)) {
+            const std::pair<int, int> key{
+                std::min(v.id, v.blocker_id),
+                std::max(v.id, v.blocker_id)};
+            previous_dynamic_actions_[key] = v.action;
+        }
         const std::string expected =
             "following_V" + std::to_string(v.blocker_id);
         if (v.reason != expected) continue;

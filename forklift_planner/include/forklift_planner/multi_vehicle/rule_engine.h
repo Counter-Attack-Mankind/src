@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "forklift_map/map_param.h"
+#include "forklift_planner/multi_vehicle/dynamic_speed_coordination.h"
 #include "forklift_planner/multi_vehicle/future_a1_policy.h"
 #include "forklift_planner/multi_vehicle/multi_vehicle_config.h"
 #include "forklift_planner/multi_vehicle/spatiotemporal_interaction.h"
@@ -207,6 +208,24 @@ public:
 
     int unifiedPriority(const VehicleAgent& a, const VehicleAgent& b) const;
 
+    struct DynamicSpeedMetrics {
+        unsigned long long baseline_conflicts = 0;
+        unsigned long long yield_trials = 0;
+        unsigned long long yield_clear = 0;
+        unsigned long long creep_trials = 0;
+        unsigned long long creep_clear = 0;
+        unsigned long long candidate_search_failed = 0;
+        unsigned long long near_fallbacks = 0;
+        unsigned long long a1_fallbacks = 0;
+        unsigned long long existing_reservation_skips = 0;
+        unsigned long long nominal_recoveries = 0;
+        unsigned long long reservation_creates = 0;
+        unsigned long long reservation_deletes = 0;
+    };
+    const DynamicSpeedMetrics& dynamicSpeedMetrics() const {
+        return dynamic_speed_metrics_;
+    }
+
     // Read-only coordination interface. The path_gen-keyed geometry cache is
     // the only mutable implementation detail this may populate.
     PairInteractionResult detectPairInteraction(
@@ -325,6 +344,9 @@ private:
     // pairwise timed OBB、reservation 和 holder 仲裁不再使用它作跳过条件。
     std::set<std::pair<int, int>> following_pairs_;
     std::map<std::pair<int, int>, FollowingSuggestion> following_suggestions_;
+    // Reconstructed before each reset from the live vehicle reason. This is
+    // diagnostic-only and never participates in coordination.
+    std::map<std::pair<int, int>, VehicleAction> previous_dynamic_actions_;
     // Directed following actions applied in the preceding decision, captured
     // before VehicleAgent::reason is reset. Used only to release a stale
     // following action_hold when pairwise now grants that follower passage.
@@ -362,6 +384,9 @@ private:
     uint64_t debug_log_plan_id_ = 0;
     int debug_log_frame_id_ = -1;
     int debug_log_rollout_step_ = -1;
+    // Intentionally excluded from SimSnapshot: rollout evaluations are
+    // diagnostic evidence, and these counters never affect restored control.
+    DynamicSpeedMetrics dynamic_speed_metrics_;
     double now_ = 0.0;  // 内部仿真时钟(每 decide 累加 dt),供令牌防抖/超时用
 };
 

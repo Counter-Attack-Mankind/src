@@ -63,12 +63,13 @@ struct PairInteractionResult {
     TimedConflictEvent event;
 };
 
-// Pure baseline prediction used by the current pairwise detector.  It starts
-// from current path_s/current_speed and recovers toward NOMINAL while obeying
-// the existing acceleration, deceleration, curvature and path-end behavior.
-std::vector<PredictedKinematicSample> predictBaselineTrajectory(
+// Unified pure action-target prediction. Every action starts from the live
+// path_s/current_speed; the target action is approached through the existing
+// acceleration/deceleration, curvature and path-end constraints.
+std::vector<PredictedKinematicSample> predictTrajectory(
     const VehicleAgent& vehicle, const MapParam& map_param,
-    const MultiVehicleConfig& config, double prediction_horizon);
+    const MultiVehicleConfig& config, VehicleAction target_action,
+    double prediction_horizon);
 
 // Pure synchronized-OBB detector.  It returns only the first contiguous
 // overlap event and associates its first sample with the nearest compressed

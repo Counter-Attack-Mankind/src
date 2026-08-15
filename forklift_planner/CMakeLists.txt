@@ -55,6 +55,7 @@ target_link_libraries(two_vehicle_sim_node
 add_executable(multi_vehicle_patrol_node
   ${PATH_GENERATOR_SOURCES}
   src/multi_vehicle/footprint.cpp
+  src/multi_vehicle/dynamic_speed_coordination.cpp
   src/multi_vehicle/marker_publisher.cpp
   src/multi_vehicle/multi_vehicle_config.cpp
   src/multi_vehicle/path_track.cpp
@@ -113,6 +114,7 @@ if(CATKIN_ENABLE_TESTING)
 
   add_executable(spatiotemporal_interaction_test
     test/spatiotemporal_interaction_test.cpp
+    src/multi_vehicle/dynamic_speed_coordination.cpp
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
     src/multi_vehicle/rule_engine.cpp
@@ -124,6 +126,34 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME spatiotemporal_interaction_test
            COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
                    $<TARGET_FILE:spatiotemporal_interaction_test>)
+
+  add_executable(dynamic_speed_coordination_test
+    test/dynamic_speed_coordination_test.cpp
+    src/multi_vehicle/dynamic_speed_coordination.cpp
+    src/multi_vehicle/footprint.cpp
+    src/multi_vehicle/path_track.cpp
+    src/multi_vehicle/spatiotemporal_interaction.cpp
+  )
+  add_dependencies(dynamic_speed_coordination_test ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(dynamic_speed_coordination_test ${catkin_LIBRARIES})
+  add_test(NAME dynamic_speed_coordination_test
+           COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
+                   $<TARGET_FILE:dynamic_speed_coordination_test>)
+
+  add_executable(dynamic_speed_rule_engine_test
+    test/dynamic_speed_rule_engine_test.cpp
+    src/multi_vehicle/dynamic_speed_coordination.cpp
+    src/multi_vehicle/footprint.cpp
+    src/multi_vehicle/path_track.cpp
+    src/multi_vehicle/rule_engine.cpp
+    src/multi_vehicle/spatiotemporal_interaction.cpp
+    src/multi_vehicle/traffic_resource_map.cpp
+  )
+  add_dependencies(dynamic_speed_rule_engine_test ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(dynamic_speed_rule_engine_test ${catkin_LIBRARIES})
+  add_test(NAME dynamic_speed_rule_engine_test
+           COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
+                   $<TARGET_FILE:dynamic_speed_rule_engine_test>)
 endif()
 
 install(TARGETS planner_node two_vehicle_sim_node multi_vehicle_patrol_node

@@ -61,6 +61,25 @@ double intervalDistance(double value, double begin, double end) {
     return 0.0;
 }
 
+double targetSpeed(VehicleAction action, const MultiVehicleConfig& config) {
+    switch (action) {
+        case VehicleAction::STOP:
+            return 0.0;
+        case VehicleAction::CREEP:
+            return config.nominal_speed * config.creep_ratio;
+        case VehicleAction::YIELD:
+            return config.nominal_speed * config.yield_ratio;
+        case VehicleAction::NOMINAL:
+            return config.nominal_speed;
+        case VehicleAction::BOOST:
+            return config.enable_boost
+                ? std::min(config.max_speed,
+                           config.nominal_speed * config.boost_ratio)
+                : config.nominal_speed;
+    }
+    return 0.0;
+}
+
 }  // namespace
 
 std::vector<InteractionPoint> intersectObbs(const OBB& a, const OBB& b) {
@@ -106,9 +125,10 @@ std::vector<InteractionPoint> intersectObbs(const OBB& a, const OBB& b) {
     return polygon;
 }
 
-std::vector<PredictedKinematicSample> predictBaselineTrajectory(
+std::vector<PredictedKinematicSample> predictTrajectory(
     const VehicleAgent& vehicle, const MapParam& map_param,
-    const MultiVehicleConfig& config, double prediction_horizon) {
+    const MultiVehicleConfig& config, VehicleAction target_action,
+    double prediction_horizon) {
     const double horizon =
         std::max(config.prediction_step, prediction_horizon);
     const double prediction_step = std::max(0.02, config.prediction_step);
@@ -135,7 +155,7 @@ std::vector<PredictedKinematicSample> predictBaselineTrajectory(
             speed = 0.0;
         } else {
             const double desired = std::min(
-                config.nominal_speed,
+                targetSpeed(target_action, config),
                 curvatureSpeedAt(vehicle, config, s));
             if (desired > speed) {
                 speed = std::min(desired, speed + config.max_accel * step);

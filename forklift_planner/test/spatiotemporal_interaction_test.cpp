@@ -137,7 +137,8 @@ int main() {
     // existing NOMINAL target using the configured acceleration limit.
     VehicleAgent low_speed = vehicle(6, line(0.0, 0.0, 2.0, 0.0));
     const auto low_prediction =
-        predictBaselineTrajectory(low_speed, map_param, config, 1.0);
+        predictTrajectory(low_speed, map_param, config,
+                          VehicleAction::NOMINAL, 1.0);
     if (low_prediction.size() < 2 ||
         !near(low_prediction[1].speed,
               config.max_accel * config.prediction_step, 1e-12) ||
@@ -161,9 +162,11 @@ int main() {
     VehicleAgent straight = vehicle(
         8, line(0.0, 0.0, 2.0, 0.0), 1, 0.20, config.nominal_speed);
     const auto curved_prediction =
-        predictBaselineTrajectory(curved, map_param, curve_config, 0.10);
+        predictTrajectory(curved, map_param, curve_config,
+                          VehicleAction::NOMINAL, 0.10);
     const auto straight_prediction =
-        predictBaselineTrajectory(straight, map_param, curve_config, 0.10);
+        predictTrajectory(straight, map_param, curve_config,
+                          VehicleAction::NOMINAL, 0.10);
     if (curved_prediction.size() < 2 || straight_prediction.size() < 2 ||
         !(curved_prediction[1].speed < straight_prediction[1].speed) ||
         !near(straight_prediction[1].speed, config.nominal_speed)) {
@@ -173,7 +176,8 @@ int main() {
     // 7. Reaching the path endpoint clamps s and then forces speed to zero.
     VehicleAgent short_path = vehicle(9, line(0.0, 0.0, 0.005, 0.0));
     const auto endpoint_prediction =
-        predictBaselineTrajectory(short_path, map_param, config, 1.0);
+        predictTrajectory(short_path, map_param, config,
+                          VehicleAction::NOMINAL, 1.0);
     if (endpoint_prediction.empty() ||
         !near(endpoint_prediction.back().s, short_path.track.length()) ||
         !near(endpoint_prediction.back().speed, 0.0)) {

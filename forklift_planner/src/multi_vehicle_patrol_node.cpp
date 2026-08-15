@@ -3311,6 +3311,11 @@ public:
         std::vector<int> previous_task_count(agents_.size(), -1);
         std::vector<MissionPhase> previous_phase(agents_.size(),
                                                  MissionPhase::DIRECT_TO_B);
+        std::vector<std::array<double, 5>> action_seconds(agents_.size());
+        std::vector<unsigned long long> action_transitions(agents_.size(), 0);
+        std::vector<VehicleAction> previous_action(agents_.size(),
+                                                   VehicleAction::STOP);
+        std::vector<bool> previous_action_valid(agents_.size(), false);
         for (size_t i = 0; i < agents_.size(); ++i) {
             previous_path_s[i] = agents_[i].path_s;
             previous_path_gen[i] = agents_[i].path_gen;
@@ -3350,6 +3355,23 @@ public:
                 if (!executeSimulationPlanSample()) {
                     rule_engine_->decide(agents_, dt);
                 }
+            }
+            for (size_t i = 0; i < agents_.size(); ++i) {
+                const VehicleAgent& v = agents_[i];
+                if (v.mode != VehicleMode::ACTIVE) {
+                    previous_action_valid[i] = false;
+                    continue;
+                }
+                const size_t action_index = static_cast<size_t>(v.action);
+                if (action_index < action_seconds[i].size()) {
+                    action_seconds[i][action_index] += dt;
+                }
+                if (previous_action_valid[i] &&
+                    previous_action[i] != v.action) {
+                    ++action_transitions[i];
+                }
+                previous_action[i] = v.action;
+                previous_action_valid[i] = true;
             }
             const unsigned long long guards_before = hard_guard_events_;
             advanceVehicles(dt);
@@ -3538,6 +3560,46 @@ public:
                  tick_count_, sim_time_, hard_guard_events_, first_guard_tick_,
                  pairs.c_str(), deadlock_ticks_, deadlock_recoveries_, max_wait,
                  stuck_id);
+        for (size_t i = 0; i < agents_.size(); ++i) {
+            const double active_seconds = std::accumulate(
+                action_seconds[i].begin(), action_seconds[i].end(), 0.0);
+            const double nominal_ratio = active_seconds > 1e-9
+                ? action_seconds[i][static_cast<size_t>(
+                      VehicleAction::NOMINAL)] / active_seconds
+                : 0.0;
+            ROS_WARN("[BATCH_ACTION_METRICS] V%zu tasks=%d max_wait=%.1f "
+                     "active_s=%.1f STOP=%.1f CREEP=%.1f YIELD=%.1f "
+                     "NOMINAL=%.1f BOOST=%.1f nominal_ratio=%.6f "
+                     "transitions=%llu",
+                     i, agents_[i].task_count, max_wait_by_vehicle[i],
+                     active_seconds,
+                     action_seconds[i][static_cast<size_t>(
+                         VehicleAction::STOP)],
+                     action_seconds[i][static_cast<size_t>(
+                         VehicleAction::CREEP)],
+                     action_seconds[i][static_cast<size_t>(
+                         VehicleAction::YIELD)],
+                     action_seconds[i][static_cast<size_t>(
+                         VehicleAction::NOMINAL)],
+                     action_seconds[i][static_cast<size_t>(
+                         VehicleAction::BOOST)],
+                     nominal_ratio, action_transitions[i]);
+        }
+        const auto& dynamic = rule_engine_->dynamicSpeedMetrics();
+        ROS_WARN("[BATCH_DYN_SPEED_METRICS] baseline_conflicts=%llu "
+                 "yield_trials=%llu yield_clear=%llu creep_trials=%llu "
+                 "creep_clear=%llu search_failed=%llu near_fallback=%llu "
+                 "a1_fallback=%llu existing_reservation=%llu "
+                 "nominal_recovery=%llu reservation_create=%llu "
+                 "reservation_delete=%llu",
+                 dynamic.baseline_conflicts, dynamic.yield_trials,
+                 dynamic.yield_clear, dynamic.creep_trials,
+                 dynamic.creep_clear, dynamic.candidate_search_failed,
+                 dynamic.near_fallbacks, dynamic.a1_fallbacks,
+                 dynamic.existing_reservation_skips,
+                 dynamic.nominal_recoveries,
+                 dynamic.reservation_creates,
+                 dynamic.reservation_deletes);
         return hard_guard_events_ > 0;
     }
     bool batchMode() const { return cfg_batch_ticks_ > 0; }
