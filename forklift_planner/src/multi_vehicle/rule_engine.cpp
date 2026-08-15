@@ -2,7 +2,6 @@
 #include "forklift_planner/multi_vehicle/conflict_zone_closure.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -38,63 +37,6 @@ std::string RuleEngine::debugLogPrefix() const {
 }
 
 namespace {
-
-std::array<ConflictMarker::Point, 4> obbCorners(const OBB& body) {
-    const double c = std::cos(body.theta);
-    const double s = std::sin(body.theta);
-    const double fx = c * body.half_l;
-    const double fy = s * body.half_l;
-    const double lx = -s * body.half_w;
-    const double ly = c * body.half_w;
-    return {{{body.x + fx + lx, body.y + fy + ly},
-             {body.x - fx + lx, body.y - fy + ly},
-             {body.x - fx - lx, body.y - fy - ly},
-             {body.x + fx - lx, body.y + fy - ly}}};
-}
-
-std::vector<ConflictMarker::Point> intersectObbs(const OBB& a, const OBB& b) {
-    const auto a_corners = obbCorners(a);
-    const auto b_corners = obbCorners(b);
-    std::vector<ConflictMarker::Point> polygon(a_corners.begin(),
-                                               a_corners.end());
-    constexpr double kEps = 1e-9;
-    for (size_t edge = 0; edge < b_corners.size() && !polygon.empty(); ++edge) {
-        const ConflictMarker::Point p0 = b_corners[edge];
-        const ConflictMarker::Point p1 = b_corners[(edge + 1) % b_corners.size()];
-        const double ex = p1.x - p0.x;
-        const double ey = p1.y - p0.y;
-        auto signedSide = [&](const ConflictMarker::Point& p) {
-            return ex * (p.y - p0.y) - ey * (p.x - p0.x);
-        };
-        auto intersection = [&](const ConflictMarker::Point& from,
-                                const ConflictMarker::Point& to) {
-            const double from_side = signedSide(from);
-            const double to_side = signedSide(to);
-            const double denom = from_side - to_side;
-            const double ratio = std::abs(denom) <= kEps
-                ? 0.0 : from_side / denom;
-            return ConflictMarker::Point{
-                from.x + ratio * (to.x - from.x),
-                from.y + ratio * (to.y - from.y)};
-        };
-
-        std::vector<ConflictMarker::Point> clipped;
-        clipped.reserve(polygon.size() + 1);
-        ConflictMarker::Point previous = polygon.back();
-        bool previous_inside = signedSide(previous) >= -kEps;
-        for (const ConflictMarker::Point& current : polygon) {
-            const bool current_inside = signedSide(current) >= -kEps;
-            if (current_inside != previous_inside) {
-                clipped.push_back(intersection(previous, current));
-            }
-            if (current_inside) clipped.push_back(current);
-            previous = current;
-            previous_inside = current_inside;
-        }
-        polygon = std::move(clipped);
-    }
-    return polygon;
-}
 
 std::vector<ConflictMarker::TimedOverlap> decimateTimedOverlaps(
     const std::vector<ConflictMarker::TimedOverlap>& input) {
@@ -1264,101 +1206,33 @@ void RuleEngine::enforceDepartureClusterCommitments(
 }
 
 
+PairInteractionResult RuleEngine::detectPairInteraction(
+    const VehicleAgent& a, const VehicleAgent& b,
+    double prediction_horizon) const {
+    const std::vector<ConflictZone> zones = findConflictZones(a, b);
+    const auto prediction_a =
+        predictBaselineTrajectory(a, mp_, cfg_, prediction_horizon);
+    const auto prediction_b =
+        predictBaselineTrajectory(b, mp_, cfg_, prediction_horizon);
+    return detectPairInteractionFromPredictions(
+        a, b, zones, prediction_a, prediction_b);
+}
+
 void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                                           double dt,
                                           double prediction_horizon) {
     pairwise_managed_pairs_.clear();
-    // Complete routes are used only as a geometric lookup table. Conflict
-    // existence is decided on one shared finite time grid: compare the two
-    // inflated complete-body OBBs predicted at the same time t in [0, T].
-    struct PredictedSample {
-        double t = 0.0;
-        double s = 0.0;
-        double speed = 0.0;
-        OBB body;
-    };
-    struct TimedEvent {
-        bool valid = false;
-        size_t zone_index = 0;
-        double first_t = 0.0;
-        double last_t = 0.0;
-        std::vector<ConflictMarker::TimedOverlap> overlaps;
-    };
-
+    // Predict each vehicle once. Pair detection below is pure and consumes
+    // these shared samples without changing coordination state.
     const double horizon =
         std::max(cfg_.prediction_step, prediction_horizon);
     const double prediction_step = std::max(0.02, cfg_.prediction_step);
-    const int prediction_count = std::max(
-        1, static_cast<int>(std::ceil(horizon / prediction_step)));
-    const double footprint_margin = 0.5 * cfg_.conflict_margin;
-
-    auto curvatureSpeedAt = [&](const VehicleAgent& v, double query_s) {
-        if (cfg_.lat_accel_max <= 0.0 || v.track.empty()) {
-            return std::numeric_limits<double>::infinity();
-        }
-        const double length = v.track.length();
-        const double s = std::max(0.0, std::min(query_s, length));
-        constexpr double sample_ds = 0.05;
-        const RoughWp pa = v.track.poseAtS(std::max(0.0, s - sample_ds));
-        const RoughWp pb = v.track.poseAtS(s);
-        const RoughWp pc = v.track.poseAtS(std::min(length, s + sample_ds));
-        const double abx = pb.x - pa.x;
-        const double aby = pb.y - pa.y;
-        const double acx = pc.x - pa.x;
-        const double acy = pc.y - pa.y;
-        const double lab = std::hypot(abx, aby);
-        const double lbc = std::hypot(pc.x - pb.x, pc.y - pb.y);
-        const double lac = std::hypot(acx, acy);
-        if (lab < 1e-4 || lbc < 1e-4 || lac < 1e-4) {
-            return std::numeric_limits<double>::infinity();
-        }
-        const double kappa =
-            2.0 * std::abs(abx * acy - aby * acx) / (lab * lbc * lac);
-        if (kappa < 1e-3) {
-            return std::numeric_limits<double>::infinity();
-        }
-        return std::max(std::sqrt(cfg_.lat_accel_max / kappa),
-                        cfg_.nominal_speed * cfg_.creep_ratio);
-    };
-
-    auto predict = [&](const VehicleAgent& v) {
-        std::vector<PredictedSample> out;
-        out.reserve(static_cast<size_t>(prediction_count + 1));
-        double s = std::max(0.0, std::min(v.path_s, v.track.length()));
-        double speed = std::max(0.0, v.current_speed);
-        out.push_back(PredictedSample{
-            0.0, s, speed,
-            makeBody(v.track.poseAtS(s), mp_, footprint_margin)});
-        for (int k = 1; k <= prediction_count; ++k) {
-            const double previous_t = (k - 1) * prediction_step;
-            const double t = std::min(horizon, k * prediction_step);
-            const double step = t - previous_t;
-            if (step <= 1e-9) continue;
-            if (s >= v.track.length() - 1e-9) {
-                s = v.track.length();
-                speed = 0.0;
-            } else {
-                const double desired = std::min(
-                    speedForAction(VehicleAction::NOMINAL),
-                    curvatureSpeedAt(v, s));
-                if (desired > speed) {
-                    speed = std::min(desired, speed + cfg_.max_accel * step);
-                } else {
-                    speed = std::max(desired, speed - cfg_.max_decel * step);
-                }
-                s = std::min(v.track.length(), s + speed * step);
-            }
-            out.push_back(PredictedSample{
-                t, s, speed,
-                makeBody(v.track.poseAtS(s), mp_, footprint_margin)});
-        }
-        return out;
-    };
-
-    std::vector<std::vector<PredictedSample>> predictions(vehicles.size());
+    std::vector<std::vector<PredictedKinematicSample>> predictions(
+        vehicles.size());
     for (size_t i = 0; i < vehicles.size(); ++i) {
         if (vehicles[i].active() && !vehicles[i].track.empty()) {
-            predictions[i] = predict(vehicles[i]);
+            predictions[i] =
+                predictBaselineTrajectory(vehicles[i], mp_, cfg_, horizon);
         }
     }
 
@@ -1530,6 +1404,9 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 }
                 continue;
             }
+            const PairInteractionResult interaction =
+                detectPairInteractionFromPredictions(
+                    a, b, zones, predictions[i], predictions[j]);
 
             // Honor the previously selected local event, not every later
             // crossing of the same pair of complete paths.
@@ -1572,30 +1449,9 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     logConflictReservation(coord_log_sink_, key, "delete", r);
                     conflict_reservations_.erase(reservation_it);
                 } else {
-                    std::vector<ConflictMarker::TimedOverlap>
-                        reserved_overlaps;
-                    bool overlap_started = false;
-                    const size_t reserved_count = std::min(
-                        predictions[i].size(), predictions[j].size());
-                    for (size_t k = 0; k < reserved_count; ++k) {
-                        const bool hit = overlaps(predictions[i][k].body,
-                                                  predictions[j][k].body);
-                        if (!hit) {
-                            if (overlap_started) break;
-                            continue;
-                        }
-                        overlap_started = true;
-                        auto polygon = intersectObbs(predictions[i][k].body,
-                                                     predictions[j][k].body);
-                        if (polygon.size() >= 3) {
-                            reserved_overlaps.push_back(
-                                ConflictMarker::TimedOverlap{
-                                    predictions[i][k].t,
-                                    std::move(polygon)});
-                        }
-                    }
-                    reserved_overlaps =
-                        decimateTimedOverlaps(reserved_overlaps);
+                    const std::vector<ConflictMarker::TimedOverlap>
+                        reserved_overlaps = decimateTimedOverlaps(
+                            interaction.event.timed_overlaps);
                     pairwise_managed_pairs_.insert(key);
                     const bool owner_inside =
                         insideInterval(owner, owner_enter, owner_exit);
@@ -1635,54 +1491,13 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 }
             }
 
-            // Locate the first contiguous same-time body overlap in this
-            // horizon. Geometric crossings at different times are ignored.
-            TimedEvent event;
-            const size_t count =
-                std::min(predictions[i].size(), predictions[j].size());
-            for (size_t k = 0; k < count; ++k) {
-                const bool hit = overlaps(predictions[i][k].body,
-                                          predictions[j][k].body);
-                if (!hit) {
-                    if (event.valid) break;
-                    continue;
-                }
-                if (!event.valid) {
-                    event.valid = true;
-                    event.first_t = predictions[i][k].t;
-                    const double sa = predictions[i][k].s;
-                    const double sb = predictions[j][k].s;
-                    double best_score = std::numeric_limits<double>::infinity();
-                    for (size_t zi = 0; zi < zones.size(); ++zi) {
-                        const ConflictZone& z = zones[zi];
-                        auto intervalDistance = [](double value, double begin,
-                                                   double end) {
-                            if (value < begin) return begin - value;
-                            if (value > end) return value - end;
-                            return 0.0;
-                        };
-                        const double score =
-                            intervalDistance(sa, z.s_self_enter, z.s_self_exit) +
-                            intervalDistance(sb, z.s_other_enter, z.s_other_exit);
-                        if (score < best_score) {
-                            best_score = score;
-                            event.zone_index = zi;
-                        }
-                    }
-                }
-                event.last_t = predictions[i][k].t;
-                auto polygon = intersectObbs(predictions[i][k].body,
-                                             predictions[j][k].body);
-                if (polygon.size() >= 3) {
-                    event.overlaps.push_back(ConflictMarker::TimedOverlap{
-                        predictions[i][k].t, std::move(polygon)});
-                }
-            }
+            const TimedConflictEvent& event = interaction.event;
             if (!event.valid) continue;
 
             pairwise_managed_pairs_.insert(key);
 
-            const ConflictZone& zone = zones[event.zone_index];
+            const ConflictZone& zone =
+                zones[static_cast<size_t>(event.associated_zone_index)];
             const bool a_inside =
                 insideInterval(a, zone.s_self_enter, zone.s_self_exit);
             const bool b_inside =
@@ -1762,7 +1577,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 ConflictMarkerKind::CROSSING_OR_OPPOSING, event.first_t,
                 -1, -1, 0.0, VehicleAction::NOMINAL, holder,
                 holder == a.id ? b.id : (holder == b.id ? a.id : -1),
-                decimateTimedOverlaps(event.overlaps));
+                decimateTimedOverlaps(event.timed_overlaps));
             if (holder < 0) {
                 brakeBefore(a, zone.s_self_enter, b.id);
                 brakeBefore(b, zone.s_other_enter, a.id);

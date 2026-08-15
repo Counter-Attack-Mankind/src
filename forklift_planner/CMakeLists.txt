@@ -59,6 +59,7 @@ add_executable(multi_vehicle_patrol_node
   src/multi_vehicle/multi_vehicle_config.cpp
   src/multi_vehicle/path_track.cpp
   src/multi_vehicle/rule_engine.cpp
+  src/multi_vehicle/spatiotemporal_interaction.cpp
   src/multi_vehicle/task_allocator.cpp
   src/multi_vehicle/traffic_resource_map.cpp
   src/multi_vehicle_patrol_node.cpp
@@ -109,6 +110,20 @@ if(CATKIN_ENABLE_TESTING)
     test/future_a1_policy_test.cpp
   )
   add_test(NAME future_a1_policy_test COMMAND future_a1_policy_test)
+
+  add_executable(spatiotemporal_interaction_test
+    test/spatiotemporal_interaction_test.cpp
+    src/multi_vehicle/footprint.cpp
+    src/multi_vehicle/path_track.cpp
+    src/multi_vehicle/rule_engine.cpp
+    src/multi_vehicle/spatiotemporal_interaction.cpp
+    src/multi_vehicle/traffic_resource_map.cpp
+  )
+  add_dependencies(spatiotemporal_interaction_test ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(spatiotemporal_interaction_test ${catkin_LIBRARIES})
+  add_test(NAME spatiotemporal_interaction_test
+           COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
+                   $<TARGET_FILE:spatiotemporal_interaction_test>)
 endif()
 
 install(TARGETS planner_node two_vehicle_sim_node multi_vehicle_patrol_node

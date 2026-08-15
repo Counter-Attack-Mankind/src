@@ -12,6 +12,7 @@
 #include "forklift_map/map_param.h"
 #include "forklift_planner/multi_vehicle/future_a1_policy.h"
 #include "forklift_planner/multi_vehicle/multi_vehicle_config.h"
+#include "forklift_planner/multi_vehicle/spatiotemporal_interaction.h"
 #include "forklift_planner/multi_vehicle/traffic_resource.h"
 #include "forklift_planner/multi_vehicle/traffic_resource_map.h"
 #include "forklift_planner/multi_vehicle/vehicle_agent.h"
@@ -27,14 +28,8 @@ enum class ConflictMarkerKind {
 };
 
 struct ConflictMarker {
-    struct Point {
-        double x = 0.0;
-        double y = 0.0;
-    };
-    struct TimedOverlap {
-        double t = 0.0;
-        std::vector<Point> polygon;
-    };
+    using Point = InteractionPoint;
+    using TimedOverlap = TimedOverlapGeometry;
 
     // For CROSSING_OR_OPPOSING, x/y and scale_x/scale_y are the AABB around
     // sampled, time-synchronised OBB intersections. For the two resource-only
@@ -212,31 +207,18 @@ public:
 
     int unifiedPriority(const VehicleAgent& a, const VehicleAgent& b) const;
 
+    // Read-only coordination interface. The path_gen-keyed geometry cache is
+    // the only mutable implementation detail this may populate.
+    PairInteractionResult detectPairInteraction(
+        const VehicleAgent& a, const VehicleAgent& b,
+        double prediction_horizon) const;
+
     // 诊断:打印一对车的冲突区全貌(各块 se/sx、same_dir、committed、停止线、owner 预约、
     // 是否在 following_pairs_)。供无头批处理在碰撞现场调用,定位"该不该门控/谁越线"。
     void debugDumpConflict(const VehicleAgent& a, const VehicleAgent& b) const;
 
 private:
-    struct ConflictZone {
-        double s_self_enter = 0.0;   // arc entry on self's path
-        double s_other_enter = 0.0;  // arc entry on other's path
-        double s_self_exit = 0.0;    // arc exit on self's path
-        double s_other_exit = 0.0;   // arc exit on other's path
-        double x = 0.0;
-        double y = 0.0;
-        // Stable cache index and the exact union AABB of every overlap
-        // polygon aggregated into this zone. Diagnostic-only: no rule reads
-        // these fields.
-        int raw_index = -1;
-        double aabb_min_x = 0.0;
-        double aabb_min_y = 0.0;
-        double aabb_max_x = 0.0;
-        double aabb_max_y = 0.0;
-        bool aabb_valid = false;
-        // 块内两路径是否「同向」(正对角带=同车道跟车;否则交叉/对向)。由静态几何在
-        // 块中点测两路径行进朝向算定 → 稳定不随当前位姿闪烁(对称,与 self/other 朝向无关)。
-        bool same_dir = false;
-    };
+    using ConflictZone = PotentialConflictZone;
 
     struct FutureA1ZoneSelection {
         std::vector<ConflictZone> normalized_zones;
