@@ -168,6 +168,21 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME prediction_execution_consistency_test
            COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
                    $<TARGET_FILE:prediction_execution_consistency_test>)
+
+  add_executable(rolling_decision_timing_test
+    test/rolling_decision_timing_test.cpp
+    src/multi_vehicle/dynamic_speed_coordination.cpp
+    src/multi_vehicle/footprint.cpp
+    src/multi_vehicle/path_track.cpp
+    src/multi_vehicle/rule_engine.cpp
+    src/multi_vehicle/spatiotemporal_interaction.cpp
+    src/multi_vehicle/traffic_resource_map.cpp
+  )
+  add_dependencies(rolling_decision_timing_test ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(rolling_decision_timing_test ${catkin_LIBRARIES})
+  add_test(NAME rolling_decision_timing_test
+           COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
+                   $<TARGET_FILE:rolling_decision_timing_test>)
 endif()
 
 install(TARGETS planner_node two_vehicle_sim_node multi_vehicle_patrol_node

@@ -11,6 +11,7 @@ namespace multi_vehicle {
 
 namespace {
 
+
 std::array<InteractionPoint, 4> obbCorners(const OBB& body) {
     const double c = std::cos(body.theta);
     const double s = std::sin(body.theta);
@@ -139,9 +140,11 @@ std::vector<PredictedKinematicSample> predictTrajectory(
     std::vector<PredictedKinematicSample> output;
     if (!vehicle.active() || vehicle.track.empty()) return output;
     output.reserve(static_cast<size_t>(prediction_count + 1));
+    
     double s = std::max(0.0,
                         std::min(vehicle.path_s, vehicle.track.length()));
     double speed = std::max(0.0, vehicle.current_speed);
+
     output.push_back(PredictedKinematicSample{
         0.0, s, speed,
         makeBody(vehicle.track.poseAtS(s), map_param, footprint_margin)});

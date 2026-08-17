@@ -1222,7 +1222,8 @@ PairInteractionResult RuleEngine::detectPairInteraction(
 
 void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                                           double dt,
-                                          double prediction_horizon) {
+                                          double prediction_horizon,
+                                          bool reuse_ordinary_coordination) {
     pairwise_managed_pairs_.clear();
     // Predict each vehicle once. Pair detection below is pure and consumes
     // these shared samples without changing coordination state.
@@ -1278,7 +1279,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
     };
     const bool dynamic_speed_enabled = vehicles.size() == 2;
     auto logNominalRecovery = [&](const std::pair<int, int>& key) {
-        if (!dynamic_speed_enabled) return;
+        if (!dynamic_speed_enabled || reuse_ordinary_coordination) return;
         const auto previous = previous_dynamic_actions_.find(key);
         if (previous == previous_dynamic_actions_.end()) return;
         ++dynamic_speed_metrics_.nominal_recoveries;
@@ -1574,17 +1575,35 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 departure_cluster_owner >= 0 || future_owner >= 0;
             const bool a_terminal = terminalDocking(a);
             const bool b_terminal = terminalDocking(b);
+            const bool ordinary =
+                !a_inside_any_zone && !b_inside_any_zone && !a1_related &&
+                !a_terminal && !b_terminal &&
+                !a.deadlock_breaker && !b.deadlock_breaker;
+
+            // The rolling-period target was selected from the true state at
+            // frame 0.  Future sandbox states may still run reservation/A1 and
+            // safety rules, but must not turn the same period's FAR into MID,
+            // re-run priority/candidates, or create a new ordinary reservation.
+            if (ordinary && reuse_ordinary_coordination) {
+                recordConflictZones(
+                    a, b, std::vector<ConflictZone>{zone},
+                    ConflictMarkerKind::CROSSING_OR_OPPOSING,
+                    event.first_t, -1, -1, 0.0,
+                    VehicleAction::NOMINAL, -1, -1,
+                    decimateTimedOverlaps(event.timed_overlaps));
+                continue;
+            }
 
             if (dynamic_speed_enabled) {
                 ++dynamic_speed_metrics_.baseline_conflicts;
-                const bool ordinary =
-                    !a_inside_any_zone && !b_inside_any_zone && !a1_related &&
-                    !a_terminal && !b_terminal &&
-                    !a.deadlock_breaker && !b.deadlock_breaker;
                 const int preferred_winner = ordinary
                     ? priorityWinner(a, b) : -1;
                 const DynamicInterventionBand intervention_band =
                     classifyDynamicInterventionBand(event.first_t, cfg_);
+                if (ordinary) {
+                    last_rolling_dynamic_decision_.valid = true;
+                    last_rolling_dynamic_decision_.band = intervention_band;
+                }
                 const bool far_deferred =
                     ordinary &&
                     intervention_band == DynamicInterventionBand::FAR;
@@ -1638,6 +1657,10 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     intervention_band == DynamicInterventionBand::NEAR &&
                     (near_fallback || speed_result.fallback_required)) {
                     ++dynamic_speed_metrics_.near_legacy_fallbacks;
+                }
+                if (ordinary &&
+                    (near_fallback || speed_result.fallback_required)) {
+                    last_rolling_dynamic_decision_.legacy_fallback = true;
                 }
 
                 if (coord_log_sink_) {
@@ -1722,6 +1745,18 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                             "dynamic_speed_" + std::string(actionName(
                                 speed_result.selected_action_b)) + suffix,
                             a.id);
+                    }
+                    for (const VehicleAgent* vehicle : {&a, &b}) {
+                        if (vehicle->requested_action ==
+                                VehicleAction::NOMINAL ||
+                            vehicle->reason.rfind("dynamic_speed_", 0) != 0) {
+                            continue;
+                        }
+                        last_rolling_dynamic_decision_.targets.push_back(
+                            RollingDynamicDecision::Target{
+                                vehicle->id, vehicle->path_gen,
+                                vehicle->requested_action,
+                                vehicle->blocker_id, vehicle->reason});
                     }
                     recordConflictZones(
                         a, b, std::vector<ConflictZone>{zone},
@@ -2697,8 +2732,12 @@ void RuleEngine::resolveDeadlock(std::vector<VehicleAgent>& vehicles, double dt)
 }
 
 void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
-                        double prediction_horizon_override) {
+                        double prediction_horizon_override,
+                        bool reuse_ordinary_coordination,
+                        const RollingDynamicDecision*
+                            period_ordinary_decision) {
     conflicts_.clear();
+    last_rolling_dynamic_decision_ = RollingDynamicDecision{};
     now_ += dt;                      // 内部仿真时钟(令牌防抖/超时)
     resolveDeadlock(vehicles, dt);   // Phase4:用上周期等待边检测环、选破环车(reset 前)
     refreshResourceSpans(vehicles);  // Phase 2:刷新每车路径的资源占用缓存
@@ -2707,12 +2746,12 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
     previous_dynamic_actions_.clear();
     for (const VehicleAgent& v : vehicles) {
         if (v.blocker_id < 0) continue;
-        if (v.reason.rfind("dynamic_speed_", 0) == 0 &&
-            (v.action == VehicleAction::YIELD ||
-             v.action == VehicleAction::CREEP)) {
-            const std::pair<int, int> key{
-                std::min(v.id, v.blocker_id),
-                std::max(v.id, v.blocker_id)};
+        if (!reuse_ordinary_coordination &&
+            v.reason.rfind("dynamic_speed_", 0) == 0 &&
+                (v.action == VehicleAction::YIELD ||
+                 v.action == VehicleAction::CREEP)) {
+            const std::pair<int, int> key{std::min(v.id, v.blocker_id),
+                                          std::max(v.id, v.blocker_id)};
             previous_dynamic_actions_[key] = v.action;
         }
         const std::string expected =
@@ -2724,15 +2763,30 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
     }
 
     for (VehicleAgent& v : vehicles) {
-        v.blocker_id = -1;
         if (v.mode != VehicleMode::ACTIVE) {
+            v.blocker_id = -1;
             v.cycle_break_immunity = 0.0;
             v.requested_action = VehicleAction::STOP;
             v.reason = "not_active";
             continue;
         }
+        v.blocker_id = -1;
         v.requested_action = VehicleAction::NOMINAL;
         v.reason = "clear";
+        if (reuse_ordinary_coordination &&
+            period_ordinary_decision != nullptr) {
+            for (const RollingDynamicDecision::Target& target :
+                 period_ordinary_decision->targets) {
+                if (target.vehicle_id != v.id ||
+                    target.path_gen != v.path_gen) {
+                    continue;
+                }
+                v.requested_action = target.action;
+                v.blocker_id = target.blocker_id;
+                v.reason = target.reason;
+                break;
+            }
+        }
     }
 
     resolveFollowing(vehicles);
@@ -2745,12 +2799,13 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
         ? prediction_horizon_override
         : cfg_.prediction_horizon;
     refreshDepartureClusterCommitments(vehicles);
-    resolvePairwiseConflicts(vehicles, dt, pairwise_horizon);
+    resolvePairwiseConflicts(vehicles, dt, pairwise_horizon,
+                             reuse_ordinary_coordination);
     enforceFutureA1Admission(vehicles, dt);
     enforceDepartureClusterCommitments(vehicles, dt);
     resolveTargetSlotOccupancy(vehicles);  // slot-mouth queueing (spec 6/7)
     enforceForwardClearance(vehicles);     // 普适前向净空兜底:堵分类接缝→防十字楔死
-    applyFollowingSuggestions(vehicles);   // lowest-priority longitudinal hint
+    applyFollowingSuggestions(vehicles);  // lowest-priority hint
     applyRequestedActions(vehicles, dt);
     if (cfg_.enable_cycle_break) breakDeadlockCycles(vehicles);  // spec 16
 

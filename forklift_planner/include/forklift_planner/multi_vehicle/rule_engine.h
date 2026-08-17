@@ -170,11 +170,17 @@ public:
     // 接入资源地图(Phase 2:资源仲裁需要它把路径映射到资源占用)。
     void setResourceMap(const TrafficResourceMap* m) { resmap_ = m; }
 
+    struct RollingDynamicDecision;
+
     // prediction_horizon_override >= 0 constrains this decision to the
-    // remaining part of one already-active planning window. Normal callers
-    // keep the configured horizon by omitting it.
+    // supplied prediction window. reuse_ordinary_coordination skips only a
+    // new ordinary pairwise arbitration and reapplies this period's ordinary
+    // targets; following, reservation, A1 and safety rules still run.
     void decide(std::vector<VehicleAgent>& vehicles, double dt,
-                double prediction_horizon_override = -1.0);
+                double prediction_horizon_override = -1.0,
+                bool reuse_ordinary_coordination = false,
+                const RollingDynamicDecision* period_ordinary_decision =
+                    nullptr);
     double speedForAction(VehicleAction action) const;
 
     // 前瞻仿真用:快照/恢复跨周期持久状态,使「克隆-空跑」忠实复现真实协调(确定性⇒预测准)。
@@ -228,6 +234,23 @@ public:
     };
     const DynamicSpeedMetrics& dynamicSpeedMetrics() const {
         return dynamic_speed_metrics_;
+    }
+
+    struct RollingDynamicDecision {
+        struct Target {
+            int vehicle_id = -1;
+            int path_gen = 0;
+            VehicleAction action = VehicleAction::NOMINAL;
+            int blocker_id = -1;
+            std::string reason;
+        };
+        bool valid = false;
+        DynamicInterventionBand band = DynamicInterventionBand::FAR;
+        bool legacy_fallback = false;
+        std::vector<Target> targets;
+    };
+    const RollingDynamicDecision& lastRollingDynamicDecision() const {
+        return last_rolling_dynamic_decision_;
     }
 
     // Read-only coordination interface. The path_gen-keyed geometry cache is
@@ -302,7 +325,8 @@ private:
     void applyActionRequest(VehicleAgent& v, VehicleAction action,
                             const std::string& reason, int blocker_id = -1);
     void resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles, double dt,
-                                  double prediction_horizon);
+                                  double prediction_horizon,
+                                  bool reuse_ordinary_coordination);
     void enforceFutureA1Admission(std::vector<VehicleAgent>& vehicles,
                                   double dt);
     void refreshDepartureClusterCommitments(
@@ -391,6 +415,7 @@ private:
     // Intentionally excluded from SimSnapshot: rollout evaluations are
     // diagnostic evidence, and these counters never affect restored control.
     DynamicSpeedMetrics dynamic_speed_metrics_;
+    RollingDynamicDecision last_rolling_dynamic_decision_;
     double now_ = 0.0;  // 内部仿真时钟(每 decide 累加 dt),供令牌防抖/超时用
 };
 

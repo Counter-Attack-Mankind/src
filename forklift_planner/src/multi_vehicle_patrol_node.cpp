@@ -221,6 +221,18 @@ private:
     struct SimPlanFrame {
         std::vector<SimPlannedAgentDecision> agents;
         forklift_planner::multi_vehicle::RuleEngine::SimSnapshot rule_state;
+        forklift_planner::multi_vehicle::RuleEngine::RollingDynamicDecision
+            rolling_dynamic_decision;
+    };
+
+    struct ExecutedRollingDecisionMetrics {
+        unsigned long long far_periods = 0;
+        unsigned long long mid_periods = 0;
+        unsigned long long near_periods = 0;
+        unsigned long long legacy_periods = 0;
+        std::array<unsigned long long, 5> target_actions{};
+        unsigned long long reservation_creates = 0;
+        unsigned long long reservation_deletes = 0;
     };
 
     struct A1ArrivalPrediction {
@@ -670,6 +682,8 @@ private:
             plan_frames->clear();
             plan_frames->reserve(static_cast<size_t>(H));
         }
+        forklift_planner::multi_vehicle::RuleEngine::RollingDynamicDecision
+            period_ordinary_decision;
 
         //开始向未来预测H步长，H = 预测时间/dt
         for (int s = 1; s <= H; ++s) {
@@ -681,6 +695,8 @@ private:
             if (!(first_step_task_state_is_current && s == 1)) {
                 updateDwellAndTasks(dt);
             }
+            const bool reuse_ordinary_coordination =
+                plan_frames != nullptr && s > 1;
             if (plan_frames != nullptr) {
                 // All decisions used to build this active plan share one
                 // absolute end time. At future offset tau, only [tau, H]
@@ -689,9 +705,16 @@ private:
                 const double tau = static_cast<double>(s - 1) * dt;
                 const double remaining_horizon =
                     std::max(dt, horizon - tau);
-                rule_engine_->decide(agents_, dt, remaining_horizon);
+                rule_engine_->decide(agents_, dt, remaining_horizon,
+                                     reuse_ordinary_coordination,
+                                     reuse_ordinary_coordination
+                                         ? &period_ordinary_decision : nullptr);
             } else {
                 rule_engine_->decide(agents_, dt);
+            }
+            if (plan_frames != nullptr && s == 1) {
+                period_ordinary_decision =
+                    rule_engine_->lastRollingDynamicDecision();
             }
             if (plan_frames != nullptr) {
                 SimPlanFrame frame;
@@ -712,6 +735,10 @@ private:
                     frame.agents.push_back(std::move(d));
                 }
                 frame.rule_state = rule_engine_->snapshot();
+                if (s == 1) {
+                    frame.rolling_dynamic_decision =
+                        rule_engine_->lastRollingDynamicDecision();
+                }
                 plan_frames->push_back(std::move(frame));
             }
             advanceVehicles(dt);
@@ -1063,6 +1090,17 @@ private:
         setCoordLogContext("REAL", sim_plan_id_,
                            static_cast<int>(sim_plan_cursor_), -1);
         const SimPlanFrame& frame = sim_plan_frames_[sim_plan_cursor_];
+        const auto before_rule_state = rule_engine_->snapshot();
+        for (const auto& incoming : frame.rule_state.reservations) {
+            if (before_rule_state.reservations.count(incoming.first) == 0) {
+                ++executed_rolling_metrics_.reservation_creates;
+            }
+        }
+        for (const auto& current : before_rule_state.reservations) {
+            if (frame.rule_state.reservations.count(current.first) == 0) {
+                ++executed_rolling_metrics_.reservation_deletes;
+            }
+        }
         rule_engine_->restore(frame.rule_state);
         for (size_t i = 0; i < agents_.size(); ++i) {
             VehicleAgent& v = agents_[i];
@@ -1076,6 +1114,46 @@ private:
             v.deadlock_breaker = d.deadlock_breaker;
             v.deadlock_breaker_hold = d.deadlock_breaker_hold;
             v.reason = d.reason;
+        }
+        if (sim_plan_cursor_ == 0) {
+            const auto& decision = frame.rolling_dynamic_decision;
+            if (decision.valid) {
+                switch (decision.band) {
+                    case forklift_planner::multi_vehicle::
+                        DynamicInterventionBand::FAR:
+                        ++executed_rolling_metrics_.far_periods;
+                        break;
+                    case forklift_planner::multi_vehicle::
+                        DynamicInterventionBand::MID:
+                        ++executed_rolling_metrics_.mid_periods;
+                        break;
+                    case forklift_planner::multi_vehicle::
+                        DynamicInterventionBand::NEAR:
+                        ++executed_rolling_metrics_.near_periods;
+                        break;
+                }
+                if (decision.legacy_fallback) {
+                    ++executed_rolling_metrics_.legacy_periods;
+                }
+            }
+            std::ostringstream line;
+            line << "[ROLLING-DECISION] plan=" << sim_plan_id_ << " band="
+                 << (decision.valid
+                         ? forklift_planner::multi_vehicle::
+                               dynamicInterventionBandName(decision.band)
+                         : "CLEAR_OR_SPECIAL")
+                 << " targets=";
+            for (size_t i = 0; i < frame.agents.size(); ++i) {
+                const VehicleAction target = frame.agents[i].requested_action;
+                const size_t action_index = static_cast<size_t>(target);
+                if (action_index < executed_rolling_metrics_.target_actions.size()) {
+                    ++executed_rolling_metrics_.target_actions[action_index];
+                }
+                if (i != 0) line << "/";
+                line << actionName(target);
+            }
+            line << " legacy=" << (decision.legacy_fallback ? 1 : 0);
+            coordLogWithContext(line.str(), "REAL", sim_plan_id_, 0, -1);
         }
         ++sim_plan_cursor_;
         return true;
@@ -2778,6 +2856,7 @@ private:
     double sim_plan_start_time_ = 0.0;
     forklift_planner::multi_vehicle::RuleEngine::FutureA1Commitment
         future_a1_commitment_;
+    ExecutedRollingDecisionMetrics executed_rolling_metrics_;
     
     double rb_full_horizon_ = 180.0;                    // 一次性模式:全程推演上限时长(s),尾部静止点会裁掉
     bool one_shot_published_ = false;                   // 一次性轨迹是否已全部发完(防重复发)
@@ -3586,7 +3665,7 @@ public:
                      nominal_ratio, action_transitions[i]);
         }
         const auto& dynamic = rule_engine_->dynamicSpeedMetrics();
-        ROS_WARN("[BATCH_DYN_SPEED_METRICS] baseline_conflicts=%llu "
+        ROS_WARN("[BATCH_DYN_SPEED_EVALUATED] baseline_conflicts=%llu "
                  "far_deferred=%llu mid_intervention=%llu "
                  "near_intervention=%llu near_legacy_fallback=%llu "
                  "yield_trials=%llu yield_clear=%llu creep_trials=%llu "
@@ -3604,6 +3683,26 @@ public:
                  dynamic.nominal_recoveries,
                  dynamic.reservation_creates,
                  dynamic.reservation_deletes);
+        const auto& executed = executed_rolling_metrics_;
+        ROS_WARN("[BATCH_DYN_SPEED_EXECUTED] far_periods=%llu "
+                 "mid_periods=%llu near_periods=%llu legacy_periods=%llu "
+                 "target_STOP=%llu target_CREEP=%llu target_YIELD=%llu "
+                 "target_NOMINAL=%llu target_BOOST=%llu "
+                 "reservation_create=%llu reservation_delete=%llu",
+                 executed.far_periods, executed.mid_periods,
+                 executed.near_periods, executed.legacy_periods,
+                 executed.target_actions[static_cast<size_t>(
+                     VehicleAction::STOP)],
+                 executed.target_actions[static_cast<size_t>(
+                     VehicleAction::CREEP)],
+                 executed.target_actions[static_cast<size_t>(
+                     VehicleAction::YIELD)],
+                 executed.target_actions[static_cast<size_t>(
+                     VehicleAction::NOMINAL)],
+                 executed.target_actions[static_cast<size_t>(
+                     VehicleAction::BOOST)],
+                 executed.reservation_creates,
+                 executed.reservation_deletes);
         return hard_guard_events_ > 0;
     }
     bool batchMode() const { return cfg_batch_ticks_ > 0; }

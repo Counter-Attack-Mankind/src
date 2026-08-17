@@ -8,12 +8,15 @@ namespace multi_vehicle {
 
 namespace {
 
+    //假设 A 采取 action_a，B 采取 action_b，
+    //那么重新预测未来 prediction_horizon 秒，看两车还会不会冲突。
 SpeedCoordinationCandidate evaluateCandidate(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const std::vector<PotentialConflictZone>& potential_zones,
     const MapParam& map_param, const MultiVehicleConfig& config,
     double prediction_horizon, VehicleAction action_a,
     VehicleAction action_b) {
+
     SpeedCoordinationCandidate candidate;
     candidate.action_a = action_a;
     candidate.action_b = action_b;
@@ -34,6 +37,7 @@ SpeedCoordinationCandidate evaluateCandidate(
 
 }  // namespace
 
+    //按照冲突时间分级
 DynamicInterventionBand classifyDynamicInterventionBand(
     double first_conflict_t, const MultiVehicleConfig& config) {
     if (first_conflict_t >= config.dynamic_speed_far_threshold) {
@@ -54,6 +58,7 @@ const char* dynamicInterventionBandName(DynamicInterventionBand band) {
     return "UNKNOWN";
 }
 
+    //整个动态速度协调的主体,对一对车辆，根据 NOMINAL 基准冲突和已有 priority winner，尝试用速度调节消除冲突。
 PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const std::vector<PotentialConflictZone>& potential_zones,
