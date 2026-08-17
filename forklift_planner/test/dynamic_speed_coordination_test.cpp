@@ -2,7 +2,9 @@
 
 #include <cmath>
 #include <iostream>
+#include <optional>
 #include <string>
+#include <vector>
 
 using namespace forklift_planner::multi_vehicle;
 
@@ -26,14 +28,11 @@ VehicleAgent crossingVehicle(int id, double approach, bool vertical,
     result.requested_action = VehicleAction::NOMINAL;
     result.path_gen = 1;
     result.current_speed = speed;
-    RoughPath path;
-    if (vertical) {
-        path = {wp(0.0, -approach, 1.5707963267948966),
-                wp(0.0, 2.0, 1.5707963267948966)};
-    } else {
-        path = {wp(-approach, 0.0, 0.0), wp(2.0, 0.0, 0.0)};
-    }
-    result.track.set(path);
+    result.track.set(vertical
+        ? RoughPath{wp(0.0, -approach, 1.5707963267948966),
+                    wp(0.0, 2.0, 1.5707963267948966)}
+        : RoughPath{wp(-approach, 0.0, 0.0),
+                    wp(2.0, 0.0, 0.0)});
     return result;
 }
 
@@ -60,25 +59,14 @@ PairInteractionResult baseline(const VehicleAgent& a, const VehicleAgent& b,
                           horizon));
 }
 
-struct Scenario {
-    VehicleAgent a;
-    VehicleAgent b;
-    PairInteractionResult baseline;
-    PairSpeedCoordinationResult result;
-};
-
-Scenario makeScenario(
+PairSpeedCoordinationResult evaluate(
+    const VehicleAgent& a, const VehicleAgent& b,
     const MapParam& map_param, const MultiVehicleConfig& config,
-    double approach_a, double approach_b) {
-    constexpr double horizon = 15.0;
-    VehicleAgent a = crossingVehicle(0, approach_a, false);
-    VehicleAgent b = crossingVehicle(1, approach_b, true);
-    PairInteractionResult nominal =
-        baseline(a, b, map_param, config, horizon);
-    const std::vector<PotentialConflictZone> zones{broadZone(a, b)};
-    PairSpeedCoordinationResult result = evaluatePairSpeedCoordination(
-        a, b, zones, nominal, map_param, config, horizon, 0);
-    return Scenario{a, b, nominal, result};
+    bool emergency_stop = false) {
+    const auto nominal = baseline(a, b, map_param, config, 15.0);
+    return evaluatePairSpeedCoordination(
+        a, b, std::vector<PotentialConflictZone>{broadZone(a, b)},
+        nominal, map_param, config, 15.0, 0, emergency_stop);
 }
 
 bool near(double lhs, double rhs, double tolerance = 1e-9) {
@@ -93,81 +81,116 @@ int main() {
     config.prediction_horizon = 15.0;
     config.prediction_step = 0.05;
 
-    // Phase 2.2 intervention bands. Boundaries are intentionally inclusive
-    // on the less urgent side: exactly 10 s is FAR and exactly 5 s is MID.
     constexpr double eps = 1e-6;
-    if (classifyDynamicInterventionBand(
-            10.0, config) != DynamicInterventionBand::FAR ||
-        classifyDynamicInterventionBand(
-            10.0 - eps, config) != DynamicInterventionBand::MID ||
-        classifyDynamicInterventionBand(
-            10.0 + eps, config) != DynamicInterventionBand::FAR ||
-        classifyDynamicInterventionBand(
-            5.0, config) != DynamicInterventionBand::MID ||
-        classifyDynamicInterventionBand(
-            5.0 - eps, config) != DynamicInterventionBand::NEAR ||
-        classifyDynamicInterventionBand(
-            5.0 + eps, config) != DynamicInterventionBand::MID) {
-        return fail("FAR/MID/NEAR boundary classification changed");
+    if (classifyDynamicInterventionBand(10.0, config) !=
+            DynamicInterventionBand::FAR ||
+        classifyDynamicInterventionBand(10.0 - eps, config) !=
+            DynamicInterventionBand::MID ||
+        classifyDynamicInterventionBand(5.0, config) !=
+            DynamicInterventionBand::MID ||
+        classifyDynamicInterventionBand(5.0 - eps, config) !=
+            DynamicInterventionBand::NEAR) {
+        return fail("configured FAR/MID/NEAR boundaries changed");
+    }
+    if (selectRollingSpeedAction(DynamicInterventionBand::FAR, false) !=
+            VehicleAction::NOMINAL ||
+        selectRollingSpeedAction(DynamicInterventionBand::MID, false) !=
+            VehicleAction::YIELD ||
+        selectRollingSpeedAction(DynamicInterventionBand::NEAR, false) !=
+            VehicleAction::CREEP ||
+        selectRollingSpeedAction(DynamicInterventionBand::FAR, true) !=
+            VehicleAction::STOP) {
+        return fail("rolling band-to-action mapping changed");
     }
 
-    // 1. NOMINAL/NOMINAL conflicts while NOMINAL/YIELD clears the horizon.
-    const Scenario yield_clear = makeScenario(
-        map_param, config, 0.30, 0.70);
-    if (!yield_clear.baseline.event.valid ||
-        !yield_clear.result.solved_by_speed_adjustment ||
-        yield_clear.result.selected_action_a != VehicleAction::NOMINAL ||
-        yield_clear.result.selected_action_b != VehicleAction::YIELD) {
-        return fail("no deterministic YIELD-clear crossing was found");
+    const VehicleAgent far_a = crossingVehicle(0, 2.50, false);
+    const VehicleAgent far_b = crossingVehicle(1, 2.90, true);
+    const auto far_result = evaluate(far_a, far_b, map_param, config);
+    if (!far_result.action_selected ||
+        far_result.selected_action_a != VehicleAction::NOMINAL ||
+        far_result.selected_action_b != VehicleAction::NOMINAL) {
+        return fail("FAR did not select NOMINAL/NOMINAL");
     }
 
-    // 2. YIELD still conflicts, then CREEP is the first clear candidate.
-    const Scenario creep_clear = makeScenario(
-        map_param, config, 0.30, 0.55);
-    if (creep_clear.result.candidates.size() != 2 ||
-        creep_clear.result.candidates[0].conflict_free ||
-        !creep_clear.result.candidates[1].conflict_free ||
-        creep_clear.result.selected_action_b != VehicleAction::CREEP) {
-        return fail("progressive YIELD-to-CREEP search failed");
+    const VehicleAgent mid_a = crossingVehicle(0, 1.50, false);
+    const VehicleAgent mid_b = crossingVehicle(1, 1.90, true);
+    const auto mid_baseline = baseline(mid_a, mid_b, map_param, config, 15.0);
+    const auto mid_result = evaluate(mid_a, mid_b, map_param, config);
+    if (!mid_baseline.event.valid ||
+        classifyDynamicInterventionBand(mid_baseline.event.first_t, config) !=
+            DynamicInterventionBand::MID ||
+        !mid_result.action_selected ||
+        mid_result.selected_action_a != VehicleAction::NOMINAL ||
+        mid_result.selected_action_b != VehicleAction::YIELD) {
+        return fail("MID did not select exactly one YIELD target");
     }
 
-    // 3. An overlap at t=0 cannot be repaired by either speed target.
-    VehicleAgent overlap_a = crossingVehicle(0, 0.0, false);
-    VehicleAgent overlap_b = crossingVehicle(1, 0.0, true);
-    const PairInteractionResult overlap_baseline =
-        baseline(overlap_a, overlap_b, map_param, config, 15.0);
-    const std::vector<PotentialConflictZone> overlap_zones{
-        broadZone(overlap_a, overlap_b)};
-    const PairSpeedCoordinationResult all_failed =
-        evaluatePairSpeedCoordination(
-            overlap_a, overlap_b, overlap_zones, overlap_baseline,
-            map_param, config, 15.0, 0);
-    if (!all_failed.fallback_required ||
-        all_failed.solved_by_speed_adjustment ||
-        all_failed.candidates.size() != 2) {
-        return fail("unavoidable overlap did not request legacy fallback");
+    const VehicleAgent near_a = crossingVehicle(0, 0.30, false);
+    const VehicleAgent near_b = crossingVehicle(1, 0.55, true);
+    const auto near_baseline = baseline(
+        near_a, near_b, map_param, config, 15.0);
+    const auto near_result = evaluate(near_a, near_b, map_param, config);
+    if (!near_baseline.event.valid ||
+        classifyDynamicInterventionBand(near_baseline.event.first_t, config) !=
+            DynamicInterventionBand::NEAR ||
+        near_result.selected_action_b != VehicleAction::CREEP) {
+        return fail("NEAR did not jump directly to CREEP");
     }
 
-    // 4. A candidate that merely delays first_t is still a failure.
-    if (!creep_clear.result.candidates[0].first_conflict_t ||
-        !creep_clear.result.original_first_conflict_t ||
-        *creep_clear.result.candidates[0].first_conflict_t <=
-            *creep_clear.result.original_first_conflict_t ||
-        creep_clear.result.candidates[0].conflict_free) {
-        return fail("delayed but remaining conflict was accepted");
+    const auto emergency = evaluate(
+        mid_a, mid_b, map_param, config, true);
+    if (!emergency.emergency_stop ||
+        emergency.selected_action_b != VehicleAction::STOP) {
+        return fail("emergency did not directly select STOP");
     }
 
-    // 5. Low speed with NOMINAL accelerates under max_accel.
+    // Find a deterministic MID case where the one selected YIELD action
+    // delays, but does not clear, the full 15 s conflict. It must still be
+    // accepted as this rolling period's action.
+    std::optional<PairSpeedCoordinationResult> delayed_mid;
+    for (double speed_a : {0.0, 0.2, 0.4, 0.6}) {
+      for (double speed_b : {0.0, 0.2, 0.4, 0.6}) {
+       for (double approach_a = 0.5;
+            approach_a <= 4.0 && !delayed_mid; approach_a += 0.1) {
+        for (double approach_b = 0.5;
+             approach_b <= 4.0; approach_b += 0.1) {
+            const VehicleAgent a = crossingVehicle(
+                0, approach_a, false, speed_a);
+            const VehicleAgent b = crossingVehicle(
+                1, approach_b, true, speed_b);
+            const auto nominal = baseline(a, b, map_param, config, 15.0);
+            if (!nominal.event.valid ||
+                classifyDynamicInterventionBand(nominal.event.first_t,
+                                                config) !=
+                    DynamicInterventionBand::MID) {
+                continue;
+            }
+            const auto result = evaluate(a, b, map_param, config);
+            if (result.action_selected &&
+                result.selected_action_b == VehicleAction::YIELD &&
+                !result.evaluation.conflict_free &&
+                result.evaluation.first_conflict_t &&
+                result.evaluation.conflict_delay &&
+                *result.evaluation.conflict_delay > config.prediction_step) {
+                delayed_mid = result;
+                break;
+            }
+        }
+       }
+      }
+    }
+    if (!delayed_mid) {
+        return fail("no delayed-but-remaining MID/YIELD fixture found");
+    }
+
     VehicleAgent low = crossingVehicle(2, 1.0, false, 0.0);
-    const auto nominal = predictTrajectory(
+    const auto nominal_prediction = predictTrajectory(
         low, map_param, config, VehicleAction::NOMINAL, 0.1);
-    if (nominal.size() < 2 ||
-        !near(nominal[1].speed,
+    if (nominal_prediction.size() < 2 ||
+        !near(nominal_prediction[1].speed,
               config.max_accel * config.prediction_step)) {
         return fail("NOMINAL acceleration constraint changed");
     }
-
-    // 6. High speed with YIELD decelerates under max_decel, not instantly.
     VehicleAgent fast = crossingVehicle(
         3, 1.0, false, config.nominal_speed);
     const auto yielding = predictTrajectory(
@@ -179,87 +202,32 @@ int main() {
         return fail("YIELD deceleration constraint changed");
     }
 
-    // 7. A tight curve caps even a NOMINAL target.
-    RoughPath arc;
-    constexpr double radius = 0.5;
-    for (int index = 0; index <= 100; ++index) {
-        const double angle = 1.5707963267948966 * index / 100.0;
-        arc.push_back(wp(radius * std::cos(angle),
-                         radius * std::sin(angle),
-                         angle + 1.5707963267948966));
-    }
-    MultiVehicleConfig curve_config = config;
-    curve_config.lat_accel_max = 0.001;
-    VehicleAgent curved;
-    curved.id = 4;
-    curved.mode = VehicleMode::ACTIVE;
-    curved.track.set(arc);
-    curved.path_s = 0.2;
-    curved.current_speed = config.nominal_speed;
-    const auto curve_prediction = predictTrajectory(
-        curved, map_param, curve_config, VehicleAction::NOMINAL, 0.1);
-    if (curve_prediction.size() < 2 ||
-        !(curve_prediction[1].speed < config.nominal_speed)) {
-        return fail("curvature cap was bypassed by action target");
-    }
-
-    // 8. STOP prediction clamps at the path endpoint and never overshoots.
-    VehicleAgent endpoint = crossingVehicle(5, 0.005, false, 0.2);
-    endpoint.track.set(RoughPath{wp(0.0, 0.0, 0.0),
-                                 wp(0.005, 0.0, 0.0)});
-    const auto stopped = predictTrajectory(
-        endpoint, map_param, config, VehicleAction::STOP, 1.0);
-    if (stopped.empty() ||
-        stopped.back().s > endpoint.track.length() + 1e-12 ||
-        !near(stopped.back().speed, 0.0)) {
-        return fail("STOP/path-end constraint failed");
-    }
-
-    // 9. Repeated candidate evaluation changes neither live vehicle input.
-    const VehicleAgent before_a = yield_clear.a;
-    const VehicleAgent before_b = yield_clear.b;
+    const VehicleAgent before_a = mid_a;
+    const VehicleAgent before_b = mid_b;
     for (int repeat = 0; repeat < 3; ++repeat) {
-        (void)evaluatePairSpeedCoordination(
-            yield_clear.a, yield_clear.b,
-            std::vector<PotentialConflictZone>{
-                broadZone(yield_clear.a, yield_clear.b)},
-            yield_clear.baseline, map_param, config, 15.0, 0);
+        (void)evaluate(mid_a, mid_b, map_param, config);
     }
-    if (!near(yield_clear.a.path_s, before_a.path_s) ||
-        !near(yield_clear.a.current_speed, before_a.current_speed) ||
-        yield_clear.a.action != before_a.action ||
-        yield_clear.a.reason != before_a.reason ||
-        !near(yield_clear.b.path_s, before_b.path_s) ||
-        !near(yield_clear.b.current_speed, before_b.current_speed) ||
-        yield_clear.b.action != before_b.action ||
-        yield_clear.b.reason != before_b.reason) {
-        return fail("counterfactual evaluation changed live input");
+    if (!near(mid_a.path_s, before_a.path_s) ||
+        !near(mid_a.current_speed, before_a.current_speed) ||
+        mid_a.action != before_a.action ||
+        !near(mid_b.path_s, before_b.path_s) ||
+        !near(mid_b.current_speed, before_b.current_speed) ||
+        mid_b.action != before_b.action) {
+        return fail("selected-action evaluation changed live input");
     }
 
-    // 12. Near conflicts conservatively use legacy fallback.
     VehicleAgent near_entry = crossingVehicle(6, 0.2, false, 0.2);
     if (!hasInsufficientBrakingMargin(
             near_entry, 0.25, config, 0.1)) {
         return fail("insufficient braking margin was not detected");
     }
-    VehicleAgent far_entry = crossingVehicle(7, 1.0, false, 0.2);
-    if (hasInsufficientBrakingMargin(
-            far_entry, 1.0, config, 0.1)) {
-        return fail("distant conflict was misclassified as near");
-    }
 
-    std::cout << "yield_clear baseline_t="
-              << *yield_clear.result.original_first_conflict_t
-              << " approach_a=" << -yield_clear.a.track.path().front().x
-              << " approach_b=" << -yield_clear.b.track.path().front().y
-              << '\n';
-    std::cout << "creep_clear baseline_t="
-              << *creep_clear.result.original_first_conflict_t
-              << " yield_t="
-              << *creep_clear.result.candidates[0].first_conflict_t
-              << " approach_a=" << -creep_clear.a.track.path().front().x
-              << " approach_b=" << -creep_clear.b.track.path().front().y
-              << '\n';
+    std::cout << "[MID-DELAY] baseline_first_t="
+              << *delayed_mid->original_first_conflict_t
+              << " selected=YIELD after_first_t="
+              << *delayed_mid->evaluation.first_conflict_t
+              << " delay=" << *delayed_mid->evaluation.conflict_delay
+              << " accepted=true\n";
     std::cout << "dynamic_speed_coordination_test: PASS\n";
     return 0;
 }

@@ -6,38 +6,6 @@
 namespace forklift_planner {
 namespace multi_vehicle {
 
-namespace {
-
-    //假设 A 采取 action_a，B 采取 action_b，
-    //那么重新预测未来 prediction_horizon 秒，看两车还会不会冲突。
-SpeedCoordinationCandidate evaluateCandidate(
-    const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
-    const std::vector<PotentialConflictZone>& potential_zones,
-    const MapParam& map_param, const MultiVehicleConfig& config,
-    double prediction_horizon, VehicleAction action_a,
-    VehicleAction action_b) {
-
-    SpeedCoordinationCandidate candidate;
-    candidate.action_a = action_a;
-    candidate.action_b = action_b;
-    const auto prediction_a = predictTrajectory(
-        vehicle_a, map_param, config, action_a, prediction_horizon);
-    const auto prediction_b = predictTrajectory(
-        vehicle_b, map_param, config, action_b, prediction_horizon);
-    const PairInteractionResult interaction =
-        detectPairInteractionFromPredictions(
-            vehicle_a, vehicle_b, potential_zones,
-            prediction_a, prediction_b);
-    candidate.conflict_free = !interaction.event.valid;
-    if (interaction.event.valid) {
-        candidate.first_conflict_t = interaction.event.first_t;
-    }
-    return candidate;
-}
-
-}  // namespace
-
-    //按照冲突时间分级
 DynamicInterventionBand classifyDynamicInterventionBand(
     double first_conflict_t, const MultiVehicleConfig& config) {
     if (first_conflict_t >= config.dynamic_speed_far_threshold) {
@@ -58,51 +26,94 @@ const char* dynamicInterventionBandName(DynamicInterventionBand band) {
     return "UNKNOWN";
 }
 
-    //整个动态速度协调的主体,对一对车辆，根据 NOMINAL 基准冲突和已有 priority winner，尝试用速度调节消除冲突。
+VehicleAction selectRollingSpeedAction(
+    DynamicInterventionBand band, bool emergency_stop) {
+    if (emergency_stop) return VehicleAction::STOP;
+    switch (band) {
+        case DynamicInterventionBand::FAR:
+            return VehicleAction::NOMINAL;
+        case DynamicInterventionBand::MID:
+            return VehicleAction::YIELD;
+        case DynamicInterventionBand::NEAR:
+            return VehicleAction::CREEP;
+    }
+    return VehicleAction::STOP;
+}
+
+SelectedSpeedActionEvaluation evaluateSelectedAction(
+    const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
+    const std::vector<PotentialConflictZone>& potential_zones,
+    const MapParam& map_param, const MultiVehicleConfig& config,
+    double prediction_horizon, VehicleAction action_a,
+    VehicleAction action_b,
+    std::optional<double> original_first_conflict_t) {
+    SelectedSpeedActionEvaluation evaluation;
+    evaluation.action_a = action_a;
+    evaluation.action_b = action_b;
+    const auto prediction_a = predictTrajectory(
+        vehicle_a, map_param, config, action_a, prediction_horizon);
+    const auto prediction_b = predictTrajectory(
+        vehicle_b, map_param, config, action_b, prediction_horizon);
+    const PairInteractionResult interaction =
+        detectPairInteractionFromPredictions(
+            vehicle_a, vehicle_b, potential_zones,
+            prediction_a, prediction_b);
+    evaluation.conflict_free = !interaction.event.valid;
+    if (interaction.event.valid) {
+        evaluation.first_conflict_t = interaction.event.first_t;
+        if (original_first_conflict_t) {
+            evaluation.conflict_delay =
+                interaction.event.first_t - *original_first_conflict_t;
+        }
+    }
+    return evaluation;
+}
+
 PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const std::vector<PotentialConflictZone>& potential_zones,
     const PairInteractionResult& nominal_baseline,
     const MapParam& map_param, const MultiVehicleConfig& config,
-    double prediction_horizon, int preferred_winner_id) {
+    double prediction_horizon, int preferred_winner_id,
+    bool emergency_stop) {
     PairSpeedCoordinationResult result;
     if (!nominal_baseline.event.valid) {
         result.reason = "baseline_clear";
         return result;
     }
-    result.original_first_conflict_t =
-        nominal_baseline.event.first_t;
+    result.original_first_conflict_t = nominal_baseline.event.first_t;
     if (preferred_winner_id != vehicle_a.id &&
         preferred_winner_id != vehicle_b.id) {
-        result.fallback_required = true;
         result.reason = "no_priority_winner";
         return result;
     }
 
     result.attempted = true;
+    result.action_selected = true;
+    result.emergency_stop = emergency_stop;
     const bool a_is_winner = preferred_winner_id == vehicle_a.id;
-    for (VehicleAction yielding_action :
-         {VehicleAction::YIELD, VehicleAction::CREEP}) {
-        const VehicleAction action_a = a_is_winner
-            ? VehicleAction::NOMINAL : yielding_action;
-        const VehicleAction action_b = a_is_winner
-            ? yielding_action : VehicleAction::NOMINAL;
-        result.candidates.push_back(evaluateCandidate(
-            vehicle_a, vehicle_b, potential_zones, map_param, config,
-            prediction_horizon, action_a, action_b));
-        if (!result.candidates.back().conflict_free) continue;
+    const DynamicInterventionBand band = classifyDynamicInterventionBand(
+        nominal_baseline.event.first_t, config);
+    const VehicleAction loser_action = selectRollingSpeedAction(
+        band, emergency_stop);
+    result.selected_action_a = a_is_winner
+        ? VehicleAction::NOMINAL : loser_action;
+    result.selected_action_b = a_is_winner
+        ? loser_action : VehicleAction::NOMINAL;
+    result.evaluation = evaluateSelectedAction(
+        vehicle_a, vehicle_b, potential_zones, map_param, config,
+        prediction_horizon, result.selected_action_a,
+        result.selected_action_b, result.original_first_conflict_t);
 
-        result.solved_by_speed_adjustment = true;
-        result.selected_action_a = action_a;
-        result.selected_action_b = action_b;
-        result.reason = yielding_action == VehicleAction::YIELD
-            ? "minimum_intervention_yield"
-            : "minimum_intervention_creep";
-        return result;
+    if (emergency_stop) {
+        result.reason = "rolling_emergency_stop";
+    } else if (band == DynamicInterventionBand::FAR) {
+        result.reason = "rolling_far_nominal";
+    } else if (band == DynamicInterventionBand::MID) {
+        result.reason = "rolling_mid_yield";
+    } else {
+        result.reason = "rolling_near_creep";
     }
-
-    result.fallback_required = true;
-    result.reason = "candidate_search_failed";
     return result;
 }
 
@@ -117,11 +128,11 @@ bool hasInsufficientBrakingMargin(
     const double speed = std::max(0.0, vehicle.current_speed);
     const double braking_distance =
         speed * speed / (2.0 * std::max(1e-6, config.max_decel));
-    const double frozen_prefix =
+    const double rolling_prefix =
         std::max(std::max(0.0, decision_dt),
                  std::max(0.0, config.rolling_refresh_period));
     const double required_distance =
-        braking_distance + speed * frozen_prefix;
+        braking_distance + speed * rolling_prefix;
     return available_distance <= required_distance + 1e-9;
 }
 

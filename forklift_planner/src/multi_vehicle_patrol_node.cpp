@@ -230,9 +230,28 @@ private:
         unsigned long long mid_periods = 0;
         unsigned long long near_periods = 0;
         unsigned long long legacy_periods = 0;
+        unsigned long long far_to_nominal = 0;
+        unsigned long long mid_to_yield = 0;
+        unsigned long long near_to_creep = 0;
+        unsigned long long nominal_to_creep = 0;
+        std::array<unsigned long long, 5> emergency_stop_from{};
+        unsigned long long selected_rollout_clear = 0;
+        unsigned long long yield_delayed = 0;
+        unsigned long long creep_delayed = 0;
+        unsigned long long eventually_resolved = 0;
         std::array<unsigned long long, 5> target_actions{};
         unsigned long long reservation_creates = 0;
+        unsigned long long reservation_updates = 0;
         unsigned long long reservation_deletes = 0;
+        unsigned long long existing_reservation_holds = 0;
+        unsigned long long reservation_create_ordinary_dynamic = 0;
+        unsigned long long reservation_create_a1 = 0;
+        unsigned long long reservation_create_terminal = 0;
+        unsigned long long reservation_create_already_inside = 0;
+        unsigned long long reservation_create_braking_safety = 0;
+        unsigned long long reservation_create_deadlock = 0;
+        unsigned long long reservation_create_multi_vehicle = 0;
+        unsigned long long reservation_create_other = 0;
     };
 
     struct A1ArrivalPrediction {
@@ -1092,8 +1111,37 @@ private:
         const SimPlanFrame& frame = sim_plan_frames_[sim_plan_cursor_];
         const auto before_rule_state = rule_engine_->snapshot();
         for (const auto& incoming : frame.rule_state.reservations) {
-            if (before_rule_state.reservations.count(incoming.first) == 0) {
+            const auto before =
+                before_rule_state.reservations.find(incoming.first);
+            if (before == before_rule_state.reservations.end()) {
                 ++executed_rolling_metrics_.reservation_creates;
+                const std::string& reason = incoming.second.create_reason;
+                if (reason == "ordinary_dynamic") {
+                    ++executed_rolling_metrics_.
+                        reservation_create_ordinary_dynamic;
+                } else if (reason == "a1_related") {
+                    ++executed_rolling_metrics_.reservation_create_a1;
+                } else if (reason == "terminal") {
+                    ++executed_rolling_metrics_.reservation_create_terminal;
+                } else if (reason == "already_inside") {
+                    ++executed_rolling_metrics_.
+                        reservation_create_already_inside;
+                } else if (reason == "braking_safety") {
+                    ++executed_rolling_metrics_.
+                        reservation_create_braking_safety;
+                } else if (reason == "deadlock_breaker") {
+                    ++executed_rolling_metrics_.reservation_create_deadlock;
+                } else if (reason == "multi_vehicle_legacy") {
+                    ++executed_rolling_metrics_.
+                        reservation_create_multi_vehicle;
+                } else {
+                    ++executed_rolling_metrics_.reservation_create_other;
+                }
+            } else {
+                ++executed_rolling_metrics_.existing_reservation_holds;
+                if (before->second.owner_id != incoming.second.owner_id) {
+                    ++executed_rolling_metrics_.reservation_updates;
+                }
             }
         }
         for (const auto& current : before_rule_state.reservations) {
@@ -1117,6 +1165,13 @@ private:
         }
         if (sim_plan_cursor_ == 0) {
             const auto& decision = frame.rolling_dynamic_decision;
+            if (previous_ordinary_conflict_active_ &&
+                decision.baseline_evaluated && !decision.valid) {
+                ++executed_rolling_metrics_.eventually_resolved;
+            }
+            if (decision.baseline_evaluated) {
+                previous_ordinary_conflict_active_ = decision.valid;
+            }
             if (decision.valid) {
                 switch (decision.band) {
                     case forklift_planner::multi_vehicle::
@@ -1134,6 +1189,52 @@ private:
                 }
                 if (decision.legacy_fallback) {
                     ++executed_rolling_metrics_.legacy_periods;
+                }
+                if (decision.band == forklift_planner::multi_vehicle::
+                                         DynamicInterventionBand::FAR &&
+                    decision.selected_action_a == VehicleAction::NOMINAL &&
+                    decision.selected_action_b == VehicleAction::NOMINAL) {
+                    ++executed_rolling_metrics_.far_to_nominal;
+                }
+                if (decision.band == forklift_planner::multi_vehicle::
+                                         DynamicInterventionBand::MID &&
+                    (decision.selected_action_a == VehicleAction::YIELD ||
+                     decision.selected_action_b == VehicleAction::YIELD)) {
+                    ++executed_rolling_metrics_.mid_to_yield;
+                }
+                if (decision.band == forklift_planner::multi_vehicle::
+                                         DynamicInterventionBand::NEAR &&
+                    (decision.selected_action_a == VehicleAction::CREEP ||
+                     decision.selected_action_b == VehicleAction::CREEP)) {
+                    ++executed_rolling_metrics_.near_to_creep;
+                }
+                if (decision.after_action_conflict_free) {
+                    ++executed_rolling_metrics_.selected_rollout_clear;
+                }
+                if (decision.conflict_delay && *decision.conflict_delay > 0.0) {
+                    if (decision.selected_action_a == VehicleAction::YIELD ||
+                        decision.selected_action_b == VehicleAction::YIELD) {
+                        ++executed_rolling_metrics_.yield_delayed;
+                    }
+                    if (decision.selected_action_a == VehicleAction::CREEP ||
+                        decision.selected_action_b == VehicleAction::CREEP) {
+                        ++executed_rolling_metrics_.creep_delayed;
+                    }
+                }
+                for (const auto& target : decision.targets) {
+                    if (target.action == VehicleAction::CREEP &&
+                        target.previous_action == VehicleAction::NOMINAL) {
+                        ++executed_rolling_metrics_.nominal_to_creep;
+                    }
+                    if (target.action == VehicleAction::STOP) {
+                        const size_t previous_index =
+                            static_cast<size_t>(target.previous_action);
+                        if (previous_index < executed_rolling_metrics_.
+                                                 emergency_stop_from.size()) {
+                            ++executed_rolling_metrics_.
+                                emergency_stop_from[previous_index];
+                        }
+                    }
                 }
             }
             std::ostringstream line;
@@ -1153,6 +1254,22 @@ private:
                 line << actionName(target);
             }
             line << " legacy=" << (decision.legacy_fallback ? 1 : 0);
+            if (decision.baseline_first_t) {
+                line << " baseline_first_t=" << *decision.baseline_first_t;
+            }
+            line << " after_action=";
+            if (!decision.valid) {
+                line << "N/A";
+            } else if (decision.after_action_conflict_free) {
+                line << "CLEAR";
+            } else if (decision.after_action_first_t) {
+                line << "CONFLICT@" << *decision.after_action_first_t;
+            } else {
+                line << "UNKNOWN";
+            }
+            if (decision.conflict_delay) {
+                line << " delay=" << *decision.conflict_delay;
+            }
             coordLogWithContext(line.str(), "REAL", sim_plan_id_, 0, -1);
         }
         ++sim_plan_cursor_;
@@ -2857,6 +2974,7 @@ private:
     forklift_planner::multi_vehicle::RuleEngine::FutureA1Commitment
         future_a1_commitment_;
     ExecutedRollingDecisionMetrics executed_rolling_metrics_;
+    bool previous_ordinary_conflict_active_ = false;
     
     double rb_full_horizon_ = 180.0;                    // 一次性模式:全程推演上限时长(s),尾部静止点会裁掉
     bool one_shot_published_ = false;                   // 一次性轨迹是否已全部发完(防重复发)
@@ -3666,31 +3784,68 @@ public:
         }
         const auto& dynamic = rule_engine_->dynamicSpeedMetrics();
         ROS_WARN("[BATCH_DYN_SPEED_EVALUATED] baseline_conflicts=%llu "
-                 "far_deferred=%llu mid_intervention=%llu "
-                 "near_intervention=%llu near_legacy_fallback=%llu "
-                 "yield_trials=%llu yield_clear=%llu creep_trials=%llu "
-                 "creep_clear=%llu search_failed=%llu near_fallback=%llu "
-                 "a1_fallback=%llu existing_reservation=%llu "
-                 "nominal_recovery=%llu reservation_create=%llu "
-                 "reservation_delete=%llu",
-                 dynamic.baseline_conflicts, dynamic.far_deferred,
-                 dynamic.mid_interventions, dynamic.near_interventions,
-                 dynamic.near_legacy_fallbacks, dynamic.yield_trials,
-                 dynamic.yield_clear, dynamic.creep_trials,
-                 dynamic.creep_clear, dynamic.candidate_search_failed,
-                 dynamic.near_fallbacks, dynamic.a1_fallbacks,
+                 "far=%llu mid=%llu near=%llu emergency_stop=%llu "
+                 "yield_eval=%llu yield_clear=%llu yield_delayed=%llu "
+                 "creep_eval=%llu creep_clear=%llu creep_delayed=%llu "
+                 "selected_conflict_remaining=%llu a1_fallback=%llu "
+                 "existing_reservation=%llu nominal_recovery=%llu "
+                 "reservation_create=%llu reservation_update=%llu "
+                 "reservation_delete=%llu ordinary_create=%llu "
+                 "a1_create=%llu terminal_create=%llu inside_create=%llu "
+                 "braking_create=%llu deadlock_create=%llu "
+                 "multi_vehicle_create=%llu other_create=%llu",
+                 dynamic.baseline_conflicts, dynamic.far_decisions,
+                 dynamic.mid_decisions, dynamic.near_decisions,
+                 dynamic.emergency_stop_decisions,
+                 dynamic.yield_evaluations,
+                 dynamic.yield_conflict_free, dynamic.yield_delayed,
+                 dynamic.creep_evaluations,
+                 dynamic.creep_conflict_free, dynamic.creep_delayed,
+                 dynamic.selected_conflict_remaining,
+                 dynamic.a1_fallbacks,
                  dynamic.existing_reservation_skips,
                  dynamic.nominal_recoveries,
                  dynamic.reservation_creates,
-                 dynamic.reservation_deletes);
+                 dynamic.reservation_updates,
+                 dynamic.reservation_deletes,
+                 dynamic.reservation_create_ordinary_dynamic,
+                 dynamic.reservation_create_a1,
+                 dynamic.reservation_create_terminal,
+                 dynamic.reservation_create_already_inside,
+                 dynamic.reservation_create_braking_safety,
+                 dynamic.reservation_create_deadlock,
+                 dynamic.reservation_create_multi_vehicle,
+                 dynamic.reservation_create_other);
         const auto& executed = executed_rolling_metrics_;
         ROS_WARN("[BATCH_DYN_SPEED_EXECUTED] far_periods=%llu "
                  "mid_periods=%llu near_periods=%llu legacy_periods=%llu "
+                 "far_to_nominal=%llu mid_to_yield=%llu "
+                 "near_to_creep=%llu nominal_to_creep=%llu "
+                 "nominal_to_stop=%llu yield_to_stop=%llu "
+                 "creep_to_stop=%llu selected_rollout_clear=%llu "
+                 "yield_delayed=%llu creep_delayed=%llu "
+                 "eventually_resolved=%llu "
                  "target_STOP=%llu target_CREEP=%llu target_YIELD=%llu "
                  "target_NOMINAL=%llu target_BOOST=%llu "
-                 "reservation_create=%llu reservation_delete=%llu",
+                 "reservation_create=%llu reservation_update=%llu "
+                 "reservation_delete=%llu existing_reservation=%llu "
+                 "ordinary_create=%llu a1_create=%llu terminal_create=%llu "
+                 "inside_create=%llu braking_create=%llu "
+                 "deadlock_create=%llu multi_vehicle_create=%llu "
+                 "other_create=%llu",
                  executed.far_periods, executed.mid_periods,
                  executed.near_periods, executed.legacy_periods,
+                 executed.far_to_nominal, executed.mid_to_yield,
+                 executed.near_to_creep, executed.nominal_to_creep,
+                 executed.emergency_stop_from[static_cast<size_t>(
+                     VehicleAction::NOMINAL)],
+                 executed.emergency_stop_from[static_cast<size_t>(
+                     VehicleAction::YIELD)],
+                 executed.emergency_stop_from[static_cast<size_t>(
+                     VehicleAction::CREEP)],
+                 executed.selected_rollout_clear,
+                 executed.yield_delayed, executed.creep_delayed,
+                 executed.eventually_resolved,
                  executed.target_actions[static_cast<size_t>(
                      VehicleAction::STOP)],
                  executed.target_actions[static_cast<size_t>(
@@ -3702,7 +3857,22 @@ public:
                  executed.target_actions[static_cast<size_t>(
                      VehicleAction::BOOST)],
                  executed.reservation_creates,
-                 executed.reservation_deletes);
+                 executed.reservation_updates,
+                 executed.reservation_deletes,
+                 executed.existing_reservation_holds,
+                 executed.reservation_create_ordinary_dynamic,
+                 executed.reservation_create_a1,
+                 executed.reservation_create_terminal,
+                 executed.reservation_create_already_inside,
+                 executed.reservation_create_braking_safety,
+                 executed.reservation_create_deadlock,
+                 executed.reservation_create_multi_vehicle,
+                 executed.reservation_create_other);
+        ROS_WARN("[BATCH_RUNTIME] requested_ticks=%llu completed_ticks=%llu "
+                 "real_sim_t=%.1f dt=%.3f wedge_episodes=%llu "
+                 "reciprocal_stop_cycles=%llu",
+                 ticks, completed_ticks, sim_time_, dt, wedge_episodes,
+                 reciprocal_cycles);
         return hard_guard_events_ > 0;
     }
     bool batchMode() const { return cfg_batch_ticks_ > 0; }

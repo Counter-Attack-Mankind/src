@@ -20,36 +20,50 @@ DynamicInterventionBand classifyDynamicInterventionBand(
 
 const char* dynamicInterventionBandName(DynamicInterventionBand band);
 
-struct SpeedCoordinationCandidate {
+struct SelectedSpeedActionEvaluation {
     VehicleAction action_a = VehicleAction::NOMINAL;
     VehicleAction action_b = VehicleAction::NOMINAL;
     bool conflict_free = false;
     std::optional<double> first_conflict_t;
+    std::optional<double> conflict_delay;
 };
 
 struct PairSpeedCoordinationResult {
     bool attempted = false;
-    bool solved_by_speed_adjustment = false;
-    bool fallback_required = false;
+    bool action_selected = false;
+    bool emergency_stop = false;
     VehicleAction baseline_action_a = VehicleAction::NOMINAL;
     VehicleAction baseline_action_b = VehicleAction::NOMINAL;
     VehicleAction selected_action_a = VehicleAction::NOMINAL;
     VehicleAction selected_action_b = VehicleAction::NOMINAL;
     std::optional<double> original_first_conflict_t;
-    std::vector<SpeedCoordinationCandidate> candidates;
+    SelectedSpeedActionEvaluation evaluation;
     std::string reason;
 };
 
-// Pure two-vehicle counterfactual search. The existing priority winner stays
-// NOMINAL while the other vehicle is tried at YIELD and then CREEP. A
-// candidate succeeds only if no synchronized OBB event remains anywhere in
-// the supplied horizon.
+VehicleAction selectRollingSpeedAction(
+    DynamicInterventionBand band, bool emergency_stop);
+
+SelectedSpeedActionEvaluation evaluateSelectedAction(
+    const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
+    const std::vector<PotentialConflictZone>& potential_zones,
+    const MapParam& map_param, const MultiVehicleConfig& config,
+    double prediction_horizon, VehicleAction action_a,
+    VehicleAction action_b,
+    std::optional<double> original_first_conflict_t = std::nullopt);
+
+// Pure two-vehicle rolling action selection. The priority winner remains
+// NOMINAL; the loser receives exactly one target for this rolling period:
+// FAR=NOMINAL, MID=YIELD, NEAR=CREEP, or STOP for an explicit emergency.
+// The selected action is evaluated once over the full horizon for trend
+// diagnostics, but a remaining conflict does not reject that action.
 PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const std::vector<PotentialConflictZone>& potential_zones,
     const PairInteractionResult& nominal_baseline,
     const MapParam& map_param, const MultiVehicleConfig& config,
-    double prediction_horizon, int preferred_winner_id);
+    double prediction_horizon, int preferred_winner_id,
+    bool emergency_stop = false);
 
 // Conservative boundary for deciding whether a new conflict is still a
 // distant speed-shaping problem. It uses the legacy 1 cm stop line plus the

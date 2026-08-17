@@ -129,7 +129,7 @@ int main() {
     }
     const std::vector<PeriodTarget> far_targets = captureTargets(far);
     const auto far_decision = far_engine.lastRollingDynamicDecision();
-    const auto mid_before = far_engine.dynamicSpeedMetrics().mid_interventions;
+    const auto mid_before = far_engine.dynamicSpeedMetrics().mid_decisions;
     bool observed_mid_state = false;
     double observed_mid_t = -1.0;
     for (int frame = 0; frame < 20; ++frame) {
@@ -159,7 +159,7 @@ int main() {
                         map_param, config, 0.1);
     }
     if (!observed_mid_state ||
-        far_engine.dynamicSpeedMetrics().mid_interventions != mid_before) {
+        far_engine.dynamicSpeedMetrics().mid_decisions != mid_before) {
         return fail("reuse period did not exercise a skipped MID decision");
     }
     const auto refresh_baseline = far_engine.detectPairInteraction(
@@ -203,19 +203,22 @@ int main() {
                         map_param, config, 0.1);
     }
 
-    // Candidate validation remains a complete 15 s check: merely delaying a
-    // conflict beyond the 2 s execution prefix is not CLEAR.
+    // The one selected action is still diagnosed over the complete 15 s.
+    // A conflict remaining beyond 2 s is recorded but the rolling action is
+    // accepted instead of triggering a second candidate in this period.
     bool found_delayed_candidate = false;
     double delayed_candidate_t = -1.0;
-    for (double approach_a = 0.3;
-         approach_a <= 2.0 && !found_delayed_candidate;
-         approach_a += 0.05) {
-        for (double approach_b = approach_a + 0.05;
-             approach_b <= approach_a + 0.8; approach_b += 0.05) {
+    for (double speed_a : {0.0, 0.2, 0.4, 0.6}) {
+      for (double speed_b : {0.0, 0.2, 0.4, 0.6}) {
+       for (double approach_a = 0.5;
+            approach_a <= 4.0 && !found_delayed_candidate;
+            approach_a += 0.1) {
+        for (double approach_b = 0.5;
+             approach_b <= 4.0; approach_b += 0.1) {
             VehicleAgent candidate_a = crossingVehicle(
-                0, approach_a, false);
+                0, approach_a, false, speed_a);
             VehicleAgent candidate_b = crossingVehicle(
-                1, approach_b, true);
+                1, approach_b, true, speed_b);
             const std::vector<PotentialConflictZone> candidate_zones{
                 broadZone(candidate_a, candidate_b)};
             const auto candidate_baseline =
@@ -226,22 +229,30 @@ int main() {
                     predictTrajectory(candidate_b, map_param, config,
                                       VehicleAction::NOMINAL, 15.0));
             if (!candidate_baseline.event.valid) continue;
+            if (classifyDynamicInterventionBand(
+                    candidate_baseline.event.first_t, config) !=
+                DynamicInterventionBand::MID) {
+                continue;
+            }
             const auto candidate_result = evaluatePairSpeedCoordination(
                 candidate_a, candidate_b, candidate_zones,
                 candidate_baseline, map_param, config, 15.0, 0);
-            if (!candidate_result.candidates.empty() &&
-                !candidate_result.candidates[0].conflict_free &&
-                candidate_result.candidates[0].first_conflict_t &&
-                *candidate_result.candidates[0].first_conflict_t > 2.0) {
+            if (candidate_result.action_selected &&
+                candidate_result.selected_action_b == VehicleAction::YIELD &&
+                !candidate_result.evaluation.conflict_free &&
+                candidate_result.evaluation.first_conflict_t &&
+                *candidate_result.evaluation.first_conflict_t > 2.0) {
                 found_delayed_candidate = true;
                 delayed_candidate_t =
-                    *candidate_result.candidates[0].first_conflict_t;
+                    *candidate_result.evaluation.first_conflict_t;
                 break;
             }
         }
+       }
+      }
     }
     if (!found_delayed_candidate) {
-        return fail("candidate validation no longer covers the full 15 s");
+        return fail("selected action was not evaluated over the full 15 s");
     }
 
     // Reuse mode still honors an existing reservation and may tighten a
@@ -274,8 +285,8 @@ int main() {
               << refresh_baseline.event.first_t << " new_target="
               << actionName(far[0].requested_action) << "/"
               << actionName(far[1].requested_action) << '\n';
-    std::cout << "[FULL-HORIZON-CANDIDATE] remaining_conflict_t="
-              << delayed_candidate_t << '\n';
+    std::cout << "[FULL-HORIZON-ACTION] remaining_conflict_t="
+              << delayed_candidate_t << " accepted=true\n";
     std::cout << "rolling_decision_timing_test: PASS\n";
     return 0;
 }

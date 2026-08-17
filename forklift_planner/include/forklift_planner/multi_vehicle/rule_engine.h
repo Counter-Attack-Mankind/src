@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <tuple>
@@ -135,6 +136,7 @@ public:
         double x = 0.0;
         double y = 0.0;
         double first_conflict_t = 0.0;
+        std::string create_reason;
         // RViz/debug metadata. These fields never participate in arbitration.
         int raw_zone_index = -1;
         double aabb_min_x = 0.0;
@@ -216,21 +218,31 @@ public:
 
     struct DynamicSpeedMetrics {
         unsigned long long baseline_conflicts = 0;
-        unsigned long long far_deferred = 0;
-        unsigned long long mid_interventions = 0;
-        unsigned long long near_interventions = 0;
-        unsigned long long near_legacy_fallbacks = 0;
-        unsigned long long yield_trials = 0;
-        unsigned long long yield_clear = 0;
-        unsigned long long creep_trials = 0;
-        unsigned long long creep_clear = 0;
-        unsigned long long candidate_search_failed = 0;
-        unsigned long long near_fallbacks = 0;
+        unsigned long long far_decisions = 0;
+        unsigned long long mid_decisions = 0;
+        unsigned long long near_decisions = 0;
+        unsigned long long emergency_stop_decisions = 0;
+        unsigned long long yield_evaluations = 0;
+        unsigned long long yield_conflict_free = 0;
+        unsigned long long yield_delayed = 0;
+        unsigned long long creep_evaluations = 0;
+        unsigned long long creep_conflict_free = 0;
+        unsigned long long creep_delayed = 0;
+        unsigned long long selected_conflict_remaining = 0;
         unsigned long long a1_fallbacks = 0;
         unsigned long long existing_reservation_skips = 0;
         unsigned long long nominal_recoveries = 0;
         unsigned long long reservation_creates = 0;
+        unsigned long long reservation_updates = 0;
         unsigned long long reservation_deletes = 0;
+        unsigned long long reservation_create_ordinary_dynamic = 0;
+        unsigned long long reservation_create_a1 = 0;
+        unsigned long long reservation_create_terminal = 0;
+        unsigned long long reservation_create_already_inside = 0;
+        unsigned long long reservation_create_braking_safety = 0;
+        unsigned long long reservation_create_deadlock = 0;
+        unsigned long long reservation_create_multi_vehicle = 0;
+        unsigned long long reservation_create_other = 0;
     };
     const DynamicSpeedMetrics& dynamicSpeedMetrics() const {
         return dynamic_speed_metrics_;
@@ -241,12 +253,21 @@ public:
             int vehicle_id = -1;
             int path_gen = 0;
             VehicleAction action = VehicleAction::NOMINAL;
+            VehicleAction previous_action = VehicleAction::NOMINAL;
             int blocker_id = -1;
             std::string reason;
         };
         bool valid = false;
+        bool baseline_evaluated = false;
         DynamicInterventionBand band = DynamicInterventionBand::FAR;
         bool legacy_fallback = false;
+        bool emergency_stop = false;
+        VehicleAction selected_action_a = VehicleAction::NOMINAL;
+        VehicleAction selected_action_b = VehicleAction::NOMINAL;
+        std::optional<double> baseline_first_t;
+        std::optional<double> after_action_first_t;
+        std::optional<double> conflict_delay;
+        bool after_action_conflict_free = false;
         std::vector<Target> targets;
     };
     const RollingDynamicDecision& lastRollingDynamicDecision() const {
