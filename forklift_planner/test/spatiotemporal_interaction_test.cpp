@@ -101,10 +101,26 @@ int main() {
     const PairInteractionResult crossing =
         engine.detectPairInteraction(crossing_a, crossing_b, 12.0);
     if (crossing.potential_zones.empty() || !crossing.event.valid ||
-        crossing.event.associated_zone_index < 0 ||
+        crossing.event.associated_zone_index != -1 ||
+        crossing.type != PairInteractionType::CROSSING ||
         crossing.event.last_t < crossing.event.first_t ||
         crossing.event.timed_overlaps.empty()) {
         return fail("synchronized crossing event was not detected");
+    }
+
+    // Crossing truth is independent of static potential zones.
+    const auto direct_prediction_a = predictTrajectory(
+        crossing_a, map_param, config, VehicleAction::NOMINAL, 12.0);
+    const auto direct_prediction_b = predictTrajectory(
+        crossing_b, map_param, config, VehicleAction::NOMINAL, 12.0);
+    const PairInteractionResult zone_free_crossing =
+        detectPairInteractionFromPredictions(
+            crossing_a, crossing_b, {}, direct_prediction_a,
+            direct_prediction_b);
+    if (!zone_free_crossing.event.valid ||
+        zone_free_crossing.event.associated_zone_index != -1 ||
+        zone_free_crossing.event.timed_overlaps.empty()) {
+        return fail("zone-free synchronized crossing was not detected");
     }
 
     // 4. Multiple separated overlap periods return the first contiguous one.
@@ -131,6 +147,43 @@ int main() {
         first_only.event.timed_overlaps.size() != 1 ||
         first_only.event.associated_zone_index != 0) {
         return fail("detector did not retain only the first overlap event");
+    }
+
+    // 4b. Opposing conflict is confirmed by SharedSegment occupancy before a
+    // physical OBB overlap is required.
+    SharedSegment shared;
+    shared.valid = true;
+    shared.s_a_enter = 1.0;
+    shared.s_a_exit = 2.0;
+    shared.s_b_enter = 1.0;
+    shared.s_b_exit = 2.0;
+    shared.direction_dot = -1.0;
+    const std::vector<PredictedKinematicSample> occupancy_a{
+        sample(0.0, 0.0, -2.0, 0.0), sample(1.0, 1.0, -1.0, 0.0),
+        sample(2.0, 1.5, -0.5, 0.0), sample(3.0, 2.1, 0.1, 0.0)};
+    const std::vector<PredictedKinematicSample> occupancy_b{
+        sample(0.0, 0.0, 2.0, 0.0), sample(1.5, 1.0, 1.0, 0.0),
+        sample(2.5, 1.5, 0.5, 0.0), sample(3.5, 2.1, -0.1, 0.0)};
+    const PairInteractionResult occupancy_conflict =
+        detectSharedSegmentInteraction(
+            crossing_a, crossing_b, shared, occupancy_a, occupancy_b,
+            0.2, crossing_a.id);
+    if (!occupancy_conflict.event.valid ||
+        occupancy_conflict.type != PairInteractionType::OPPOSING ||
+        !near(occupancy_conflict.occupancy_a.t_enter, 1.0) ||
+        !near(occupancy_conflict.occupancy_a.t_exit, 3.0) ||
+        !near(occupancy_conflict.occupancy_b.t_enter, 1.5)) {
+        return fail("SharedSegment occupancy conflict was not detected");
+    }
+    const std::vector<PredictedKinematicSample> delayed_b{
+        sample(0.0, 0.0, 2.0, 0.0), sample(3.5, 0.9, 1.1, 0.0),
+        sample(4.0, 1.0, 1.0, 0.0), sample(5.0, 2.1, -0.1, 0.0)};
+    const PairInteractionResult occupancy_clear =
+        detectSharedSegmentInteraction(
+            crossing_a, crossing_b, shared, occupancy_a, delayed_b,
+            0.2, crossing_a.id);
+    if (occupancy_clear.event.valid) {
+        return fail("safe SharedSegment clearance was reported as conflict");
     }
 
     // 5. Baseline prediction accelerates from a low current speed toward the

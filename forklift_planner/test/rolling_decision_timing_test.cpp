@@ -203,9 +203,8 @@ int main() {
                         map_param, config, 0.1);
     }
 
-    // The one selected action is still diagnosed over the complete 15 s.
-    // A conflict remaining beyond 2 s is recorded but the rolling action is
-    // accepted instead of triggering a second candidate in this period.
+    // Candidate validation still covers the complete 15 s. A MID candidate
+    // that remains unsafe must escalate inside the same rolling decision.
     bool found_delayed_candidate = false;
     double delayed_candidate_t = -1.0;
     for (double speed_a : {0.0, 0.2, 0.4, 0.6}) {
@@ -238,13 +237,10 @@ int main() {
                 candidate_a, candidate_b, candidate_zones,
                 candidate_baseline, map_param, config, 15.0, 0);
             if (candidate_result.action_selected &&
-                candidate_result.selected_action_b == VehicleAction::YIELD &&
-                !candidate_result.evaluation.conflict_free &&
-                candidate_result.evaluation.first_conflict_t &&
-                *candidate_result.evaluation.first_conflict_t > 2.0) {
+                candidate_result.selected_action_b != VehicleAction::YIELD &&
+                candidate_result.evaluation.conflict_free) {
                 found_delayed_candidate = true;
-                delayed_candidate_t =
-                    *candidate_result.evaluation.first_conflict_t;
+                delayed_candidate_t = candidate_baseline.event.first_t;
                 break;
             }
         }
@@ -252,7 +248,7 @@ int main() {
       }
     }
     if (!found_delayed_candidate) {
-        return fail("selected action was not evaluated over the full 15 s");
+        return fail("unsafe MID action did not escalate over full horizon");
     }
 
     // Reproduce the stage-3.1 contamination shape: frame 0 selects a normal
@@ -320,8 +316,8 @@ int main() {
               << refresh_baseline.event.first_t << " new_target="
               << actionName(far[0].requested_action) << "/"
               << actionName(far[1].requested_action) << '\n';
-    std::cout << "[FULL-HORIZON-ACTION] remaining_conflict_t="
-              << delayed_candidate_t << " accepted=true\n";
+    std::cout << "[FULL-HORIZON-ACTION] baseline_conflict_t="
+              << delayed_candidate_t << " escalated_clear=true\n";
     std::cout << "rolling_decision_timing_test: PASS\n";
     return 0;
 }

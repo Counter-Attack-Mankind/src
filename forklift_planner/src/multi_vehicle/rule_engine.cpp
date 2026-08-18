@@ -783,51 +783,6 @@ std::vector<ConflictMarker> RuleEngine::conflictResourceMarkers(
                     static_cast<int>(zone_index),
                     ConflictMarkerKind::POTENTIAL_CONFLICT_ZONE, -1, -1));
             }
-
-            const std::pair<int, int> key{std::min(a.id, b.id),
-                                          std::max(a.id, b.id)};
-            const auto reservation = conflict_reservations_.find(key);
-            if (reservation == conflict_reservations_.end()) continue;
-            const ConflictReservation& r = reservation->second;
-            const bool a_is_lo = a.id == key.first;
-            if (r.gen_lo != (a_is_lo ? a.path_gen : b.path_gen) ||
-                r.gen_hi != (a_is_lo ? b.path_gen : a.path_gen)) {
-                continue;
-            }
-            ConflictZone reserved_zone;
-            reserved_zone.s_self_enter = a_is_lo ? r.enter_lo : r.enter_hi;
-            reserved_zone.s_self_exit = a_is_lo ? r.exit_lo : r.exit_hi;
-            reserved_zone.s_other_enter = a_is_lo ? r.enter_hi : r.enter_lo;
-            reserved_zone.s_other_exit = a_is_lo ? r.exit_hi : r.exit_lo;
-            reserved_zone.x = r.x;
-            reserved_zone.y = r.y;
-            reserved_zone.raw_index = r.raw_zone_index;
-            reserved_zone.aabb_min_x = r.aabb_min_x;
-            reserved_zone.aabb_min_y = r.aabb_min_y;
-            reserved_zone.aabb_max_x = r.aabb_max_x;
-            reserved_zone.aabb_max_y = r.aabb_max_y;
-            reserved_zone.aabb_valid = r.aabb_valid;
-            int reserved_zone_index = -1;
-            for (size_t zone_index = 0; zone_index < zones.size();
-                 ++zone_index) {
-                const ConflictZone& zone = zones[zone_index];
-                if (std::abs(zone.s_self_enter -
-                             reserved_zone.s_self_enter) <= 1e-9 &&
-                    std::abs(zone.s_self_exit -
-                             reserved_zone.s_self_exit) <= 1e-9 &&
-                    std::abs(zone.s_other_enter -
-                             reserved_zone.s_other_enter) <= 1e-9 &&
-                    std::abs(zone.s_other_exit -
-                             reserved_zone.s_other_exit) <= 1e-9) {
-                    reserved_zone_index = static_cast<int>(zone_index);
-                    break;
-                }
-            }
-            const int waiter_id = r.owner_id == a.id ? b.id : a.id;
-            markers.push_back(makeMarker(
-                a, b, reserved_zone, reserved_zone_index,
-                ConflictMarkerKind::CONFLICT_RESERVATION,
-                r.owner_id, waiter_id));
         }
     }
     return markers;
@@ -839,7 +794,11 @@ void RuleEngine::recordConflictZones(
     double first_conflict_t, int follower_id, int leader_id,
     double following_gap, VehicleAction following_action,
     int holder_id, int waiter_id,
-    const std::vector<ConflictMarker::TimedOverlap>& timed_overlaps) {
+    const std::vector<ConflictMarker::TimedOverlap>& timed_overlaps,
+    PairInteractionType interaction_type,
+    const OccupancyInterval& occupancy_a,
+    const OccupancyInterval& occupancy_b,
+    double last_conflict_t) {
     constexpr double kDisplayStep = 0.025;
     const double following_pad =
         std::max(0.03, 0.5 * mp_.vehicle_width +
@@ -871,7 +830,13 @@ void RuleEngine::recordConflictZones(
             y_max = std::max(y_max, p.y);
         };
 
-        if (!timed_overlaps.empty()) {
+        if (interaction_type == PairInteractionType::OPPOSING &&
+            z.aabb_valid) {
+            x_min = z.aabb_min_x;
+            y_min = z.aabb_min_y;
+            x_max = z.aabb_max_x;
+            y_max = z.aabb_max_y;
+        } else if (!timed_overlaps.empty()) {
             for (const ConflictMarker::TimedOverlap& overlap : timed_overlaps) {
                 for (const ConflictMarker::Point& p : overlap.polygon) {
                     x_min = std::min(x_min, p.x);
@@ -918,6 +883,9 @@ void RuleEngine::recordConflictZones(
         marker.waiter_id = waiter_id;
         marker.following_gap = following_gap;
         marker.following_action = following_action;
+        marker.interaction_type = interaction_type;
+        marker.occupancy_a = occupancy_a;
+        marker.occupancy_b = occupancy_b;
         marker.timed_overlaps = timed_overlaps;
         if (follower_id >= 0 && leader_id >= 0) {
             const RoughWp follower_pose = self.track.poseAtS(self.path_s);
@@ -929,6 +897,8 @@ void RuleEngine::recordConflictZones(
         }
         marker.kind = kind;
         marker.t = first_conflict_t;
+        marker.last_t = last_conflict_t >= 0.0
+            ? last_conflict_t : first_conflict_t;
         conflicts_.push_back(marker);
     }
 }
@@ -1219,8 +1189,12 @@ PairInteractionResult RuleEngine::detectPairInteraction(
     const auto prediction_b =
         predictTrajectory(b, mp_, cfg_, VehicleAction::NOMINAL,
                           prediction_horizon);
-    return detectPairInteractionFromPredictions(
-        a, b, zones, prediction_a, prediction_b);
+    PairInteractionResult result = detectPairInteractionFromPredictions(
+        a, b, {}, prediction_a, prediction_b);
+    // Static path geometry remains diagnostic only for this public query; it
+    // is no longer a gate or identity source for a crossing TimedConflict.
+    result.potential_zones = zones;
+    return result;
 }
 
 void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
@@ -1228,6 +1202,8 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                                           double prediction_horizon,
                                           bool reuse_ordinary_coordination) {
     pairwise_managed_pairs_.clear();
+    ordinary_dynamic_pairs_.clear();
+    following_pairs_.clear();
     // Predict each vehicle once. Pair detection below is pure and consumes
     // these shared samples without changing coordination state.
     const double horizon =
@@ -1413,6 +1389,87 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         return owner->id;
     };
 
+    auto motionHeadingAt = [](const VehicleAgent& v, double s) {
+        constexpr double kPi = 3.14159265358979323846;
+        double heading = v.track.poseAtS(s).theta;
+        if (v.track.typeAtS(s) == WpType::REVERSE) heading += kPi;
+        return heading;
+    };
+    auto sameDirectionLeader = [&](const VehicleAgent& a,
+                                   const VehicleAgent& b) {
+        const RoughWp pose_a = a.track.poseAtS(a.path_s);
+        const RoughWp pose_b = b.track.poseAtS(b.path_s);
+        const double heading_a = motionHeadingAt(a, a.path_s);
+        const double heading_b = motionHeadingAt(b, b.path_s);
+        const double dot = std::cos(heading_a - heading_b);
+        if (dot <= 0.70) return -1;
+        const double dx = pose_b.x - pose_a.x;
+        const double dy = pose_b.y - pose_a.y;
+        const double lateral = std::abs(
+            -dx * std::sin(heading_a) + dy * std::cos(heading_a));
+        if (lateral > mp_.vehicle_width) return -1;
+        const double longitudinal =
+            dx * std::cos(heading_a) + dy * std::sin(heading_a);
+        if (std::abs(longitudinal) <= 1e-6) return -1;
+        return longitudinal > 0.0 ? b.id : a.id;
+    };
+    auto eventZone = [&](const PairInteractionResult& interaction,
+                         const std::vector<PredictedKinematicSample>& pa,
+                         const std::vector<PredictedKinematicSample>& pb) {
+        ConflictZone zone;
+        if (interaction.type == PairInteractionType::OPPOSING &&
+            interaction.shared_segment.valid) {
+            const SharedSegment& segment = interaction.shared_segment;
+            zone.s_self_enter = segment.s_a_enter;
+            zone.s_self_exit = segment.s_a_exit;
+            zone.s_other_enter = segment.s_b_enter;
+            zone.s_other_exit = segment.s_b_exit;
+            zone.aabb_min_x = segment.aabb_min_x;
+            zone.aabb_min_y = segment.aabb_min_y;
+            zone.aabb_max_x = segment.aabb_max_x;
+            zone.aabb_max_y = segment.aabb_max_y;
+            zone.aabb_valid = segment.aabb_valid;
+        } else {
+            auto sampleAt = [](const auto& prediction, double time)
+                -> const PredictedKinematicSample& {
+                auto it = std::lower_bound(
+                    prediction.begin(), prediction.end(), time,
+                    [](const PredictedKinematicSample& sample, double value) {
+                        return sample.t < value;
+                    });
+                return it == prediction.end() ? prediction.back() : *it;
+            };
+            const auto& first_a = sampleAt(pa, interaction.event.first_t);
+            const auto& last_a = sampleAt(pa, interaction.event.last_t);
+            const auto& first_b = sampleAt(pb, interaction.event.first_t);
+            const auto& last_b = sampleAt(pb, interaction.event.last_t);
+            zone.s_self_enter = first_a.s;
+            zone.s_self_exit = last_a.s;
+            zone.s_other_enter = first_b.s;
+            zone.s_other_exit = last_b.s;
+        }
+        for (const TimedOverlapGeometry& overlap :
+             interaction.event.timed_overlaps) {
+            for (const InteractionPoint& point : overlap.polygon) {
+                if (!zone.aabb_valid) {
+                    zone.aabb_min_x = zone.aabb_max_x = point.x;
+                    zone.aabb_min_y = zone.aabb_max_y = point.y;
+                    zone.aabb_valid = true;
+                } else {
+                    zone.aabb_min_x = std::min(zone.aabb_min_x, point.x);
+                    zone.aabb_min_y = std::min(zone.aabb_min_y, point.y);
+                    zone.aabb_max_x = std::max(zone.aabb_max_x, point.x);
+                    zone.aabb_max_y = std::max(zone.aabb_max_y, point.y);
+                }
+            }
+        }
+        if (zone.aabb_valid) {
+            zone.x = 0.5 * (zone.aabb_min_x + zone.aabb_max_x);
+            zone.y = 0.5 * (zone.aabb_min_y + zone.aabb_max_y);
+        }
+        return zone;
+    };
+
     for (size_t i = 0; i < vehicles.size(); ++i) {
         VehicleAgent& a = vehicles[i];
         if (!a.active() || predictions[i].empty()) continue;
@@ -1424,20 +1481,11 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                                           std::max(a.id, b.id)};
             const bool a_is_lo = a.id == key.first;
             const std::vector<ConflictZone> zones = findConflictZones(a, b);
-            if (zones.empty()) {
-                logNominalRecovery(key);
-                const auto old = conflict_reservations_.find(key);
-                if (old != conflict_reservations_.end()) {
-                    logConflictReservation(coord_log_sink_, key, "delete",
-                                           old->second);
-                    ++dynamic_speed_metrics_.reservation_deletes;
-                    conflict_reservations_.erase(old);
-                }
-                continue;
-            }
-            const PairInteractionResult interaction =
+            // Crossing truth is generated directly from synchronized OBBs.
+            // Static path geometry is intentionally absent from this call.
+            const PairInteractionResult direct_interaction =
                 detectPairInteractionFromPredictions(
-                    a, b, zones, predictions[i], predictions[j]);
+                    a, b, {}, predictions[i], predictions[j]);
 
             // Honor the previously selected local event, not every later
             // crossing of the same pair of complete paths.
@@ -1499,7 +1547,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 } else {
                     const std::vector<ConflictMarker::TimedOverlap>
                         reserved_overlaps = decimateTimedOverlaps(
-                            interaction.event.timed_overlaps);
+                            direct_interaction.event.timed_overlaps);
                     pairwise_managed_pairs_.insert(key);
                     const bool owner_inside =
                         insideInterval(owner, owner_enter, owner_exit);
@@ -1540,6 +1588,94 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 }
             }
 
+            const bool a_a1_departure =
+                a.a1_departure_committed &&
+                a.path_s < a.a1_departure_priority_until_s - 1e-9;
+            const bool b_a1_departure =
+                b.a1_departure_committed &&
+                b.path_s < b.a1_departure_priority_until_s - 1e-9;
+            const bool future_a1_pair =
+                future_a1_commitment_.valid() &&
+                ((a.id == future_a1_commitment_.owner_id &&
+                  a.path_gen == future_a1_commitment_.owner_path_gen) ||
+                 (b.id == future_a1_commitment_.owner_id &&
+                  b.path_gen == future_a1_commitment_.owner_path_gen));
+            int departure_cluster_owner =
+                departureClusterOwnerForPair(a, b);
+            int future_owner = futureA1OwnerForPair(a, b);
+            const bool a1_related =
+                departure_cluster_commitments_.count(key) != 0 ||
+                future_a1_pair || a_a1_departure || b_a1_departure ||
+                departure_cluster_owner >= 0 || future_owner >= 0;
+            const bool ordinary = !a1_related;
+
+            PairInteractionResult interaction;
+            int same_direction_leader = -1;
+            if (a1_related) {
+                // A1 is the only remaining consumer of the legacy fixed-zone
+                // association and reservation lifecycle.
+                interaction = detectPairInteractionFromPredictions(
+                    a, b, zones, predictions[i], predictions[j]);
+            } else {
+                interaction = direct_interaction;
+                same_direction_leader = sameDirectionLeader(a, b);
+                if (same_direction_leader >= 0 && interaction.event.valid) {
+                    interaction.type = PairInteractionType::SAME_DIRECTION;
+                    following_pairs_.insert(key);
+                } else if (same_direction_leader < 0) {
+                    // A SharedSegment is fixed path geometry, but opposing is
+                    // classified from real travel tangents (including reverse)
+                    // and conflict is an occupancy-time violation.
+                    const VehicleAgent& lo = a_is_lo ? a : b;
+                    const VehicleAgent& hi = a_is_lo ? b : a;
+                    const auto& canonical = conflictBlocksCanonical(lo, hi);
+                    const double clearance_time = std::max(
+                        cfg_.prediction_step,
+                        cfg_.conflict_margin /
+                            std::max(1e-6, cfg_.nominal_speed));
+                    PairInteractionResult earliest_opposing;
+                    for (const ConflictZone& source : canonical) {
+                        SharedSegment segment;
+                        segment.valid = true;
+                        segment.s_a_enter = a_is_lo
+                            ? source.s_self_enter : source.s_other_enter;
+                        segment.s_a_exit = a_is_lo
+                            ? source.s_self_exit : source.s_other_exit;
+                        segment.s_b_enter = a_is_lo
+                            ? source.s_other_enter : source.s_self_enter;
+                        segment.s_b_exit = a_is_lo
+                            ? source.s_other_exit : source.s_self_exit;
+                        const double heading_a = motionHeadingAt(
+                            a, 0.5 * (segment.s_a_enter + segment.s_a_exit));
+                        const double heading_b = motionHeadingAt(
+                            b, 0.5 * (segment.s_b_enter + segment.s_b_exit));
+                        segment.direction_dot =
+                            std::cos(heading_a - heading_b);
+                        // -0.5 is the existing head-on threshold used by the
+                        // disabled legacy reverse diagnostic.
+                        if (segment.direction_dot >= -0.5) continue;
+                        segment.aabb_min_x = source.aabb_min_x;
+                        segment.aabb_min_y = source.aabb_min_y;
+                        segment.aabb_max_x = source.aabb_max_x;
+                        segment.aabb_max_y = source.aabb_max_y;
+                        segment.aabb_valid = source.aabb_valid;
+                        PairInteractionResult candidate =
+                            detectSharedSegmentInteraction(
+                                a, b, segment, predictions[i], predictions[j],
+                                clearance_time);
+                        if (candidate.event.valid &&
+                            (!earliest_opposing.event.valid ||
+                             candidate.event.first_t <
+                                 earliest_opposing.event.first_t)) {
+                            earliest_opposing = std::move(candidate);
+                        }
+                    }
+                    if (earliest_opposing.event.valid) {
+                        interaction = std::move(earliest_opposing);
+                    }
+                }
+            }
+
             const TimedConflictEvent& event = interaction.event;
             if (!event.valid) {
                 if (dynamic_speed_enabled) {
@@ -1550,53 +1686,26 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             }
 
             pairwise_managed_pairs_.insert(key);
+            if (ordinary) ordinary_dynamic_pairs_.insert(key);
 
-            const ConflictZone& zone =
-                zones[static_cast<size_t>(event.associated_zone_index)];
+            ConflictZone zone;
+            if (a1_related) {
+                if (event.associated_zone_index < 0 ||
+                    static_cast<size_t>(event.associated_zone_index) >=
+                        zones.size()) {
+                    continue;
+                }
+                zone = zones[static_cast<size_t>(
+                    event.associated_zone_index)];
+            } else {
+                zone = eventZone(interaction, predictions[i], predictions[j]);
+            }
             const bool a_inside =
                 insideInterval(a, zone.s_self_enter, zone.s_self_exit);
             const bool b_inside =
                 insideInterval(b, zone.s_other_enter, zone.s_other_exit);
-            bool a_inside_any_zone = false;
-            bool b_inside_any_zone = false;
-            for (const ConflictZone& candidate_zone : zones) {
-                a_inside_any_zone = a_inside_any_zone || insideInterval(
-                    a, candidate_zone.s_self_enter,
-                    candidate_zone.s_self_exit);
-                b_inside_any_zone = b_inside_any_zone || insideInterval(
-                    b, candidate_zone.s_other_enter,
-                    candidate_zone.s_other_exit);
-            }
-            int departure_cluster_owner = -1;
-            int future_owner = -1;
-            const bool a_a1_departure =
-                a.a1_departure_committed &&
-                a.path_s < a.a1_departure_priority_until_s - 1e-9;
-            const bool b_a1_departure =
-                b.a1_departure_committed &&
-                b.path_s < b.a1_departure_priority_until_s - 1e-9;
-            if (!a_inside && !b_inside) {
-                departure_cluster_owner =
-                    departureClusterOwnerForPair(a, b);
-                future_owner = futureA1OwnerForPair(a, b);
-            }
-            const bool future_a1_pair =
-                future_a1_commitment_.valid() &&
-                ((a.id == future_a1_commitment_.owner_id &&
-                  a.path_gen == future_a1_commitment_.owner_path_gen) ||
-                 (b.id == future_a1_commitment_.owner_id &&
-                  b.path_gen == future_a1_commitment_.owner_path_gen));
-            const bool a1_related =
-                departure_cluster_commitments_.count(key) != 0 ||
-                future_a1_pair || a_a1_departure || b_a1_departure ||
-                departure_cluster_owner >= 0 || future_owner >= 0;
             const bool a_terminal = terminalDocking(a);
             const bool b_terminal = terminalDocking(b);
-            // A1 service is the only remaining reservation-owned pair type.
-            // Already-inside, terminal, deadlock-breaker and braking state are
-            // urgency/safety inputs for ordinary-road motion actions; they no
-            // longer transfer the pair to legacy resource ownership.
-            const bool ordinary = !a1_related;
 
             // The rolling-period target was selected from the true state at
             // frame 0.  Future sandbox states may still run reservation/A1 and
@@ -1608,20 +1717,49 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     ConflictMarkerKind::CROSSING_OR_OPPOSING,
                     event.first_t, -1, -1, 0.0,
                     VehicleAction::NOMINAL, -1, -1,
-                    decimateTimedOverlaps(event.timed_overlaps));
+                    decimateTimedOverlaps(event.timed_overlaps),
+                    interaction.type, interaction.occupancy_a,
+                    interaction.occupancy_b, event.last_t);
                 continue;
             }
 
             bool emergency_stop_required = false;
             if (dynamic_speed_enabled) {
                 ++dynamic_speed_metrics_.baseline_conflicts;
-                int preferred_winner = -1;
                 if (ordinary) {
-                    // Physical progress affects only this rolling-period
-                    // motion decision; it is not persisted as ownership.
-                    if (a_inside_any_zone != b_inside_any_zone) {
-                        preferred_winner = a_inside_any_zone ? a.id : b.id;
-                    } else if (a_inside && b_inside) {
+                    if (interaction.type == PairInteractionType::OPPOSING) {
+                        ++dynamic_speed_metrics_.opposing_conflicts;
+                    } else if (interaction.type ==
+                               PairInteractionType::SAME_DIRECTION) {
+                        ++dynamic_speed_metrics_.same_direction_conflicts;
+                    } else {
+                        ++dynamic_speed_metrics_.crossing_conflicts;
+                    }
+                }
+                int preferred_winner = -1;
+                double a_only_clear_t = -1.0;
+                double b_only_clear_t = -1.0;
+                if (ordinary) {
+                    if (interaction.type ==
+                            PairInteractionType::SAME_DIRECTION &&
+                        same_direction_leader >= 0) {
+                        // Stable longitudinal order is authoritative: the
+                        // physical front vehicle is never told to yield to its
+                        // follower.
+                        preferred_winner = same_direction_leader;
+                    } else if (interaction.type ==
+                                   PairInteractionType::OPPOSING &&
+                               interaction.occupancy_a.actually_inside !=
+                                   interaction.occupancy_b.actually_inside) {
+                        // Actual occupancy dominates a fresh prediction until
+                        // the complete OBB-derived shared extent is cleared.
+                        preferred_winner =
+                            interaction.occupancy_a.actually_inside
+                                ? a.id : b.id;
+                    } else if (interaction.type ==
+                                   PairInteractionType::OPPOSING &&
+                               interaction.occupancy_a.actually_inside &&
+                               interaction.occupancy_b.actually_inside) {
                         const double a_clear = timeToReachS(
                             a, VehicleAction::NOMINAL, zone.s_self_exit);
                         const double b_clear = timeToReachS(
@@ -1629,6 +1767,36 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         preferred_winner =
                             std::abs(a_clear - b_clear) > cfg_.prediction_step
                                 ? (a_clear < b_clear ? a.id : b.id)
+                                : priorityWinner(a, b);
+                    } else if (event.first_t <= cfg_.prediction_step + 1e-9) {
+                        // For an already active crossing, compare the two
+                        // physically executable ways to clear the current
+                        // overlap: A moves while B brakes, and vice versa.
+                        // This is a current-cycle feasibility comparison, not
+                        // remembered ownership or a second coordinator.
+                        const auto a_nominal = predictTrajectory(
+                            a, mp_, cfg_, VehicleAction::NOMINAL, horizon);
+                        const auto a_stop = predictTrajectory(
+                            a, mp_, cfg_, VehicleAction::STOP, horizon);
+                        const auto b_nominal = predictTrajectory(
+                            b, mp_, cfg_, VehicleAction::NOMINAL, horizon);
+                        const auto b_stop = predictTrajectory(
+                            b, mp_, cfg_, VehicleAction::STOP, horizon);
+                        const PairInteractionResult a_moves =
+                            detectPairInteractionFromPredictions(
+                                a, b, {}, a_nominal, b_stop);
+                        const PairInteractionResult b_moves =
+                            detectPairInteractionFromPredictions(
+                                a, b, {}, a_stop, b_nominal);
+                        a_only_clear_t = a_moves.event.valid
+                            ? a_moves.event.last_t : 0.0;
+                        b_only_clear_t = b_moves.event.valid
+                            ? b_moves.event.last_t : 0.0;
+                        preferred_winner =
+                            std::abs(a_only_clear_t - b_only_clear_t) >
+                                    cfg_.prediction_step
+                                ? (a_only_clear_t < b_only_clear_t ? a.id
+                                                                  : b.id)
                                 : priorityWinner(a, b);
                     } else {
                         preferred_winner = priorityWinner(a, b);
@@ -1651,14 +1819,16 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 PairSpeedCoordinationResult speed_result;
                 if (ordinary) {
                     speed_result = evaluatePairSpeedCoordination(
-                        a, b, zones, interaction, mp_, cfg_, horizon,
+                        a, b, std::vector<ConflictZone>{}, interaction,
+                        mp_, cfg_, horizon,
                         preferred_winner, emergency_stop_required);
+                    preferred_winner = speed_result.selected_winner_id;
                     last_rolling_dynamic_decision_.valid = true;
                     last_rolling_dynamic_decision_.baseline_evaluated = true;
                     last_rolling_dynamic_decision_.band = intervention_band;
                     last_rolling_dynamic_decision_.legacy_fallback = false;
                     last_rolling_dynamic_decision_.emergency_stop =
-                        emergency_stop_required;
+                        speed_result.emergency_stop;
                     last_rolling_dynamic_decision_.selected_action_a =
                         speed_result.selected_action_a;
                     last_rolling_dynamic_decision_.selected_action_b =
@@ -1680,14 +1850,16 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     } else {
                         ++dynamic_speed_metrics_.near_decisions;
                     }
-                    if (emergency_stop_required) {
+                    if (speed_result.emergency_stop) {
                         ++dynamic_speed_metrics_.emergency_stop_decisions;
                     }
 
                     const VehicleAction loser_action =
                         preferred_winner == a.id
                             ? speed_result.selected_action_b
-                            : speed_result.selected_action_a;
+                            : preferred_winner == b.id
+                                ? speed_result.selected_action_a
+                                : VehicleAction::STOP;
                     if (loser_action == VehicleAction::YIELD) {
                         ++dynamic_speed_metrics_.yield_evaluations;
                         if (speed_result.evaluation.conflict_free) {
@@ -1766,6 +1938,21 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                              << "[DYN-SPEED] pair=V" << key.first << "-V"
                              << key.second
                              << " baseline_first_t=" << event.first_t
+                             << " interaction="
+                             << (interaction.type ==
+                                         PairInteractionType::OPPOSING
+                                     ? "OPPOSING"
+                                     : interaction.type ==
+                                               PairInteractionType::SAME_DIRECTION
+                                           ? "SAME_DIRECTION"
+                                           : "CROSSING")
+                             << " winner=V" << preferred_winner
+                             << " s_a=" << a.path_s
+                             << " s_b=" << b.path_s
+                             << " event_exit_a=" << zone.s_self_exit
+                             << " event_exit_b=" << zone.s_other_exit
+                             << " a_only_clear_t=" << a_only_clear_t
+                             << " b_only_clear_t=" << b_only_clear_t
                              << " band="
                              << dynamicInterventionBandName(intervention_band)
                              << " selected="
@@ -1791,11 +1978,26 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
 
                     recordConflictZones(
                         a, b, std::vector<ConflictZone>{zone},
-                        ConflictMarkerKind::CROSSING_OR_OPPOSING,
-                        event.first_t, -1, -1, 0.0,
-                        VehicleAction::NOMINAL, preferred_winner,
+                        interaction.type == PairInteractionType::SAME_DIRECTION
+                            ? ConflictMarkerKind::SAME_DIRECTION
+                            : ConflictMarkerKind::CROSSING_OR_OPPOSING,
+                        event.first_t,
+                        interaction.type == PairInteractionType::SAME_DIRECTION
+                            ? (same_direction_leader == a.id ? b.id : a.id)
+                            : -1,
+                        interaction.type == PairInteractionType::SAME_DIRECTION
+                            ? same_direction_leader : -1,
+                        0.0,
+                        interaction.type == PairInteractionType::SAME_DIRECTION
+                            ? (same_direction_leader == a.id
+                                   ? speed_result.selected_action_b
+                                   : speed_result.selected_action_a)
+                            : VehicleAction::NOMINAL,
+                        preferred_winner,
                         preferred_winner == a.id ? b.id : a.id,
-                        decimateTimedOverlaps(event.timed_overlaps));
+                        decimateTimedOverlaps(event.timed_overlaps),
+                        interaction.type, interaction.occupancy_a,
+                        interaction.occupancy_b, event.last_t);
                     continue;
                 } else {
                     if (a1_related) ++dynamic_speed_metrics_.a1_fallbacks;
@@ -2302,7 +2504,8 @@ void RuleEngine::applyFollowingSuggestions(
     }
 }
 
-void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles) {
+void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles,
+                                         double dt) {
     // 普适前向净空护栏(§11.13.1 出口检查精神 + 补 following/crossing 分类接缝漏洞)。
     // 接缝 bug:近乎同向、向不同库位汇聚的两车,被 pairwise 当跟车跳过、又不满足
     // resolveFollowing 的横向/间距条件 → 两套都没刹 → 后车 NOMINAL 直撞停在路口的前车
@@ -2310,59 +2513,64 @@ void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles) {
     // 兜底:任何车沿自身固定路径在「自己刹车距离 + 车头前伸」内会压上另一辆车的当前
     // 车身,就提前 STOP。不论被哪套逻辑处理这道都在。比硬护栏(0 余量、贴死才停)早刹、
     // 留余量 → 两车干净对停而非重叠 → 破环车 canStepForward 能判出谁可走 → 解开。
-    const double front_ext = mp_.body_front_ext();
     auto bodyAt = [&](const VehicleAgent& v, double s) {
         return makeBody(v.track.poseAtS(s), mp_, 0.0);
     };
-    auto currentS = [&](const VehicleAgent& v) {
-        return (v.mode == VehicleMode::DWELL) ? v.track.length() : v.path_s;
+    auto nextS = [&](const VehicleAgent& v) {
+        if (!v.active()) {
+            return v.mode == VehicleMode::DWELL
+                ? v.track.length() : v.path_s;
+        }
+        const double desired = speedForAction(v.requested_action);
+        double next_speed = std::max(0.0, v.current_speed);
+        if (desired > next_speed) {
+            next_speed = std::min(
+                desired, next_speed + cfg_.max_accel * dt);
+        } else {
+            next_speed = std::max(
+                desired, next_speed - cfg_.max_decel * dt);
+        }
+        return std::min(v.track.length(), v.path_s + next_speed * dt);
     };
     for (VehicleAgent& v : vehicles) {
         if (!v.active()) continue;
         if (v.deadlock_breaker) continue;  // 破环车豁免:它正被授权冲出环
         if (v.requested_action == VehicleAction::STOP) continue;
-        const double v_cur = std::max(0.0, v.current_speed);
-        const double brake_dist =
-            (v_cur * v_cur) / (2.0 * std::max(1e-6, cfg_.max_decel));
         // 前探距离必须足够远,让车「早早停在冲突区外、留出间隙」,而不是冲到贴上才刹
         // (低速时 brake_dist 极小,只算它会一直蹭到接触才停=楔死)。故在刹车距离之外
         // 再加:车头前伸 + 一个固定安全间隙 kStandoff。kStandoff 同时是「干净对停」后
         // 两车之间留出的余量,使破环车 canStepForward 有空间判别谁能动。另设最小前探
         // kMinLook,保证即便停着(brake_dist≈0)也能看到近处已挡在交叉口的车。
-        constexpr double kStandoff = 0.16;  // 停在冲突区外留出的安全间隙
-        constexpr double kMinLook = 0.22;   // 最小前探(覆盖交叉接近段,防停车时漏看)
-        const double look =
-            std::max(brake_dist + kStandoff, kMinLook) + front_ext;
-        const double s_end = std::min(v.track.length(), v.path_s + look);
-        constexpr double kStep = 0.03;
+        const double s_end = nextS(v);
         int block_id = -1;
-        for (double s = v.path_s; s <= s_end + 1e-9 && block_id < 0; s += kStep) {
-            const OBB body = bodyAt(v, std::min(s, s_end));
-            for (const VehicleAgent& o : vehicles) {
-                if (o.id == v.id) continue;
-                if (o.mode == VehicleMode::NEED_TASK || o.track.empty()) continue;
-                if (overlaps(body, bodyAt(o, currentS(o)))) {
-                    block_id = o.id;
-                    break;
-                }
+        const OBB body = bodyAt(v, s_end);
+        for (const VehicleAgent& o : vehicles) {
+            if (o.id == v.id) continue;
+            if (o.mode == VehicleMode::NEED_TASK || o.track.empty()) continue;
+            if (overlaps(body, bodyAt(o, nextS(o)))) {
+                block_id = o.id;
+                break;
             }
         }
         if (block_id >= 0) {
-            applyActionRequest(v, VehicleAction::STOP,
-                               "clear_block_V" + std::to_string(block_id),
-                               block_id);
-            if (v.reason == "clear_block_V" + std::to_string(block_id)) {
-                const VehicleAgent* blocker = nullptr;
-                for (const VehicleAgent& candidate : vehicles) {
-                    if (candidate.id == block_id) {
-                        blocker = &candidate;
-                        break;
-                    }
-                }
-                if (shouldLogA1Decision(v, block_id)) {
-                    logA1Decision(coord_log_sink_, cfg_, v, blocker, block_id);
-                }
+            const std::pair<int, int> key{
+                std::min(v.id, block_id), std::max(v.id, block_id)};
+            const int committed_frames = std::max(
+                1, static_cast<int>(std::ceil(
+                       cfg_.rolling_refresh_period / std::max(1e-6, dt))));
+            const bool executable_frame =
+                debug_log_source_ != "ROLLOUT" ||
+                (debug_log_frame_id_ >= 0 &&
+                 debug_log_frame_id_ < committed_frames);
+            if (executable_frame &&
+                ordinary_dynamic_pairs_.count(key) != 0 &&
+                v.requested_action != VehicleAction::STOP) {
+                ++dynamic_speed_metrics_.duplicate_pair_authority_overrides;
             }
+            applyActionRequest(v, VehicleAction::STOP,
+                               "emergency_next_step_V" +
+                                   std::to_string(block_id),
+                               block_id);
         }
     }
 }
@@ -2841,7 +3049,6 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
         }
     }
 
-    resolveFollowing(vehicles);
     // 深层根治(用户洞察:路径固定→只信精确几何):停用粗粒度资源盒仲裁(路口/车道
     // 令牌),它把"共用一个路口盒"当冲突造成幻象冲突→打架→死锁。改由精确的 pairwise
     // 几何冲突(findConflictZones:沿固定路径采样车身OBB,只标真实重叠弧段)作唯一交叉
@@ -2856,8 +3063,9 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
     enforceFutureA1Admission(vehicles, dt);
     enforceDepartureClusterCommitments(vehicles, dt);
     resolveTargetSlotOccupancy(vehicles);  // slot-mouth queueing (spec 6/7)
-    enforceForwardClearance(vehicles);     // 普适前向净空兜底:堵分类接缝→防十字楔死
-    applyFollowingSuggestions(vehicles);  // lowest-priority hint
+    // Safety validation runs after all coordination/special-resource outputs
+    // and may only reject a physically illegal next control step.
+    enforceForwardClearance(vehicles, dt);
     applyRequestedActions(vehicles, dt);
     if (cfg_.enable_cycle_break) breakDeadlockCycles(vehicles);  // spec 16
 

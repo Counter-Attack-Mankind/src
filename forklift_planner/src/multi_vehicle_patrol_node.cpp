@@ -3784,6 +3784,7 @@ public:
         }
         const auto& dynamic = rule_engine_->dynamicSpeedMetrics();
         ROS_WARN("[BATCH_DYN_SPEED_EVALUATED] baseline_conflicts=%llu "
+                 "crossing=%llu opposing=%llu same_direction=%llu "
                  "far=%llu mid=%llu near=%llu emergency_stop=%llu "
                  "yield_eval=%llu yield_clear=%llu yield_delayed=%llu "
                  "creep_eval=%llu creep_clear=%llu creep_delayed=%llu "
@@ -3793,9 +3794,13 @@ public:
                  "reservation_delete=%llu ordinary_create=%llu "
                  "a1_create=%llu terminal_create=%llu inside_create=%llu "
                  "braking_create=%llu deadlock_create=%llu "
-                 "multi_vehicle_create=%llu other_create=%llu",
-                 dynamic.baseline_conflicts, dynamic.far_decisions,
-                 dynamic.mid_decisions, dynamic.near_decisions,
+                 "multi_vehicle_create=%llu other_create=%llu "
+                 "duplicate_pair_authority=%llu",
+                 dynamic.baseline_conflicts, dynamic.crossing_conflicts,
+                 dynamic.opposing_conflicts,
+                 dynamic.same_direction_conflicts,
+                 dynamic.far_decisions, dynamic.mid_decisions,
+                 dynamic.near_decisions,
                  dynamic.emergency_stop_decisions,
                  dynamic.yield_evaluations,
                  dynamic.yield_conflict_free, dynamic.yield_delayed,
@@ -3815,7 +3820,8 @@ public:
                  dynamic.reservation_create_braking_safety,
                  dynamic.reservation_create_deadlock,
                  dynamic.reservation_create_multi_vehicle,
-                 dynamic.reservation_create_other);
+                 dynamic.reservation_create_other,
+                 dynamic.duplicate_pair_authority_overrides);
         const auto& executed = executed_rolling_metrics_;
         ROS_WARN("[BATCH_DYN_SPEED_EXECUTED] far_periods=%llu "
                  "mid_periods=%llu near_periods=%llu legacy_periods=%llu "

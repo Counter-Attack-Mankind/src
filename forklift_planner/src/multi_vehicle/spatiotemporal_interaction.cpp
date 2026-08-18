@@ -186,7 +186,6 @@ PairInteractionResult detectPairInteractionFromPredictions(
     result.path_gen_a = vehicle_a.path_gen;
     result.path_gen_b = vehicle_b.path_gen;
     result.potential_zones = potential_zones;
-    if (potential_zones.empty()) return result;
 
     const size_t count = std::min(prediction_a.size(), prediction_b.size());
     for (size_t k = 0; k < count; ++k) {
@@ -197,6 +196,7 @@ PairInteractionResult detectPairInteractionFromPredictions(
         }
         if (!result.event.valid) {
             result.event.valid = true;
+            result.type = PairInteractionType::CROSSING;
             result.event.first_t = prediction_a[k].t;
             const double s_a = prediction_a[k].s;
             const double s_b = prediction_b[k].s;
@@ -226,6 +226,100 @@ PairInteractionResult detectPairInteractionFromPredictions(
                                      std::move(polygon)});
         }
     }
+    return result;
+}
+
+OccupancyInterval predictOccupancyInterval(
+    const std::vector<PredictedKinematicSample>& prediction,
+    double segment_enter_s, double segment_exit_s) {
+    OccupancyInterval interval;
+    if (prediction.empty() || segment_exit_s < segment_enter_s) {
+        return interval;
+    }
+    if (prediction.front().s > segment_exit_s + 1e-9) {
+        return interval;
+    }
+
+    const bool initially_inside =
+        prediction.front().s >= segment_enter_s - 1e-9 &&
+        prediction.front().s <= segment_exit_s + 1e-9;
+    interval.actually_inside = initially_inside;
+    bool entered = initially_inside;
+    if (entered) {
+        interval.valid = true;
+        interval.t_enter = 0.0;
+    }
+
+    for (const PredictedKinematicSample& sample : prediction) {
+        if (!entered && sample.s >= segment_enter_s - 1e-9 &&
+            sample.s <= segment_exit_s + 1e-9) {
+            entered = true;
+            interval.valid = true;
+            interval.t_enter = sample.t;
+        }
+        if (entered && sample.s > segment_exit_s + 1e-9) {
+            interval.t_exit = sample.t;
+            return interval;
+        }
+    }
+    if (entered) {
+        interval.t_exit = std::numeric_limits<double>::infinity();
+    }
+    return interval;
+}
+
+PairInteractionResult detectSharedSegmentInteraction(
+    const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
+    const SharedSegment& segment,
+    const std::vector<PredictedKinematicSample>& prediction_a,
+    const std::vector<PredictedKinematicSample>& prediction_b,
+    double clearance_time, int preferred_winner_id) {
+    PairInteractionResult result;
+    result.vehicle_a = vehicle_a.id;
+    result.vehicle_b = vehicle_b.id;
+    result.path_gen_a = vehicle_a.path_gen;
+    result.path_gen_b = vehicle_b.path_gen;
+    result.type = PairInteractionType::OPPOSING;
+    result.shared_segment = segment;
+    if (!segment.valid) return result;
+
+    result.occupancy_a = predictOccupancyInterval(
+        prediction_a, segment.s_a_enter, segment.s_a_exit);
+    result.occupancy_b = predictOccupancyInterval(
+        prediction_b, segment.s_b_enter, segment.s_b_exit);
+    if (!result.occupancy_a.valid || !result.occupancy_b.valid) {
+        return result;
+    }
+
+    const double margin = std::max(0.0, clearance_time);
+    bool violation = false;
+    if (preferred_winner_id == vehicle_a.id) {
+        violation = result.occupancy_b.t_enter <
+            result.occupancy_a.t_exit + margin - 1e-9;
+    } else if (preferred_winner_id == vehicle_b.id) {
+        violation = result.occupancy_a.t_enter <
+            result.occupancy_b.t_exit + margin - 1e-9;
+    } else {
+        violation =
+            result.occupancy_a.t_enter <
+                result.occupancy_b.t_exit + margin - 1e-9 &&
+            result.occupancy_b.t_enter <
+                result.occupancy_a.t_exit + margin - 1e-9;
+    }
+    if (!violation) return result;
+
+    result.event.valid = true;
+    result.event.first_t = std::max(result.occupancy_a.t_enter,
+                                    result.occupancy_b.t_enter);
+    result.event.last_t = std::min(result.occupancy_a.t_exit,
+                                   result.occupancy_b.t_exit);
+
+    // Red geometry remains strictly synchronous physical OBB overlap. The
+    // occupancy violation can legitimately begin before those polygons exist.
+    const PairInteractionResult physical =
+        detectPairInteractionFromPredictions(
+            vehicle_a, vehicle_b, {}, prediction_a, prediction_b);
+    result.event.timed_overlaps = physical.event.timed_overlaps;
     return result;
 }
 

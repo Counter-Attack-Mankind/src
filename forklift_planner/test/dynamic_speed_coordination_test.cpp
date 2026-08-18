@@ -144,14 +144,15 @@ int main() {
         return fail("emergency did not directly select STOP");
     }
 
-    // Find a deterministic MID case where the one selected YIELD action
-    // delays, but does not clear, the full 15 s conflict. It must still be
-    // accepted as this rolling period's action.
-    std::optional<PairSpeedCoordinationResult> delayed_mid;
+    // Find a deterministic MID case where raw YIELD delays but does not clear
+    // the full horizon. Stage 3.2 must escalate that candidate inside the same
+    // coordinator instead of accepting the remaining conflict.
+    std::optional<PairSpeedCoordinationResult> escalated_mid;
+    std::optional<double> raw_yield_delay;
     for (double speed_a : {0.0, 0.2, 0.4, 0.6}) {
       for (double speed_b : {0.0, 0.2, 0.4, 0.6}) {
        for (double approach_a = 0.5;
-            approach_a <= 4.0 && !delayed_mid; approach_a += 0.1) {
+            approach_a <= 4.0 && !escalated_mid; approach_a += 0.1) {
         for (double approach_b = 0.5;
              approach_b <= 4.0; approach_b += 0.1) {
             const VehicleAgent a = crossingVehicle(
@@ -165,22 +166,64 @@ int main() {
                     DynamicInterventionBand::MID) {
                 continue;
             }
-            const auto result = evaluate(a, b, map_param, config);
-            if (result.action_selected &&
-                result.selected_action_b == VehicleAction::YIELD &&
-                !result.evaluation.conflict_free &&
-                result.evaluation.first_conflict_t &&
-                result.evaluation.conflict_delay &&
-                *result.evaluation.conflict_delay > config.prediction_step) {
-                delayed_mid = result;
+            const auto raw_yield = evaluateSelectedAction(
+                a, b, std::vector<PotentialConflictZone>{broadZone(a, b)},
+                map_param, config, 15.0, VehicleAction::NOMINAL,
+                VehicleAction::YIELD, nominal.event.first_t);
+            if (!raw_yield.conflict_free && raw_yield.conflict_delay &&
+                *raw_yield.conflict_delay > config.prediction_step) {
+                const auto result = evaluate(a, b, map_param, config);
+                if (result.action_selected &&
+                    result.selected_action_b != VehicleAction::YIELD &&
+                    (result.evaluation.conflict_free ||
+                     result.selected_action_b == VehicleAction::STOP)) {
+                    escalated_mid = result;
+                    raw_yield_delay = raw_yield.conflict_delay;
+                }
                 break;
             }
         }
        }
       }
     }
-    if (!delayed_mid) {
-        return fail("no delayed-but-remaining MID/YIELD fixture found");
+    if (!escalated_mid || !raw_yield_delay) {
+        return fail("remaining MID/YIELD conflict did not escalate");
+    }
+
+    // A preferred crossing order is not executable when even its STOP loser
+    // candidate still overlaps. The same coordinator must be able to select
+    // the opposite order when that complete-horizon candidate is clear.
+    bool found_safe_order_swap = false;
+    for (double approach_a = 0.20;
+         approach_a <= 1.20 && !found_safe_order_swap;
+         approach_a += 0.05) {
+        for (double approach_b = 0.20;
+             approach_b <= 1.20; approach_b += 0.05) {
+            const VehicleAgent a = crossingVehicle(
+                0, approach_a, false, config.nominal_speed);
+            const VehicleAgent b = crossingVehicle(
+                1, approach_b, true, 0.0);
+            const auto nominal = baseline(a, b, map_param, config, 15.0);
+            if (!nominal.event.valid ||
+                classifyDynamicInterventionBand(nominal.event.first_t,
+                                                config) ==
+                    DynamicInterventionBand::FAR) {
+                continue;
+            }
+            const auto result = evaluatePairSpeedCoordination(
+                a, b,
+                std::vector<PotentialConflictZone>{broadZone(a, b)},
+                nominal, map_param, config, 15.0, a.id, true);
+            if (result.selected_winner_id == b.id &&
+                result.evaluation.conflict_free &&
+                result.reason == "rolling_crossing_order_swap") {
+                found_safe_order_swap = true;
+                break;
+            }
+        }
+    }
+    if (!found_safe_order_swap) {
+        return fail("unsafe preferred crossing order was not replaced");
     }
 
     VehicleAgent low = crossingVehicle(2, 1.0, false, 0.0);
@@ -223,11 +266,12 @@ int main() {
     }
 
     std::cout << "[MID-DELAY] baseline_first_t="
-              << *delayed_mid->original_first_conflict_t
-              << " selected=YIELD after_first_t="
-              << *delayed_mid->evaluation.first_conflict_t
-              << " delay=" << *delayed_mid->evaluation.conflict_delay
-              << " accepted=true\n";
+              << *escalated_mid->original_first_conflict_t
+              << " raw_yield_delay=" << *raw_yield_delay
+              << " escalated_action="
+              << static_cast<int>(escalated_mid->selected_action_b)
+              << " conflict_free="
+              << escalated_mid->evaluation.conflict_free << '\n';
     std::cout << "dynamic_speed_coordination_test: PASS\n";
     return 0;
 }

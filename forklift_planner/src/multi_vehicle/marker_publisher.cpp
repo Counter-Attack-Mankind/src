@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
-#include <map>
 #include <sstream>
 
 #include "forklift_planner/multi_vehicle/footprint.h"
@@ -386,39 +385,11 @@ void MarkerPublisher::addConflictMarkers(
     int same_id = 0;
     int mutual_id = 0;
     int potential_zone_id = 0;
-    struct ZoneSelection {
-        int rank = 0;  // 0=POTENTIAL, 1=TIMED, 2=RESERVED
-        int holder = -1;
-        int waiter = -1;
-    };
-    std::map<int, ZoneSelection> selected;
-    auto selectZone = [&](const ConflictMarker& marker, int rank) {
-        if (marker.raw_zone_index < 0) return;
-        const int id = stableZoneMarkerId(marker);
-        ZoneSelection& state = selected[id];
-        if (rank >= state.rank) {
-            state.rank = rank;
-            state.holder = marker.holder_id;
-            state.waiter = marker.waiter_id;
-        }
-    };
-    for (const ConflictMarker& marker : conflicts) {
-        if (marker.kind == ConflictMarkerKind::CROSSING_OR_OPPOSING) {
-            selectZone(marker, 1);
-        }
-    }
-    for (const ConflictMarker& marker : resource_markers) {
-        if (marker.kind == ConflictMarkerKind::CONFLICT_RESERVATION) {
-            selectZone(marker, 2);
-        }
-    }
 
     std::set<int> current_zone_ids;
     auto addSpatialResource = [&](const ConflictMarker& c, int marker_id) {
         const ros::Time now = ros::Time::now();
         current_zone_ids.insert(marker_id);
-        const ZoneSelection state = selected.count(marker_id)
-            ? selected.at(marker_id) : ZoneSelection{};
         visualization_msgs::Marker geometry;
         geometry.header.frame_id = pp_.frame_id;
         geometry.header.stamp = now;
@@ -449,60 +420,12 @@ void MarkerPublisher::addConflictMarkers(
             deleteMarker(potential_zone_ns, marker_id);
         }
 
-        visualization_msgs::Marker aabb;
-        aabb.header = geometry.header;
-        aabb.ns = zone_aabb_ns;
-        aabb.id = marker_id;
-        aabb.type = visualization_msgs::Marker::LINE_STRIP;
-        aabb.action = visualization_msgs::Marker::ADD;
-        aabb.pose.orientation.w = 1.0;
-        aabb.scale.x = 0.016;
-        aabb.color = state.rank > 0
-            ? rgba(1.00f, 0.10f, 0.08f, 1.0f)
-            : rgba(1.00f, 0.55f, 0.08f, 1.0f);
-        if (c.zone_aabb_valid) {
-            const double x0 = c.x - 0.5 * c.scale_x;
-            const double x1 = c.x + 0.5 * c.scale_x;
-            const double y0 = c.y - 0.5 * c.scale_y;
-            const double y1 = c.y + 0.5 * c.scale_y;
-            aabb.points.push_back(pt3(x0, y0, 0.062));
-            aabb.points.push_back(pt3(x1, y0, 0.062));
-            aabb.points.push_back(pt3(x1, y1, 0.062));
-            aabb.points.push_back(pt3(x0, y1, 0.062));
-            aabb.points.push_back(pt3(x0, y0, 0.062));
-            arr.markers.push_back(aabb);
-        } else {
-            deleteMarker(zone_aabb_ns, marker_id);
-        }
-
-        visualization_msgs::Marker label;
-        label.header = geometry.header;
-        label.ns = potential_zone_label_ns;
-        label.id = marker_id;
-        label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-        label.action = visualization_msgs::Marker::ADD;
-        label.pose.position.x = c.x;
-        label.pose.position.y = c.y;
-        label.pose.position.z = 0.19;
-        label.pose.orientation.w = 1.0;
-        label.scale.z = 0.055;
-        label.color = state.rank > 0
-            ? rgba(1.00f, 0.35f, 0.20f, 1.0f)
-            : rgba(1.00f, 0.72f, 0.20f, 1.0f);
-        std::ostringstream text;
-        text << std::fixed << std::setprecision(3);
-        text << "pair=V" << c.vehicle_a << "/V" << c.vehicle_b
-             << " raw_zone=" << c.raw_zone_index
-             << " active_zone=" << c.active_zone_index
-             << "\nV" << c.vehicle_a << " s=[" << c.s_a_enter << ","
-             << c.s_a_exit << "] V" << c.vehicle_b << " s=["
-             << c.s_b_enter << "," << c.s_b_exit << "]"
-             << "\nstate=" << (state.rank == 2 ? "RESERVED" :
-                                state.rank == 1 ? "TIMED" : "POTENTIAL");
-        if (state.holder >= 0) text << " holder=V" << state.holder;
-        if (state.waiter >= 0) text << " waiter=V" << state.waiter;
-        label.text = text.str();
-        arr.markers.push_back(label);
+        // Stage 3.2: blue polygons are geometry reference only. Static orange
+        // ConflictZone AABBs and resource-style labels are deliberately
+        // removed; active orange geometry is emitted from the current dynamic
+        // interaction below.
+        deleteMarker(zone_aabb_ns, marker_id);
+        deleteMarker(potential_zone_label_ns, marker_id);
     };
 
     std::vector<const ConflictMarker*> all_markers;
@@ -530,7 +453,8 @@ void MarkerPublisher::addConflictMarkers(
         const int marker_id = same_direction ? same_id++ : mutual_id++;
         if (same_direction) {
             deleteMarker(same_ns, marker_id);
-        } else if (c.timed_overlaps.empty()) {
+        } else if (c.timed_overlaps.empty() &&
+                   c.interaction_type != PairInteractionType::OPPOSING) {
             deleteMarker(mutual_ns, marker_id);
             deleteMarker(actual_ns, marker_id);
         }
@@ -544,7 +468,9 @@ void MarkerPublisher::addConflictMarkers(
         m.pose.position.y = c.y;
         m.pose.position.z = 0.018;
         m.pose.orientation.w = 1.0;
-        if (!same_direction && !c.timed_overlaps.empty()) {
+        if (!same_direction &&
+            (!c.timed_overlaps.empty() ||
+             c.interaction_type == PairInteractionType::OPPOSING)) {
             // Orange is only the axis-aligned bounding outline of the sampled
             // time-synchronised OBB intersections rendered below.
             m.type = visualization_msgs::Marker::LINE_STRIP;
@@ -641,8 +567,10 @@ void MarkerPublisher::addConflictMarkers(
             label.color = rgba(1.00f, 0.80f, 0.25f, 1.0f);
             std::ostringstream text;
             text << std::fixed << std::setprecision(2)
-                 << "TIMED OVERLAP V" << c.vehicle_a << "-V" << c.vehicle_b
-                 << " type=CROSSING/OPPOSING"
+                 << "ACTIVE V" << c.vehicle_a << "-V" << c.vehicle_b
+                 << " type="
+                 << (c.interaction_type == PairInteractionType::OPPOSING
+                         ? "OPPOSING" : "CROSSING")
                  << " holder="
                  << (c.holder_id >= 0 ? "V" + std::to_string(c.holder_id)
                                       : "none")
@@ -650,7 +578,18 @@ void MarkerPublisher::addConflictMarkers(
                  << (c.waiter_id >= 0 ? "V" + std::to_string(c.waiter_id)
                                       : "both")
                  << " first_t=" << c.t << "s"
-                 << "\nred=timed OBB overlap; orange=overlap AABB";
+                 << " last_t=" << c.last_t << "s";
+            if (c.interaction_type == PairInteractionType::OPPOSING) {
+                text << "\nV" << c.vehicle_a << " occupancy=["
+                     << c.occupancy_a.t_enter << ","
+                     << c.occupancy_a.t_exit << "]"
+                     << " V" << c.vehicle_b << " occupancy=["
+                     << c.occupancy_b.t_enter << ","
+                     << c.occupancy_b.t_exit << "]"
+                     << "\norange=SharedSegment; red=timed OBB overlap";
+            } else {
+                text << "\nred=timed OBB overlap; orange=dynamic overlap AABB";
+            }
             label.text = text.str();
             arr.markers.push_back(label);
         }

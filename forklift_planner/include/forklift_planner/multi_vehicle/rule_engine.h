@@ -40,6 +40,7 @@ struct ConflictMarker {
     double x = 0.0;
     double y = 0.0;
     double t = 0.0;
+    double last_t = 0.0;
     double scale_x = 0.08;
     double scale_y = 0.08;
     int vehicle_a = -1;
@@ -54,6 +55,9 @@ struct ConflictMarker {
     double follower_y = 0.0;
     double leader_x = 0.0;
     double leader_y = 0.0;
+    PairInteractionType interaction_type = PairInteractionType::NONE;
+    OccupancyInterval occupancy_a;
+    OccupancyInterval occupancy_b;
     std::vector<TimedOverlap> timed_overlaps;
     // Static, time-independent OBB intersections reconstructed from one
     // ConflictZone/reservation arc-length rectangle. Kept separate from
@@ -218,6 +222,9 @@ public:
 
     struct DynamicSpeedMetrics {
         unsigned long long baseline_conflicts = 0;
+        unsigned long long crossing_conflicts = 0;
+        unsigned long long opposing_conflicts = 0;
+        unsigned long long same_direction_conflicts = 0;
         unsigned long long far_decisions = 0;
         unsigned long long mid_decisions = 0;
         unsigned long long near_decisions = 0;
@@ -232,6 +239,7 @@ public:
         unsigned long long a1_fallbacks = 0;
         unsigned long long existing_reservation_skips = 0;
         unsigned long long nominal_recoveries = 0;
+        unsigned long long duplicate_pair_authority_overrides = 0;
         unsigned long long reservation_creates = 0;
         unsigned long long reservation_updates = 0;
         unsigned long long reservation_deletes = 0;
@@ -337,7 +345,12 @@ private:
                              int holder_id = -1,
                              int waiter_id = -1,
                              const std::vector<ConflictMarker::TimedOverlap>&
-                                 timed_overlaps = {});
+                                 timed_overlaps = {},
+                             PairInteractionType interaction_type =
+                                 PairInteractionType::NONE,
+                             const OccupancyInterval& occupancy_a = {},
+                             const OccupancyInterval& occupancy_b = {},
+                             double last_conflict_t = -1.0);
     double timeToReachS(const VehicleAgent& v, VehicleAction action,
                         double target_s) const;
     double predictedTravelDistance(const VehicleAgent& v,
@@ -361,7 +374,8 @@ private:
     // 普适前向净空护栏:任何车若沿自身固定路径在自己刹车距离内会撞上另一辆车的当前
     // 车身,提前 STOP(留余量、干净对停)。堵死 following/crossing 分类接缝处「两套都
     // 没刹→NOMINAL 直撞停着的车→十字楔死」的漏洞。破环车豁免。比硬护栏早刹留余量。
-    void enforceForwardClearance(std::vector<VehicleAgent>& vehicles);
+    void enforceForwardClearance(std::vector<VehicleAgent>& vehicles,
+                                 double dt);
     void resolveTargetSlotOccupancy(std::vector<VehicleAgent>& vehicles);
     void applyRequestedActions(std::vector<VehicleAgent>& vehicles, double dt);
     void breakDeadlockCycles(std::vector<VehicleAgent>& vehicles);
@@ -404,6 +418,10 @@ private:
     // Pairs for which reservation/OBB arbitration supplied the result in this
     // decision. A following hint must not be applied to those pairs.
     std::set<std::pair<int, int>> pairwise_managed_pairs_;
+    // Current decide() calls in which an ordinary pair was handled by the
+    // unified rolling coordinator (including frozen-period reuse). This is
+    // diagnostic input for detecting a downstream authority override.
+    std::set<std::pair<int, int>> ordinary_dynamic_pairs_;
 
     // 静态冲突集 C_ij 缓存(协调图第一步)。key={lo.id,hi.id};块以 self=lo 朝向存储。
     // gen_lo/gen_hi 记录算定时两车的 path_gen;任一方 path_gen 变(换了固定路径)即失效

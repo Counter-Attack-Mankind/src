@@ -36,6 +36,7 @@ struct PairSpeedCoordinationResult {
     VehicleAction baseline_action_b = VehicleAction::NOMINAL;
     VehicleAction selected_action_a = VehicleAction::NOMINAL;
     VehicleAction selected_action_b = VehicleAction::NOMINAL;
+    int selected_winner_id = -1;
     std::optional<double> original_first_conflict_t;
     SelectedSpeedActionEvaluation evaluation;
     std::string reason;
@@ -50,13 +51,18 @@ SelectedSpeedActionEvaluation evaluateSelectedAction(
     const MapParam& map_param, const MultiVehicleConfig& config,
     double prediction_horizon, VehicleAction action_a,
     VehicleAction action_b,
-    std::optional<double> original_first_conflict_t = std::nullopt);
+    std::optional<double> original_first_conflict_t = std::nullopt,
+    const PairInteractionResult* interaction_context = nullptr,
+    int preferred_winner_id = -1);
 
-// Pure two-vehicle rolling action selection. The priority winner remains
-// NOMINAL; the loser receives exactly one target for this rolling period:
+// Pure two-vehicle rolling action selection. The preferred winner normally
+// remains NOMINAL; the loser receives exactly one target for this period:
 // FAR=NOMINAL, MID=YIELD, NEAR=CREEP, or STOP for an explicit emergency.
-// The selected action is evaluated once over the full horizon for trend
-// diagnostics, but a remaining conflict does not reject that action.
+// Every MID/NEAR candidate is evaluated over the full horizon and escalates
+// within this coordinator until the interaction clears or STOP is reached.
+// For CROSSING only, an unsafe preferred order may be replaced by the opposite
+// order, then by a one-period STOP/STOP safety transition. Opposing physical
+// occupancy and same-direction front/rear order are never reversed here.
 PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const std::vector<PotentialConflictZone>& potential_zones,

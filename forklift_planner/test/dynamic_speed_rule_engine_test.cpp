@@ -50,6 +50,20 @@ VehicleAgent diagonalVehicle(int id, double approach, double speed = 0.0) {
     return result;
 }
 
+VehicleAgent laneVehicle(int id, double path_s, double speed) {
+    VehicleAgent result;
+    result.id = id;
+    result.mode = VehicleMode::ACTIVE;
+    result.action = VehicleAction::NOMINAL;
+    result.requested_action = VehicleAction::NOMINAL;
+    result.path_gen = 1;
+    result.path_s = path_s;
+    result.current_speed = speed;
+    result.track.set(RoughPath{wp(0.0, 0.0, 0.0),
+                               wp(4.0, 0.0, 0.0)});
+    return result;
+}
+
 bool hasDynamicReason(const std::vector<VehicleAgent>& vehicles,
                       VehicleAction action) {
     for (const VehicleAgent& vehicle : vehicles) {
@@ -179,6 +193,35 @@ int main() {
             }
         }
         target_ids.push_back(target.vehicle_id);
+    }
+
+    // Same-direction classification uses current travel direction/lateral
+    // alignment and stable longitudinal order. The physical front vehicle is
+    // always the dynamic winner even when the rear vehicle has the smaller id.
+    RuleEngine following_engine(map_param, config);
+    std::vector<VehicleAgent> following{
+        laneVehicle(0, 0.20, config.nominal_speed),
+        laneVehicle(1, 0.48, 0.0)};
+    following_engine.decide(following, 0.1, 15.0);
+    if (following_engine.dynamicSpeedMetrics().same_direction_conflicts == 0 ||
+        following[1].requested_action != VehicleAction::NOMINAL ||
+        following[0].requested_action == VehicleAction::NOMINAL ||
+        following[0].blocker_id != following[1].id ||
+        following_engine.dynamicSpeedMetrics().
+                duplicate_pair_authority_overrides != 0) {
+        std::cerr << "same_direction_conflicts="
+                  << following_engine.dynamicSpeedMetrics().
+                         same_direction_conflicts
+                  << " rear_action="
+                  << static_cast<int>(following[0].requested_action)
+                  << " front_action="
+                  << static_cast<int>(following[1].requested_action)
+                  << " rear_blocker=" << following[0].blocker_id
+                  << " duplicate="
+                  << following_engine.dynamicSpeedMetrics().
+                         duplicate_pair_authority_overrides
+                  << '\n';
+        return fail("same-direction front/rear authority was not stable");
     }
 
     // A clear next rolling period returns to NOMINAL and reports recovery.
