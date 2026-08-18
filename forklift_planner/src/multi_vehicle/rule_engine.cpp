@@ -1280,7 +1280,10 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                                other_id);
         }
     };
-    const bool dynamic_speed_enabled = vehicles.size() == 2;
+    // Every active pair, including pairs in a 3+ vehicle scene, is handled by
+    // the same rolling motion coordinator. Pair outputs are merged later by
+    // applyActionRequest() using the existing restrictive-action ordering.
+    const bool dynamic_speed_enabled = vehicles.size() >= 2;
     auto logNominalRecovery = [&](const std::pair<int, int>& key) {
         if (!dynamic_speed_enabled || reuse_ordinary_coordination) return;
         const auto previous = previous_dynamic_actions_.find(key);
@@ -1296,13 +1299,16 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         coord_log_sink_(line.str());
     };
 
-    // Drop event reservations when a participant or its route changes.
+    // Stage 3.1 boundary: only A1 service transactions may retain cross-period
+    // pair ownership. Remove any ordinary-road reservation restored from an
+    // older snapshot before it can skip rolling motion coordination.
     for (auto it = conflict_reservations_.begin();
          it != conflict_reservations_.end();) {
         VehicleAgent* lo = agentById(it->first.first);
         VehicleAgent* hi = agentById(it->first.second);
         const ConflictReservation& r = it->second;
-        if (lo == nullptr || hi == nullptr || !lo->active() || !hi->active() ||
+        if (r.create_reason != "a1_related" ||
+            lo == nullptr || hi == nullptr || !lo->active() || !hi->active() ||
             lo->path_gen != r.gen_lo || hi->path_gen != r.gen_hi) {
             logConflictReservation(coord_log_sink_, it->first, "delete", r);
             ++dynamic_speed_metrics_.reservation_deletes;
@@ -1586,10 +1592,11 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 departure_cluster_owner >= 0 || future_owner >= 0;
             const bool a_terminal = terminalDocking(a);
             const bool b_terminal = terminalDocking(b);
-            const bool ordinary =
-                !a_inside_any_zone && !b_inside_any_zone && !a1_related &&
-                !a_terminal && !b_terminal &&
-                !a.deadlock_breaker && !b.deadlock_breaker;
+            // A1 service is the only remaining reservation-owned pair type.
+            // Already-inside, terminal, deadlock-breaker and braking state are
+            // urgency/safety inputs for ordinary-road motion actions; they no
+            // longer transfer the pair to legacy resource ownership.
+            const bool ordinary = !a1_related;
 
             // The rolling-period target was selected from the true state at
             // frame 0.  Future sandbox states may still run reservation/A1 and
@@ -1605,11 +1612,28 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 continue;
             }
 
-            bool braking_safety_fallback = false;
+            bool emergency_stop_required = false;
             if (dynamic_speed_enabled) {
                 ++dynamic_speed_metrics_.baseline_conflicts;
-                const int preferred_winner = ordinary
-                    ? priorityWinner(a, b) : -1;
+                int preferred_winner = -1;
+                if (ordinary) {
+                    // Physical progress affects only this rolling-period
+                    // motion decision; it is not persisted as ownership.
+                    if (a_inside_any_zone != b_inside_any_zone) {
+                        preferred_winner = a_inside_any_zone ? a.id : b.id;
+                    } else if (a_inside && b_inside) {
+                        const double a_clear = timeToReachS(
+                            a, VehicleAction::NOMINAL, zone.s_self_exit);
+                        const double b_clear = timeToReachS(
+                            b, VehicleAction::NOMINAL, zone.s_other_exit);
+                        preferred_winner =
+                            std::abs(a_clear - b_clear) > cfg_.prediction_step
+                                ? (a_clear < b_clear ? a.id : b.id)
+                                : priorityWinner(a, b);
+                    } else {
+                        preferred_winner = priorityWinner(a, b);
+                    }
+                }
                 const DynamicInterventionBand intervention_band =
                     classifyDynamicInterventionBand(event.first_t, cfg_);
 
@@ -1620,7 +1644,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         preferred_winner == a.id ? b : a;
                     const double loser_entry = preferred_winner == a.id
                         ? zone.s_other_enter : zone.s_self_enter;
-                    braking_safety_fallback = hasInsufficientBrakingMargin(
+                    emergency_stop_required = hasInsufficientBrakingMargin(
                         loser, loser_entry, cfg_, dt, kStopBuffer);
                 }
 
@@ -1628,14 +1652,13 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 if (ordinary) {
                     speed_result = evaluatePairSpeedCoordination(
                         a, b, zones, interaction, mp_, cfg_, horizon,
-                        preferred_winner, braking_safety_fallback);
+                        preferred_winner, emergency_stop_required);
                     last_rolling_dynamic_decision_.valid = true;
                     last_rolling_dynamic_decision_.baseline_evaluated = true;
                     last_rolling_dynamic_decision_.band = intervention_band;
-                    last_rolling_dynamic_decision_.legacy_fallback =
-                        braking_safety_fallback;
+                    last_rolling_dynamic_decision_.legacy_fallback = false;
                     last_rolling_dynamic_decision_.emergency_stop =
-                        braking_safety_fallback;
+                        emergency_stop_required;
                     last_rolling_dynamic_decision_.selected_action_a =
                         speed_result.selected_action_a;
                     last_rolling_dynamic_decision_.selected_action_b =
@@ -1657,7 +1680,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     } else {
                         ++dynamic_speed_metrics_.near_decisions;
                     }
-                    if (braking_safety_fallback) {
+                    if (emergency_stop_required) {
                         ++dynamic_speed_metrics_.emergency_stop_decisions;
                     }
 
@@ -1717,11 +1740,24 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                             vehicle->reason.rfind("dynamic_speed_", 0) != 0) {
                             continue;
                         }
-                        last_rolling_dynamic_decision_.targets.push_back(
-                            RollingDynamicDecision::Target{
-                                vehicle->id, vehicle->path_gen,
-                                vehicle->requested_action, item.second,
-                                vehicle->blocker_id, vehicle->reason});
+                        const RollingDynamicDecision::Target aggregate{
+                            vehicle->id, vehicle->path_gen,
+                            vehicle->requested_action, item.second,
+                            vehicle->blocker_id, vehicle->reason};
+                        auto existing_target = std::find_if(
+                            last_rolling_dynamic_decision_.targets.begin(),
+                            last_rolling_dynamic_decision_.targets.end(),
+                            [&](const RollingDynamicDecision::Target& target) {
+                                return target.vehicle_id == vehicle->id &&
+                                       target.path_gen == vehicle->path_gen;
+                            });
+                        if (existing_target ==
+                            last_rolling_dynamic_decision_.targets.end()) {
+                            last_rolling_dynamic_decision_.targets.push_back(
+                                aggregate);
+                        } else {
+                            *existing_target = aggregate;
+                        }
                     }
 
                     if (coord_log_sink_) {
@@ -1749,8 +1785,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         }
                         line << " accepted=true reason=" << speed_result.reason
                              << " reservation="
-                             << (braking_safety_fallback
-                                     ? "braking_safety" : "not_created");
+                             << "not_created";
                         coord_log_sink_(line.str());
                     }
 
@@ -1761,9 +1796,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         VehicleAction::NOMINAL, preferred_winner,
                         preferred_winner == a.id ? b.id : a.id,
                         decimateTimedOverlaps(event.timed_overlaps));
-                    if (!braking_safety_fallback) {
-                        continue;
-                    }
+                    continue;
                 } else {
                     if (a1_related) ++dynamic_speed_metrics_.a1_fallbacks;
                     if (coord_log_sink_) {
@@ -1875,31 +1908,11 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             r.x = zone.x;
             r.y = zone.y;
             r.first_conflict_t = event.first_t;
-            if (braking_safety_fallback) {
-                r.create_reason = "braking_safety";
-                ++dynamic_speed_metrics_.reservation_create_braking_safety;
-            } else if (a1_related) {
-                r.create_reason = "a1_related";
-                ++dynamic_speed_metrics_.reservation_create_a1;
-            } else if (a_inside_any_zone || b_inside_any_zone) {
-                r.create_reason = "already_inside";
-                ++dynamic_speed_metrics_.reservation_create_already_inside;
-            } else if (a_terminal || b_terminal) {
-                r.create_reason = "terminal";
-                ++dynamic_speed_metrics_.reservation_create_terminal;
-            } else if (a.deadlock_breaker || b.deadlock_breaker) {
-                r.create_reason = "deadlock_breaker";
-                ++dynamic_speed_metrics_.reservation_create_deadlock;
-            } else if (!dynamic_speed_enabled && vehicles.size() > 2) {
-                r.create_reason = "multi_vehicle_legacy";
-                ++dynamic_speed_metrics_.reservation_create_multi_vehicle;
-            } else if (ordinary) {
-                r.create_reason = "ordinary_dynamic";
-                ++dynamic_speed_metrics_.reservation_create_ordinary_dynamic;
-            } else {
-                r.create_reason = "other_special";
-                ++dynamic_speed_metrics_.reservation_create_other;
-            }
+            // Reaching the ownership path is now possible only for an A1
+            // service transaction; every non-A1 timed conflict returned from
+            // the rolling motion branch above.
+            r.create_reason = "a1_related";
+            ++dynamic_speed_metrics_.reservation_create_a1;
             r.raw_zone_index = zone.raw_index;
             r.aabb_min_x = zone.aabb_min_x;
             r.aabb_min_y = zone.aabb_min_y;

@@ -175,9 +175,9 @@ public:
     struct RollingDynamicDecision;
 
     // prediction_horizon_override >= 0 constrains this decision to the
-    // supplied prediction window. reuse_ordinary_coordination skips only a
-    // new ordinary pairwise arbitration and reapplies this period's ordinary
-    // targets; following, reservation, A1 and safety rules still run.
+    // supplied prediction window. reuse_ordinary_coordination skips a new
+    // non-A1 pairwise arbitration and reapplies this period's aggregate motion
+    // targets; following, A1 reservation/commitment and safety rules still run.
     void decide(std::vector<VehicleAgent>& vehicles, double dt,
                 double prediction_horizon_override = -1.0,
                 bool reuse_ordinary_coordination = false,
@@ -383,8 +383,9 @@ private:
     std::set<std::tuple<int, int, int, int>> a1_decision_logs_;
     bool shouldLogA1Decision(const VehicleAgent& vehicle, int blocker_id);
 
-    // 未来时域内最早可见的局部冲突事件预约。它只锁定本次事件对应的弧长区间，
-    // 不再把同一车对完整路径上的所有几何交叉合并为一个大资源。
+    // Stage 3.1: reservations are retained only for A1 service transactions.
+    // Ordinary-road pairs use rolling motion actions without cross-period
+    // holder/waiter ownership.
     std::map<std::pair<int, int>, ConflictReservation> conflict_reservations_;
     std::map<std::pair<int, int>, DepartureClusterCommitment>
         departure_cluster_commitments_;

@@ -35,6 +35,21 @@ VehicleAgent crossingVehicle(int id, double approach, bool vertical,
     return result;
 }
 
+VehicleAgent diagonalVehicle(int id, double approach, double speed = 0.0) {
+    VehicleAgent result;
+    result.id = id;
+    result.mode = VehicleMode::ACTIVE;
+    result.action = VehicleAction::NOMINAL;
+    result.requested_action = VehicleAction::NOMINAL;
+    result.path_gen = 1;
+    result.current_speed = speed;
+    constexpr double kQuarterPi = 0.7853981633974483;
+    result.track.set(RoughPath{
+        wp(-approach, -approach, kQuarterPi),
+        wp(2.0, 2.0, kQuarterPi)});
+    return result;
+}
+
 bool hasDynamicReason(const std::vector<VehicleAgent>& vehicles,
                       VehicleAction action) {
     for (const VehicleAgent& vehicle : vehicles) {
@@ -88,9 +103,8 @@ int main() {
         return fail("NEAR did not jump directly to reservation-free CREEP");
     }
 
-    // A close, already-fast loser may select STOP and enter the retained
-    // braking-safety reservation path. This is an explicit safety reason,
-    // not failure of the selected action to clear 15 s.
+    // Braking safety remains a direct STOP motion action, but no longer
+    // creates ordinary-road holder/waiter ownership.
     RuleEngine emergency_engine(map_param, config);
     std::vector<VehicleAgent> emergency{
         crossingVehicle(0, 0.30, false, config.nominal_speed),
@@ -99,10 +113,8 @@ int main() {
     const auto emergency_state = emergency_engine.snapshot();
     if (emergency_engine.dynamicSpeedMetrics().emergency_stop_decisions == 0 ||
         !hasDynamicReason(emergency, VehicleAction::STOP) ||
-        emergency_state.reservations.empty() ||
-        emergency_state.reservations.begin()->second.create_reason !=
-            "braking_safety") {
-        return fail("braking emergency did not select STOP/safety reservation");
+        !emergency_state.reservations.empty()) {
+        return fail("braking emergency did not remain reservation-free STOP");
     }
 
     RuleEngine reserved_engine(map_param, config);
@@ -122,11 +134,11 @@ int main() {
     reservation_state.reservations[{0, 1}] = reservation;
     reserved_engine.restore(reservation_state);
     reserved_engine.decide(reserved, 0.1, 15.0);
-    if (reserved_engine.snapshot().reservations.count({0, 1}) == 0 ||
-        reserved_engine.dynamicSpeedMetrics().existing_reservation_skips == 0 ||
-        hasDynamicReason(reserved, VehicleAction::YIELD) ||
-        hasDynamicReason(reserved, VehicleAction::CREEP)) {
-        return fail("existing reservation did not skip dynamic selection");
+    if (!reserved_engine.snapshot().reservations.empty() ||
+        reserved_engine.dynamicSpeedMetrics().reservation_deletes == 0 ||
+        reserved_engine.dynamicSpeedMetrics().existing_reservation_skips != 0 ||
+        reserved_engine.dynamicSpeedMetrics().baseline_conflicts == 0) {
+        return fail("ordinary already-inside reservation was not retired");
     }
 
     RuleEngine a1_engine(map_param, config);
@@ -143,20 +155,30 @@ int main() {
         return fail("A1 special pair did not retain legacy reservation");
     }
 
-    // Dynamic speed is deliberately two-vehicle-only. With three active
-    // vehicles, ordinary pairwise conflicts remain on the legacy path.
+    // Three mutually crossing vehicles exercise all three pairwise dynamic
+    // calls. Their requests must aggregate without a legacy reservation.
     RuleEngine multi_engine(map_param, config);
     std::vector<VehicleAgent> multi{
-        crossingVehicle(0, 0.30, false),
-        crossingVehicle(1, 0.70, true),
-        crossingVehicle(2, 4.00, false)};
-    multi[2].track.set(RoughPath{wp(10.0, 10.0, 0.0),
-                                 wp(12.0, 10.0, 0.0)});
+        crossingVehicle(0, 1.50, false),
+        crossingVehicle(1, 1.70, true),
+        diagonalVehicle(2, 1.10)};
     multi_engine.decide(multi, 0.1, 15.0);
-    if (multi_engine.snapshot().reservations.empty() ||
-        multi_engine.dynamicSpeedMetrics().
-                reservation_create_multi_vehicle == 0) {
-        return fail("multi-vehicle conflict left legacy reservation path");
+    const auto& multi_metrics = multi_engine.dynamicSpeedMetrics();
+    if (!multi_engine.snapshot().reservations.empty() ||
+        multi_metrics.baseline_conflicts < 3 ||
+        multi_metrics.reservation_create_multi_vehicle != 0 ||
+        multi_engine.lastRollingDynamicDecision().targets.empty()) {
+        return fail("three-vehicle pairs did not use dynamic aggregation");
+    }
+    std::vector<int> target_ids;
+    for (const auto& target :
+         multi_engine.lastRollingDynamicDecision().targets) {
+        for (int id : target_ids) {
+            if (id == target.vehicle_id) {
+                return fail("multi-pair aggregate stored duplicate target");
+            }
+        }
+        target_ids.push_back(target.vehicle_id);
     }
 
     // A clear next rolling period returns to NOMINAL and reports recovery.

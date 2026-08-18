@@ -255,8 +255,42 @@ int main() {
         return fail("selected action was not evaluated over the full 15 s");
     }
 
-    // Reuse mode still honors an existing reservation and may tighten a
-    // period NOMINAL target to STOP.
+    // Reproduce the stage-3.1 contamination shape: frame 0 selects a normal
+    // NEAR/CREEP action, then future 0.1 s frames move into the old geometric
+    // interval. Reuse must preserve the period motion target and must not
+    // create an already-inside reservation.
+    RuleEngine inside_engine(map_param, config);
+    std::vector<VehicleAgent> inside{
+        crossingVehicle(0, 0.30, false),
+        crossingVehicle(1, 0.79, true)};
+    inside_engine.decide(inside, 0.1, 15.0);
+    const auto inside_decision =
+        inside_engine.lastRollingDynamicDecision();
+    const auto inside_targets = captureTargets(inside);
+    if (!inside_decision.valid ||
+        inside_decision.band != DynamicInterventionBand::NEAR ||
+        inside_engine.snapshot().reservations.size() != 0) {
+        return fail("already-inside rollout fixture did not start dynamic");
+    }
+    for (int frame = 0; frame < 5; ++frame) {
+        if (frame > 0) {
+            restoreTargets(inside, inside_targets);
+            inside_engine.decide(inside, 0.1, 15.0 - frame * 0.1, true,
+                                 &inside_decision);
+            if (!inside_engine.snapshot().reservations.empty() ||
+                inside[0].requested_action != inside_targets[0].action ||
+                inside[1].requested_action != inside_targets[1].action) {
+                return fail("future inside frame polluted rolling action");
+            }
+        }
+        advanceByAction(inside[0], inside[0].requested_action,
+                        map_param, config, 0.1);
+        advanceByAction(inside[1], inside[1].requested_action,
+                        map_param, config, 0.1);
+    }
+
+    // Reuse mode still honors an A1 reservation and may tighten a period
+    // NOMINAL target to STOP.
     RuleEngine safety_engine(map_param, config);
     std::vector<VehicleAgent> safety{
         crossingVehicle(0, 0.30, false, config.nominal_speed),
@@ -270,6 +304,7 @@ int main() {
     reservation.exit_lo = 0.70;
     reservation.enter_hi = 0.05;
     reservation.exit_hi = 1.00;
+    reservation.create_reason = "a1_related";
     safety_state.reservations[{0, 1}] = reservation;
     safety_engine.restore(safety_state);
     safety_engine.decide(safety, 0.1, 15.0, true);
