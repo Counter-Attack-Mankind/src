@@ -39,11 +39,14 @@ struct MultiVehicleConfig {
 
     double prediction_horizon = 10.0;
     double prediction_step = 0.05;
-    // Phase 2.2 timed-conflict intervention bands.  A first conflict at or
-    // beyond far is deferred to the next rolling refresh; [near, far) uses
-    // dynamic speed shaping; below near is the near-term band.
+    // NOMINAL-baseline timed-conflict bands. A first conflict at or beyond
+    // far stays NOMINAL; [near, far) requests YIELD; below near requests
+    // CREEP. Braking infeasibility independently tightens the request to STOP.
     double dynamic_speed_far_threshold = 10.0;
     double dynamic_speed_near_threshold = 5.0;
+    // Ordinary NEAR STOP gate time reserve beyond one rolling period and the
+    // planned action's braking time. Unit: seconds.
+    double dynamic_stop_time_margin = 0.10;
 
     double creep_ratio = 0.25;
     double yield_ratio = 0.50;

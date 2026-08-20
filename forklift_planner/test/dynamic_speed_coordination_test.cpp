@@ -144,15 +144,15 @@ int main() {
         return fail("emergency did not directly select STOP");
     }
 
-    // Find a deterministic MID case where raw YIELD delays but does not clear
-    // the full horizon. Stage 3.2 must escalate that candidate inside the same
-    // coordinator instead of accepting the remaining conflict.
-    std::optional<PairSpeedCoordinationResult> escalated_mid;
+    // A MID action is a rolling 2 s response, not a full-horizon reservation.
+    // Even if YIELD does not clear the whole rollout, do not escalate it or
+    // reverse the supplied priority inside the current decision.
+    std::optional<PairSpeedCoordinationResult> direct_mid;
     std::optional<double> raw_yield_delay;
     for (double speed_a : {0.0, 0.2, 0.4, 0.6}) {
       for (double speed_b : {0.0, 0.2, 0.4, 0.6}) {
        for (double approach_a = 0.5;
-            approach_a <= 4.0 && !escalated_mid; approach_a += 0.1) {
+             approach_a <= 4.0 && !direct_mid; approach_a += 0.1) {
         for (double approach_b = 0.5;
              approach_b <= 4.0; approach_b += 0.1) {
             const VehicleAgent a = crossingVehicle(
@@ -174,10 +174,10 @@ int main() {
                 *raw_yield.conflict_delay > config.prediction_step) {
                 const auto result = evaluate(a, b, map_param, config);
                 if (result.action_selected &&
-                    result.selected_action_b != VehicleAction::YIELD &&
-                    (result.evaluation.conflict_free ||
-                     result.selected_action_b == VehicleAction::STOP)) {
-                    escalated_mid = result;
+                    result.selected_winner_id == a.id &&
+                    result.selected_action_a == VehicleAction::NOMINAL &&
+                    result.selected_action_b == VehicleAction::YIELD) {
+                    direct_mid = result;
                     raw_yield_delay = raw_yield.conflict_delay;
                 }
                 break;
@@ -186,44 +186,44 @@ int main() {
        }
       }
     }
-    if (!escalated_mid || !raw_yield_delay) {
-        return fail("remaining MID/YIELD conflict did not escalate");
+    if (!direct_mid || !raw_yield_delay) {
+        return fail("remaining MID/YIELD conflict changed direct mapping");
     }
 
-    // A preferred crossing order is not executable when even its STOP loser
-    // candidate still overlaps. The same coordinator must be able to select
-    // the opposite order when that complete-horizon candidate is clear.
-    bool found_safe_order_swap = false;
-    for (double approach_a = 0.20;
-         approach_a <= 1.20 && !found_safe_order_swap;
-         approach_a += 0.05) {
-        for (double approach_b = 0.20;
-             approach_b <= 1.20; approach_b += 0.05) {
-            const VehicleAgent a = crossingVehicle(
-                0, approach_a, false, config.nominal_speed);
-            const VehicleAgent b = crossingVehicle(
-                1, approach_b, true, 0.0);
-            const auto nominal = baseline(a, b, map_param, config, 15.0);
-            if (!nominal.event.valid ||
-                classifyDynamicInterventionBand(nominal.event.first_t,
-                                                config) ==
-                    DynamicInterventionBand::FAR) {
-                continue;
-            }
-            const auto result = evaluatePairSpeedCoordination(
-                a, b,
-                std::vector<PotentialConflictZone>{broadZone(a, b)},
-                nominal, map_param, config, 15.0, a.id, true);
-            if (result.selected_winner_id == b.id &&
-                result.evaluation.conflict_free &&
-                result.reason == "rolling_crossing_order_swap") {
-                found_safe_order_swap = true;
-                break;
-            }
-        }
+    // Classification metadata must not change generic rolling control.
+    PairInteractionResult crossing_label = mid_baseline;
+    crossing_label.type = PairInteractionType::CROSSING;
+    PairInteractionResult opposing_label = mid_baseline;
+    opposing_label.type = PairInteractionType::OPPOSING;
+    opposing_label.shared_segment.valid = true;
+    opposing_label.shared_segment.s_a_enter = 0.0;
+    opposing_label.shared_segment.s_a_exit = mid_a.track.length();
+    opposing_label.shared_segment.s_b_enter = 0.0;
+    opposing_label.shared_segment.s_b_exit = mid_b.track.length();
+    PairInteractionResult following_label = mid_baseline;
+    following_label.type = PairInteractionType::SAME_DIRECTION;
+    const auto crossing_result = evaluatePairSpeedCoordination(
+        mid_a, mid_b, {}, crossing_label, map_param, config, 15.0, mid_a.id);
+    const auto opposing_result = evaluatePairSpeedCoordination(
+        mid_a, mid_b, {}, opposing_label, map_param, config, 15.0, mid_a.id);
+    const auto following_result = evaluatePairSpeedCoordination(
+        mid_a, mid_b, {}, following_label, map_param, config, 15.0, mid_a.id);
+    const auto sameControl = [&](const PairSpeedCoordinationResult& result) {
+        return result.selected_winner_id == crossing_result.selected_winner_id &&
+               result.selected_action_a == crossing_result.selected_action_a &&
+               result.selected_action_b == crossing_result.selected_action_b &&
+               result.reason == crossing_result.reason;
+    };
+    if (!sameControl(opposing_result) || !sameControl(following_result)) {
+        return fail("interaction label still changes generic pair control");
     }
-    if (!found_safe_order_swap) {
-        return fail("unsafe preferred crossing order was not replaced");
+
+    const auto fixed_order = evaluatePairSpeedCoordination(
+        mid_a, mid_b, {}, mid_baseline, map_param, config, 15.0, mid_b.id);
+    if (fixed_order.selected_winner_id != mid_b.id ||
+        fixed_order.selected_action_a != VehicleAction::YIELD ||
+        fixed_order.selected_action_b != VehicleAction::NOMINAL) {
+        return fail("generic coordinator changed supplied priority order");
     }
 
     VehicleAgent low = crossingVehicle(2, 1.0, false, 0.0);
@@ -259,14 +259,50 @@ int main() {
         return fail("selected-action evaluation changed live input");
     }
 
-    VehicleAgent near_entry = crossingVehicle(6, 0.2, false, 0.2);
-    if (!hasInsufficientBrakingMargin(
-            near_entry, 0.25, config, 0.1)) {
-        return fail("insufficient braking margin was not detected");
+    const auto base_stop = evaluateTtcStopBoundary(
+        1.3, VehicleAction::CREEP, config);
+    const double expected_threshold =
+        config.rolling_refresh_period +
+        config.nominal_speed * config.creep_ratio / config.max_decel +
+        config.dynamic_stop_time_margin;
+    if (!near(base_stop.stop_threshold, expected_threshold) ||
+        !base_stop.stop_required ||
+        evaluateTtcStopBoundary(3.8, VehicleAction::CREEP, config).
+            stop_required ||
+        !evaluateTtcStopBoundary(expected_threshold, VehicleAction::CREEP,
+                                 config).stop_required) {
+        return fail("TTC STOP boundary value or inclusive edge changed");
     }
 
-    // An OPPOSING candidate that remains unsafe at t=0 must not leave a
-    // nominal "winner" moving under an accepted coordination result.
+    MultiVehicleConfig shorter_refresh = config;
+    shorter_refresh.rolling_refresh_period = 1.0;
+    if (!evaluateTtcStopBoundary(1.5, VehicleAction::CREEP, config).
+            stop_required ||
+        evaluateTtcStopBoundary(1.5, VehicleAction::CREEP,
+                                shorter_refresh).stop_required) {
+        return fail("rolling refresh period did not move TTC STOP boundary");
+    }
+
+    MultiVehicleConfig faster_creep = config;
+    faster_creep.creep_ratio = 0.50;
+    if (evaluateTtcStopBoundary(2.35, VehicleAction::CREEP, config).
+            stop_required ||
+        !evaluateTtcStopBoundary(2.35, VehicleAction::CREEP,
+                                 faster_creep).stop_required) {
+        return fail("creep ratio did not move TTC STOP boundary");
+    }
+
+    MultiVehicleConfig weaker_brake = config;
+    weaker_brake.max_decel = 0.10;
+    if (evaluateTtcStopBoundary(2.40, VehicleAction::CREEP, config).
+            stop_required ||
+        !evaluateTtcStopBoundary(2.40, VehicleAction::CREEP,
+                                 weaker_brake).stop_required) {
+        return fail("max deceleration did not move TTC STOP boundary");
+    }
+
+    // Braking infeasibility stops only the yielding side; the supplied stable
+    // priority remains nominal and no alternate order is searched.
     VehicleAgent immediate_a = crossingVehicle(10, 0.0, false, 0.0);
     VehicleAgent immediate_b = crossingVehicle(11, 0.0, false, 0.0);
     immediate_b.track.set(RoughPath{
@@ -284,21 +320,18 @@ int main() {
     const auto unresolved = evaluatePairSpeedCoordination(
         immediate_a, immediate_b, {}, immediate_baseline, map_param,
         config, 15.0, immediate_b.id, true);
-    if (unresolved.evaluation.conflict_free ||
-        unresolved.selected_action_a != VehicleAction::STOP ||
-        unresolved.selected_action_b != VehicleAction::STOP ||
-        unresolved.selected_winner_id != -1 ||
-        unresolved.reason != "rolling_unresolved_immediate_stop") {
-        return fail("unresolved immediate conflict retained a moving winner");
+    if (unresolved.selected_action_a != VehicleAction::STOP ||
+        unresolved.selected_action_b != VehicleAction::NOMINAL ||
+        unresolved.selected_winner_id != immediate_b.id ||
+        unresolved.reason != "rolling_emergency_stop") {
+        return fail("braking emergency changed stable-priority response");
     }
 
-    std::cout << "[MID-DELAY] baseline_first_t="
-              << *escalated_mid->original_first_conflict_t
+    std::cout << "[MID-DIRECT] baseline_first_t="
+              << *direct_mid->original_first_conflict_t
               << " raw_yield_delay=" << *raw_yield_delay
-              << " escalated_action="
-              << static_cast<int>(escalated_mid->selected_action_b)
-              << " conflict_free="
-              << escalated_mid->evaluation.conflict_free << '\n';
+              << " selected_action="
+              << static_cast<int>(direct_mid->selected_action_b) << '\n';
     std::cout << "dynamic_speed_coordination_test: PASS\n";
     return 0;
 }

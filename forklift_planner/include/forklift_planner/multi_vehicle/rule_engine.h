@@ -307,9 +307,6 @@ public:
         VehicleAction selected_action_a = VehicleAction::NOMINAL;
         VehicleAction selected_action_b = VehicleAction::NOMINAL;
         std::optional<double> baseline_first_t;
-        std::optional<double> after_action_first_t;
-        std::optional<double> conflict_delay;
-        bool after_action_conflict_free = false;
         std::vector<Target> targets;
     };
     const RollingDynamicDecision& lastRollingDynamicDecision() const {

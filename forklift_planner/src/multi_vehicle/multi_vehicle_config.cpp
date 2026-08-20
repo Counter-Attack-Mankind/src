@@ -75,6 +75,9 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     nh.param(ns + "dynamic_speed_near_threshold",
              c.dynamic_speed_near_threshold,
              c.dynamic_speed_near_threshold);
+    nh.param(ns + "dynamic_stop_time_margin",
+             c.dynamic_stop_time_margin,
+             c.dynamic_stop_time_margin);
     nh.param(ns + "creep_ratio", c.creep_ratio, c.creep_ratio);
     nh.param(ns + "yield_ratio", c.yield_ratio, c.yield_ratio);
     nh.param(ns + "boost_ratio", c.boost_ratio, c.boost_ratio);
@@ -152,6 +155,7 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     c.dynamic_speed_far_threshold =
         std::max(c.dynamic_speed_near_threshold,
                  c.dynamic_speed_far_threshold);
+    c.dynamic_stop_time_margin = std::max(0.0, c.dynamic_stop_time_margin);
     c.nominal_speed = std::max(0.01, c.nominal_speed);
     c.max_speed = std::max(c.nominal_speed, c.max_speed);
     c.conflict_margin = std::max(0.0, c.conflict_margin);

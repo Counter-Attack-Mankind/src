@@ -84,6 +84,42 @@ int main() {
     config.prediction_horizon = 15.0;
     config.prediction_step = 0.05;
 
+    // Ordinary priority is stable across rolling periods: diagnostic waiting
+    // time cannot reverse it. Safety/resource prerequisites remain explicit
+    // overrides ahead of the loaded/task-count/id total order.
+    RuleEngine priority_engine(map_param, config);
+    VehicleAgent priority_a = crossingVehicle(0, 2.0, false);
+    VehicleAgent priority_b = crossingVehicle(1, 2.0, true);
+    priority_a.current_slot = 10;
+    priority_a.target_slot = 11;
+    priority_b.current_slot = 20;
+    priority_b.target_slot = 21;
+    priority_b.wait_time = 1000.0;
+    if (priority_engine.priorityWinner(priority_a, priority_b) != priority_a.id) {
+        return fail("wait_time reversed ordinary stable priority");
+    }
+    priority_b.loaded = true;
+    if (priority_engine.priorityWinner(priority_a, priority_b) != priority_b.id) {
+        return fail("loaded vehicle lost ordinary priority");
+    }
+    priority_b.loaded = false;
+    priority_a.task_count = 4;
+    priority_b.task_count = 1;
+    if (priority_engine.priorityWinner(priority_a, priority_b) != priority_b.id) {
+        return fail("task-count priority order changed");
+    }
+    priority_a.task_count = 0;
+    priority_b.task_count = 0;
+    priority_a.target_slot = priority_b.current_slot;
+    if (priority_engine.priorityWinner(priority_a, priority_b) != priority_b.id) {
+        return fail("slot dependency prerequisite lost precedence");
+    }
+    priority_a.target_slot = 11;
+    priority_b.deadlock_breaker = true;
+    if (priority_engine.priorityWinner(priority_a, priority_b) != priority_b.id) {
+        return fail("deadlock-breaker prerequisite lost precedence");
+    }
+
     // Slot departure admission gives an already ACTIVE road vehicle priority
     // only when synchronized OBB overlap occurs before the candidate clears
     // its source-slot prefix. A later conflict remains rolling-coordinator
@@ -349,18 +385,33 @@ int main() {
         target_ids.push_back(target.vehicle_id);
     }
 
-    // Same-direction classification uses current travel direction/lateral
-    // alignment and stable longitudinal order. The physical front vehicle is
-    // always the dynamic winner even when the rear vehicle has the smaller id.
+    // Collinear geometry is an ordinary generic timed conflict. It must use
+    // the same deterministic priority as every other ordinary pair rather
+    // than transferring authority to a front/rear classifier.
     RuleEngine following_engine(map_param, config);
+    std::vector<std::string> following_logs;
+    following_engine.setCoordLogSink(
+        [&](const std::string& line) { following_logs.push_back(line); });
     std::vector<VehicleAgent> following{
         laneVehicle(0, 0.20, config.nominal_speed),
         laneVehicle(1, 0.48, 0.0)};
     following_engine.decide(following, 0.1, 15.0);
-    if (following_engine.dynamicSpeedMetrics().same_direction_conflicts == 0 ||
-        following[1].requested_action != VehicleAction::NOMINAL ||
-        following[0].requested_action == VehicleAction::NOMINAL ||
-        following[0].blocker_id != following[1].id ||
+    bool generic_log = false;
+    bool classified_log = false;
+    for (const std::string& line : following_logs) {
+        if (line.find("[DYN-SPEED]") == std::string::npos) continue;
+        generic_log = generic_log ||
+            line.find("interaction=GENERIC_TIMED_CONFLICT") !=
+                std::string::npos;
+        classified_log = classified_log ||
+            line.find("interaction=OPPOSING") != std::string::npos ||
+            line.find("interaction=CROSSING") != std::string::npos ||
+            line.find("interaction=SAME_DIRECTION") != std::string::npos;
+    }
+    if (following_engine.dynamicSpeedMetrics().same_direction_conflicts != 0 ||
+        following_engine.dynamicSpeedMetrics().crossing_conflicts == 0 ||
+        !generic_log || classified_log ||
+        !following_engine.snapshot().reservations.empty() ||
         following_engine.dynamicSpeedMetrics().
                 duplicate_pair_authority_overrides != 0) {
         std::cerr << "same_direction_conflicts="
@@ -371,11 +422,13 @@ int main() {
                   << " front_action="
                   << static_cast<int>(following[1].requested_action)
                   << " rear_blocker=" << following[0].blocker_id
+                  << " generic_log=" << generic_log
+                  << " classified_log=" << classified_log
                   << " duplicate="
                   << following_engine.dynamicSpeedMetrics().
                          duplicate_pair_authority_overrides
                   << '\n';
-        return fail("same-direction front/rear authority was not stable");
+        return fail("collinear pair did not use generic priority authority");
     }
 
     // A clear next rolling period returns to NOMINAL and reports recovery.

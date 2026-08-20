@@ -1344,19 +1344,6 @@ private:
                      decision.selected_action_b == VehicleAction::CREEP)) {
                     ++executed_rolling_metrics_.near_to_creep;
                 }
-                if (decision.after_action_conflict_free) {
-                    ++executed_rolling_metrics_.selected_rollout_clear;
-                }
-                if (decision.conflict_delay && *decision.conflict_delay > 0.0) {
-                    if (decision.selected_action_a == VehicleAction::YIELD ||
-                        decision.selected_action_b == VehicleAction::YIELD) {
-                        ++executed_rolling_metrics_.yield_delayed;
-                    }
-                    if (decision.selected_action_a == VehicleAction::CREEP ||
-                        decision.selected_action_b == VehicleAction::CREEP) {
-                        ++executed_rolling_metrics_.creep_delayed;
-                    }
-                }
                 for (const auto& target : decision.targets) {
                     if (target.action == VehicleAction::CREEP &&
                         target.previous_action == VehicleAction::NOMINAL) {
@@ -1393,19 +1380,7 @@ private:
             if (decision.baseline_first_t) {
                 line << " baseline_first_t=" << *decision.baseline_first_t;
             }
-            line << " after_action=";
-            if (!decision.valid) {
-                line << "N/A";
-            } else if (decision.after_action_conflict_free) {
-                line << "CLEAR";
-            } else if (decision.after_action_first_t) {
-                line << "CONFLICT@" << *decision.after_action_first_t;
-            } else {
-                line << "UNKNOWN";
-            }
-            if (decision.conflict_delay) {
-                line << " delay=" << *decision.conflict_delay;
-            }
+            line << " candidate_rollout=NOT_EVALUATED";
             coordLogWithContext(line.str(), "REAL", sim_plan_id_, 0, -1);
         }
         ++sim_plan_cursor_;

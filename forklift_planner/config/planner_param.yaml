@@ -74,12 +74,15 @@ forklift_planner:
     # 前瞻预测参数
     prediction_horizon: 15.0
     prediction_step: 0.05
-    # Phase 2.2: baseline TimedConflict first_t intervention bands (s).
-    # [far, horizon] stays NOMINAL; [near, far) tries YIELD/CREEP;
-    # [0, near) is near-term and falls back to the legacy safety chain when
-    # speed shaping is insufficient.
+    # NOMINAL baseline TimedConflict first_t intervention bands (s).
+    # [far, horizon] stays NOMINAL; [near, far) directly requests YIELD;
+    # [0, near) directly requests CREEP. Insufficient braking margin is the
+    # independent condition that tightens the yielding side to STOP.
     dynamic_speed_far_threshold: 10.0
     dynamic_speed_near_threshold: 5.0
+    # Ordinary NEAR STOP time reserve: first_t <= rolling refresh period
+    # + CREEP braking time + this margin. Unit: s.
+    dynamic_stop_time_margin: 0.10
 
     # 离散动作速度比例
     creep_ratio: 0.25

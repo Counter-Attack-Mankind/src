@@ -203,8 +203,9 @@ int main() {
                         map_param, config, 0.1);
     }
 
-    // Candidate validation still covers the complete 15 s. A MID candidate
-    // that remains unsafe must escalate inside the same rolling decision.
+    // The 15 s NOMINAL baseline classifies the conflict, while the selected
+    // MID response remains a direct YIELD for the next rolling period even if
+    // that action alone would not clear the complete horizon.
     bool found_delayed_candidate = false;
     double delayed_candidate_t = -1.0;
     for (double speed_a : {0.0, 0.2, 0.4, 0.6}) {
@@ -236,9 +237,15 @@ int main() {
             const auto candidate_result = evaluatePairSpeedCoordination(
                 candidate_a, candidate_b, candidate_zones,
                 candidate_baseline, map_param, config, 15.0, 0);
+            const auto raw_yield = evaluateSelectedAction(
+                candidate_a, candidate_b, candidate_zones, map_param, config,
+                15.0, VehicleAction::NOMINAL, VehicleAction::YIELD,
+                candidate_baseline.event.first_t);
             if (candidate_result.action_selected &&
-                candidate_result.selected_action_b != VehicleAction::YIELD &&
-                candidate_result.evaluation.conflict_free) {
+                candidate_result.selected_winner_id == candidate_a.id &&
+                candidate_result.selected_action_a == VehicleAction::NOMINAL &&
+                candidate_result.selected_action_b == VehicleAction::YIELD &&
+                !raw_yield.conflict_free) {
                 found_delayed_candidate = true;
                 delayed_candidate_t = candidate_baseline.event.first_t;
                 break;
@@ -248,7 +255,7 @@ int main() {
       }
     }
     if (!found_delayed_candidate) {
-        return fail("unsafe MID action did not escalate over full horizon");
+        return fail("MID response still depends on full-horizon clearance");
     }
 
     // Reproduce the stage-3.1 contamination shape: frame 0 selects a normal

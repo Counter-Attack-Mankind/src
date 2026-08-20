@@ -32,13 +32,10 @@ struct PairSpeedCoordinationResult {
     bool attempted = false;
     bool action_selected = false;
     bool emergency_stop = false;
-    VehicleAction baseline_action_a = VehicleAction::NOMINAL;
-    VehicleAction baseline_action_b = VehicleAction::NOMINAL;
     VehicleAction selected_action_a = VehicleAction::NOMINAL;
     VehicleAction selected_action_b = VehicleAction::NOMINAL;
     int selected_winner_id = -1;
     std::optional<double> original_first_conflict_t;
-    SelectedSpeedActionEvaluation evaluation;
     std::string reason;
 };
 
@@ -51,18 +48,14 @@ SelectedSpeedActionEvaluation evaluateSelectedAction(
     const MapParam& map_param, const MultiVehicleConfig& config,
     double prediction_horizon, VehicleAction action_a,
     VehicleAction action_b,
-    std::optional<double> original_first_conflict_t = std::nullopt,
-    const PairInteractionResult* interaction_context = nullptr,
-    int preferred_winner_id = -1);
+    std::optional<double> original_first_conflict_t = std::nullopt);
 
-// Pure two-vehicle rolling action selection. The preferred winner normally
-// remains NOMINAL; the loser receives exactly one target for this period:
-// FAR=NOMINAL, MID=YIELD, NEAR=CREEP, or STOP for an explicit emergency.
-// Every MID/NEAR candidate is evaluated over the full horizon and escalates
-// within this coordinator until the interaction clears or STOP is reached.
-// For CROSSING only, an unsafe preferred order may be replaced by the opposite
-// order, then by a one-period STOP/STOP safety transition. Opposing physical
-// occupancy and same-direction front/rear order are never reversed here.
+// Pure two-vehicle rolling TTC response. The supplied priority vehicle is not
+// a reservation owner: it merely receives no speed reduction from this pair
+// during the current rolling period. The yielding vehicle receives exactly
+// one target: FAR=NOMINAL, MID=YIELD, NEAR=CREEP, or STOP when the caller's
+// independent baseline-TTC boundary reports an emergency. No selected action
+// is re-predicted here and the priority order is never swapped for feasibility.
 PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const std::vector<PotentialConflictZone>& potential_zones,
@@ -71,13 +64,22 @@ PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     double prediction_horizon, int preferred_winner_id,
     bool emergency_stop = false);
 
-// Conservative boundary for deciding whether a new conflict is still a
-// distant speed-shaping problem. It uses the legacy 1 cm stop line plus the
-// distance that can be consumed by one frozen rolling-plan prefix.
-bool hasInsufficientBrakingMargin(
-    const VehicleAgent& vehicle, double conflict_entry_s,
-    const MultiVehicleConfig& config, double decision_dt,
-    double stop_buffer = 0.01);
+struct TtcStopBoundary {
+    VehicleAction planned_action = VehicleAction::STOP;
+    double action_speed = 0.0;
+    double decision_period = 0.0;
+    double braking_time = 0.0;
+    double time_margin = 0.0;
+    double stop_threshold = 0.0;
+    bool stop_required = false;
+};
+
+// Ordinary rolling TTC safety boundary. It uses only the NOMINAL baseline's
+// first conflict time and the speed of the action planned for this period; it
+// does not re-predict that action or evaluate full-horizon clearance.
+TtcStopBoundary evaluateTtcStopBoundary(
+    double first_conflict_t, VehicleAction planned_action,
+    const MultiVehicleConfig& config);
 
 }  // namespace multi_vehicle
 }  // namespace forklift_planner
