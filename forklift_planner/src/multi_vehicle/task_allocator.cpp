@@ -1141,6 +1141,41 @@ bool TaskAllocator::hasValidPickupLeg(int slot) const {
     return leg.ready && leg.valid && !leg.path.empty();
 }
 
+double TaskAllocator::slotDepartureClearS(const PathTrack& track,
+                                          int source_slot) const {
+    if (track.empty() || source_slot < 0 ||
+        source_slot >= static_cast<int>(map_.slots().size())) {
+        return 0.0;
+    }
+    const Slot& source = map_.slots().at(source_slot);
+    if (!poseInSlotSweep(track.poseAtS(0.0), source)) return 0.0;
+
+    // poseInSlotSweep already expands the dock-to-pre-dock channel by the
+    // vehicle dimensions. Locate its first exit, then refine only that local
+    // transition; this is a path-space boundary, not a timing threshold.
+    const double scan_step = std::max(
+        0.005, std::min(0.02, 0.1 * mp_.vehicle_length));
+    double inside_s = 0.0;
+    for (double sample_s = scan_step;
+         sample_s < track.length() + scan_step; sample_s += scan_step) {
+        const double clamped_s = std::min(sample_s, track.length());
+        if (poseInSlotSweep(track.poseAtS(clamped_s), source)) {
+            inside_s = clamped_s;
+            if (clamped_s >= track.length() - 1e-9) break;
+            continue;
+        }
+        double lo = inside_s;
+        double hi = clamped_s;
+        for (int iteration = 0; iteration < 24; ++iteration) {
+            const double mid = 0.5 * (lo + hi);
+            if (poseInSlotSweep(track.poseAtS(mid), source)) lo = mid;
+            else hi = mid;
+        }
+        return hi;
+    }
+    return track.length();
+}
+
 bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle, bool emit_log) {
     if (!cfg_.use_a1_cycle) return false;
     if (vehicle.current_slot < 0 ||
@@ -1167,6 +1202,8 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle, bool emit_log) {
     vehicle.track.set(leg.path);
     ++vehicle.path_gen;
     vehicle.path_s = 0.0;
+    vehicle.slot_departure_clear_s =
+        slotDepartureClearS(vehicle.track, vehicle.current_slot);
     vehicle.current_speed = 0.0;
     vehicle.wait_time = 0.0;
     vehicle.dwell_remaining = 0.0;
@@ -1336,6 +1373,7 @@ bool TaskAllocator::activatePreparedDropoffLeg(VehicleAgent& vehicle,
     vehicle.track = vehicle.pending_dropoff_track;
     ++vehicle.path_gen;
     vehicle.path_s = 0.0;
+    vehicle.slot_departure_clear_s = 0.0;
     vehicle.current_speed = 0.0;
     vehicle.wait_time = 0.0;
     vehicle.dwell_remaining = 0.0;

@@ -79,6 +79,9 @@ struct VehicleAgent {
     double dwell_remaining = 0.0;
     double path_s = 0.0;
     double current_speed = 0.0;
+    // Rear-axle path coordinate at which the complete body has cleared the
+    // source B-slot sweep. Zero means this leg has no slot-departure phase.
+    double slot_departure_clear_s = 0.0;
 
     // Simulation A1 preview: the B destination and A1->B path are prepared
     // as soon as pickup dwell starts, but they are not executed until the

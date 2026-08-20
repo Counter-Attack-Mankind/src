@@ -281,6 +281,8 @@ private:
     struct A1LaunchMetrics {
         unsigned long long allows = 0;
         unsigned long long holds = 0;
+        unsigned long long a1_prefix_holds = 0;
+        unsigned long long ordinary_road_holds = 0;
         unsigned long long retries = 0;
         unsigned long long released_after_hold = 0;
         double max_hold_duration = 0.0;
@@ -288,8 +290,9 @@ private:
 
     struct A1LaunchHoldState {
         double since = 0.0;
-        int owner_id = -1;
+        int blocker_id = -1;
         int candidate_path_gen = -1;
+        std::string reason;
     };
 
     void initCoordLog() {
@@ -1635,36 +1638,57 @@ private:
     }
 
     //==============《任务指派与路径生成函数》===================================
-    void logA1Launch(const VehicleAgent& vehicle,
-                     const VehicleAgent* owner,
-                     const char* result,
-                     const std::string& reason,
-                     int candidate_path_gen,
-                     const forklift_planner::multi_vehicle::RuleEngine::
-                         A1LaunchAdmission* admission = nullptr) {
+    void logSlotDeparture(
+        const VehicleAgent& vehicle, const VehicleAgent* owner,
+        const char* result, const std::string& reason,
+        const VehicleAgent& candidate,
+        const forklift_planner::multi_vehicle::RuleEngine::
+            SlotDepartureAdmission& admission) {
         std::ostringstream line;
-        line << "[A1_LAUNCH] time=" << readableSimTime(sim_time_)
+        line << "[SLOT_DEPARTURE] time=" << readableSimTime(sim_time_)
              << " vehicle=V" << vehicle.id << " owner=";
         if (owner != nullptr) line << "V" << owner->id;
         else line << "none";
         line << " result=" << result
              << " reason=" << reason
-             << " candidate_path_gen=" << candidate_path_gen
+             << " candidate_path_gen=" << candidate.path_gen
+             << " slot_departure_clear_s=" << std::fixed
+             << std::setprecision(3) << candidate.slot_departure_clear_s
              << " vehicle_mode=" << modeName(vehicle.mode)
-             << " vehicle_speed=" << std::fixed << std::setprecision(3)
-             << vehicle.current_speed
-             << " vehicle_path_s=" << vehicle.path_s;
+             << " vehicle_speed=" << vehicle.current_speed
+             << " vehicle_path_s=" << vehicle.path_s
+             << " blocker=";
+        if (admission.blocker_id >= 0) line << "V" << admission.blocker_id;
+        else line << "none";
+        line << " a1_prefix_conflict="
+             << (admission.a1_departure_conflict ? 1 : 0)
+             << " ordinary_road_conflict="
+             << (admission.ordinary_road_conflict ? 1 : 0);
+        if (admission.ordinary_road_conflict) {
+            line << " first_t=" << admission.first_conflict_t
+                 << " candidate_s=" << admission.candidate_conflict_s
+                 << " interaction="
+                 << (admission.interaction_type ==
+                             forklift_planner::multi_vehicle::
+                                 PairInteractionType::OPPOSING
+                         ? "OPPOSING"
+                         : admission.interaction_type ==
+                                   forklift_planner::multi_vehicle::
+                                       PairInteractionType::SAME_DIRECTION
+                               ? "SAME_DIRECTION" : "CROSSING");
+        }
         if (owner != nullptr) {
             line << " owner_phase=" << missionPhaseName(owner->mission_phase)
                  << " owner_path_gen=" << owner->path_gen;
         }
-        if (admission != nullptr) {
+        if (owner != nullptr) {
             line << " geometry="
-                 << (admission->owner_uses_pending_preview
+                 << (admission.a1.owner_uses_pending_preview
                          ? "pending_preview" : "actual_to_b")
-                 << " protected_zones=" << admission->protected_zone_count
+                 << " protected_zones="
+                 << admission.a1.protected_zone_count
                  << " actual_occupancy_priority="
-                 << (admission->actual_occupancy_priority ? 1 : 0);
+                 << (admission.a1.actual_occupancy_priority ? 1 : 0);
         }
         ROS_WARN("%s", line.str().c_str());
         coordLogWithContext(line.str(), "REAL", sim_plan_id_, -1, -1);
@@ -1685,60 +1709,72 @@ private:
             owner = agentById(future_a1_commitment_.owner_id);
         }
 
-        forklift_planner::multi_vehicle::RuleEngine::A1LaunchAdmission
-            admission;
-        if (owner != nullptr) {
-            admission = rule_engine_->checkA1LaunchAdmission(*owner,
-                                                              candidate);
-        }
-        const bool hold = owner != nullptr &&
-                          admission.departure_resource_conflict;
+        const auto admission = rule_engine_->checkSlotDepartureAdmission(
+            owner, candidate, agents_, rb_horizon_);
+        const bool hold = !admission.clear;
+        const std::string hold_reason = admission.ordinary_road_conflict
+            ? "ordinary_immediate_conflict"
+            : "a1_departure_prefix_conflict";
         auto held = a1_launch_holds_.find(vehicle.id);
         if (hold) {
+            const bool changed = held == a1_launch_holds_.end() ||
+                held->second.blocker_id != admission.blocker_id ||
+                held->second.reason != hold_reason;
             if (held == a1_launch_holds_.end()) {
                 A1LaunchHoldState state;
                 state.since = sim_time_;
-                state.owner_id = owner->id;
+                state.blocker_id = admission.blocker_id;
                 state.candidate_path_gen = candidate.path_gen;
+                state.reason = hold_reason;
                 a1_launch_holds_[vehicle.id] = state;
                 ++a1_launch_metrics_.holds;
-                logA1Launch(vehicle, owner, "HOLD",
-                            "departure_resource_conflict",
-                            candidate.path_gen, &admission);
+                if (admission.a1_departure_conflict) {
+                    ++a1_launch_metrics_.a1_prefix_holds;
+                }
+                if (admission.ordinary_road_conflict) {
+                    ++a1_launch_metrics_.ordinary_road_holds;
+                }
             } else {
                 ++a1_launch_metrics_.retries;
+                if (changed) {
+                    held->second.blocker_id = admission.blocker_id;
+                    held->second.reason = hold_reason;
+                }
+            }
+            if (changed) {
+                logSlotDeparture(vehicle, owner, "HOLD", hold_reason,
+                                 candidate, admission);
             }
             vehicle.mode = VehicleMode::DWELL;
             vehicle.dwell_remaining = 0.0;
             vehicle.action = VehicleAction::STOP;
             vehicle.requested_action = VehicleAction::STOP;
             vehicle.current_speed = 0.0;
-            vehicle.reason = "a1_launch_hold_V" +
-                             std::to_string(owner->id);
+            vehicle.reason = "slot_departure_hold_V" +
+                             std::to_string(admission.blocker_id);
             return false;
         }
 
         std::string allow_reason = "no_service_owner";
         if (owner != nullptr) {
-            allow_reason = admission.actual_occupancy_priority
+            allow_reason = admission.a1.actual_occupancy_priority
                 ? "actual_occupancy_priority"
-                : "departure_resource_clear";
+                : "slot_departure_clear";
         }
         if (held != a1_launch_holds_.end()) {
             const double duration = sim_time_ - held->second.since;
             a1_launch_metrics_.max_hold_duration = std::max(
                 a1_launch_metrics_.max_hold_duration, duration);
             ++a1_launch_metrics_.released_after_hold;
-            allow_reason = "departure_resource_clear_after_retry";
+            allow_reason = "slot_departure_clear_after_retry";
             a1_launch_holds_.erase(held);
         }
 
         const bool assigned = allocator_->assignPickupLeg(vehicle);
         if (assigned) {
             ++a1_launch_metrics_.allows;
-            logA1Launch(vehicle, owner, "ALLOW", allow_reason,
-                        vehicle.path_gen,
-                        owner != nullptr ? &admission : nullptr);
+            logSlotDeparture(vehicle, owner, "ALLOW", allow_reason,
+                             vehicle, admission);
         }
         return assigned;
     }
@@ -4137,11 +4173,14 @@ public:
                  a1_service_metrics_.arrival_ranking_preemptions,
                  a1_service_metrics_.faster_candidate_observations,
                  max_service_duration);
-        ROS_WARN("[BATCH_A1_LAUNCH] allow=%llu hold=%llu retries=%llu "
-                 "released_after_hold=%llu max_hold=%.1f "
+        ROS_WARN("[BATCH_A1_LAUNCH] allow=%llu hold=%llu "
+                 "a1_prefix_hold=%llu ordinary_road_hold=%llu "
+                 "retries=%llu released_after_hold=%llu max_hold=%.1f "
                  "active_holds=%zu",
                  a1_launch_metrics_.allows,
                  a1_launch_metrics_.holds,
+                 a1_launch_metrics_.a1_prefix_holds,
+                 a1_launch_metrics_.ordinary_road_holds,
                  a1_launch_metrics_.retries,
                  a1_launch_metrics_.released_after_hold,
                  max_launch_hold, a1_launch_holds_.size());

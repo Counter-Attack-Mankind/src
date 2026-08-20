@@ -266,6 +266,26 @@ public:
     A1LaunchAdmission checkA1LaunchAdmission(
         const VehicleAgent& service_owner,
         const VehicleAgent& launch_candidate) const;
+
+    struct SlotDepartureAdmission {
+        bool clear = true;
+        bool a1_departure_conflict = false;
+        bool ordinary_road_conflict = false;
+        int blocker_id = -1;
+        double first_conflict_t = -1.0;
+        double candidate_conflict_s = -1.0;
+        PairInteractionType interaction_type = PairInteractionType::NONE;
+        A1LaunchAdmission a1;
+    };
+
+    // Unified pre-activation gate for a candidate B->A1 leg. It predicts the
+    // complete horizon but holds only when the candidate conflicts before its
+    // complete body clears the source-slot sweep.
+    SlotDepartureAdmission checkSlotDepartureAdmission(
+        const VehicleAgent* service_owner,
+        const VehicleAgent& launch_candidate,
+        const std::vector<VehicleAgent>& vehicles,
+        double prediction_horizon) const;
     const DynamicSpeedMetrics& dynamicSpeedMetrics() const {
         return dynamic_speed_metrics_;
     }

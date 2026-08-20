@@ -179,6 +179,26 @@ PairSpeedCoordinationResult evaluatePairSpeedCoordination(
         }
     }
 
+    // A candidate that still contains a current/immediate conflict is not a
+    // successfully coordinated motion command. Keep the hard guard intact,
+    // but do not let either selected "winner" continue NOMINAL while the
+    // re-prediction is already unsafe at the current sample.
+    if (nominal_baseline.type != PairInteractionType::SAME_DIRECTION &&
+        !result.evaluation.conflict_free &&
+        result.evaluation.first_conflict_t &&
+        *result.evaluation.first_conflict_t <=
+            config.prediction_step + 1e-9) {
+        result.selected_action_a = VehicleAction::STOP;
+        result.selected_action_b = VehicleAction::STOP;
+        result.selected_winner_id = -1;
+        result.emergency_stop = true;
+        result.evaluation = evaluateSelectedAction(
+            vehicle_a, vehicle_b, potential_zones, map_param, config,
+            prediction_horizon, VehicleAction::STOP, VehicleAction::STOP,
+            result.original_first_conflict_t, &nominal_baseline, -1);
+        result.reason = "rolling_unresolved_immediate_stop";
+    }
+
     if (!result.reason.empty()) return result;
 
     const VehicleAction loser_action =

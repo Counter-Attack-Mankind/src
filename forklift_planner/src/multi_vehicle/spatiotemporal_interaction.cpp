@@ -283,10 +283,23 @@ PairInteractionResult detectSharedSegmentInteraction(
     result.shared_segment = segment;
     if (!segment.valid) return result;
 
+    const double public_enter_a = std::max(
+        segment.s_a_enter, vehicle_a.slot_departure_clear_s);
+    const double public_enter_b = std::max(
+        segment.s_b_enter, vehicle_b.slot_departure_clear_s);
     result.occupancy_a = predictOccupancyInterval(
-        prediction_a, segment.s_a_enter, segment.s_a_exit);
+        prediction_a, public_enter_a, segment.s_a_exit);
     result.occupancy_b = predictOccupancyInterval(
-        prediction_b, segment.s_b_enter, segment.s_b_exit);
+        prediction_b, public_enter_b, segment.s_b_exit);
+    // A path-space shared segment may begin at s=0 while the vehicle body is
+    // still leaving its source slot. That is a predicted occupancy interval,
+    // not proof that the vehicle already owns the public road segment.
+    if (vehicle_a.path_s + 1e-9 < vehicle_a.slot_departure_clear_s) {
+        result.occupancy_a.actually_inside = false;
+    }
+    if (vehicle_b.path_s + 1e-9 < vehicle_b.slot_departure_clear_s) {
+        result.occupancy_b.actually_inside = false;
+    }
     if (!result.occupancy_a.valid || !result.occupancy_b.valid) {
         return result;
     }

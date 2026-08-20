@@ -1184,11 +1184,19 @@ RuleEngine::A1LaunchAdmission RuleEngine::checkA1LaunchAdmission(
     const FutureA1ZoneSelection selected = selectFutureA1ProtectedZones(
         blocks, exit_is_lo, service_owner.a1_departure_priority_until_s,
         launch_candidate.path_s);
-    result.actual_occupancy_priority = selected.other_already_inside;
-    if (selected.other_already_inside) return result;
+    const bool candidate_has_cleared_slot =
+        launch_candidate.path_s + 1e-9 >=
+        launch_candidate.slot_departure_clear_s;
+    result.actual_occupancy_priority =
+        selected.other_already_inside && candidate_has_cleared_slot;
+    if (result.actual_occupancy_priority) return result;
 
     for (size_t index : selected.protected_indices) {
         const ConflictZone& zone = selected.normalized_zones[index];
+        if (zone.s_other_enter >
+            launch_candidate.slot_departure_clear_s + 1e-9) {
+            continue;
+        }
         if (!result.owner_uses_pending_preview &&
             service_owner.path_s > zone.s_self_exit + 1e-9) {
             continue;
@@ -1196,6 +1204,93 @@ RuleEngine::A1LaunchAdmission RuleEngine::checkA1LaunchAdmission(
         ++result.protected_zone_count;
     }
     result.departure_resource_conflict = result.protected_zone_count > 0;
+    return result;
+}
+
+RuleEngine::SlotDepartureAdmission RuleEngine::checkSlotDepartureAdmission(
+    const VehicleAgent* service_owner,
+    const VehicleAgent& launch_candidate,
+    const std::vector<VehicleAgent>& vehicles,
+    double prediction_horizon) const {
+    SlotDepartureAdmission result;
+    if (!launch_candidate.active() || launch_candidate.track.empty() ||
+        launch_candidate.mission_phase != MissionPhase::TO_A1) {
+        return result;
+    }
+
+    if (service_owner != nullptr &&
+        service_owner->id != launch_candidate.id) {
+        result.a1 = checkA1LaunchAdmission(*service_owner,
+                                           launch_candidate);
+        if (result.a1.departure_resource_conflict) {
+            result.clear = false;
+            result.a1_departure_conflict = true;
+            result.blocker_id = service_owner->id;
+        }
+    }
+
+    const double horizon = std::max(cfg_.prediction_step,
+                                    prediction_horizon);
+    const auto candidate_prediction = predictTrajectory(
+        launch_candidate, mp_, cfg_, VehicleAction::NOMINAL, horizon);
+    if (candidate_prediction.empty()) return result;
+
+    auto sampleAt = [](const auto& prediction, double time)
+        -> const PredictedKinematicSample& {
+        auto it = std::lower_bound(
+            prediction.begin(), prediction.end(), time,
+            [](const PredictedKinematicSample& sample, double value) {
+                return sample.t < value;
+            });
+        return it == prediction.end() ? prediction.back() : *it;
+    };
+    constexpr double kPi = 3.14159265358979323846;
+    auto motionHeading = [&](const VehicleAgent& vehicle, double s) {
+        double heading = vehicle.track.poseAtS(s).theta;
+        if (vehicle.track.typeAtS(s) == WpType::REVERSE) heading += kPi;
+        return heading;
+    };
+
+    for (const VehicleAgent& occupant : vehicles) {
+        if (occupant.id == launch_candidate.id || !occupant.active() ||
+            occupant.track.empty()) {
+            continue;
+        }
+        const auto occupant_prediction = predictTrajectory(
+            occupant, mp_, cfg_, VehicleAction::NOMINAL, horizon);
+        const PairInteractionResult physical =
+            detectPairInteractionFromPredictions(
+                launch_candidate, occupant, {}, candidate_prediction,
+                occupant_prediction);
+        if (!physical.event.valid) continue;
+
+        const PredictedKinematicSample& candidate_sample = sampleAt(
+            candidate_prediction, physical.event.first_t);
+        if (candidate_sample.s >
+            launch_candidate.slot_departure_clear_s + 1e-9) {
+            continue;
+        }
+        if (result.ordinary_road_conflict &&
+            physical.event.first_t >= result.first_conflict_t - 1e-9) {
+            continue;
+        }
+
+        const PredictedKinematicSample& occupant_sample = sampleAt(
+            occupant_prediction, physical.event.first_t);
+        const double direction_dot = std::cos(
+            motionHeading(launch_candidate, candidate_sample.s) -
+            motionHeading(occupant, occupant_sample.s));
+        result.interaction_type = direction_dot < -0.5
+            ? PairInteractionType::OPPOSING
+            : direction_dot > 0.7
+                ? PairInteractionType::SAME_DIRECTION
+                : PairInteractionType::CROSSING;
+        result.clear = false;
+        result.ordinary_road_conflict = true;
+        result.blocker_id = occupant.id;
+        result.first_conflict_t = physical.event.first_t;
+        result.candidate_conflict_s = candidate_sample.s;
+    }
     return result;
 }
 
@@ -2015,7 +2110,11 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                             line << " delay="
                                  << *speed_result.evaluation.conflict_delay;
                         }
-                        line << " accepted=true reason=" << speed_result.reason
+                        const bool accepted =
+                            speed_result.evaluation.conflict_free ||
+                            intervention_band == DynamicInterventionBand::FAR;
+                        line << " accepted=" << (accepted ? "true" : "false")
+                             << " reason=" << speed_result.reason
                              << " reservation="
                              << "not_created";
                         coord_log_sink_(line.str());
@@ -2039,7 +2138,9 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                                    : speed_result.selected_action_a)
                             : VehicleAction::NOMINAL,
                         preferred_winner,
-                        preferred_winner == a.id ? b.id : a.id,
+                        preferred_winner == a.id
+                            ? b.id
+                            : preferred_winner == b.id ? a.id : -1,
                         decimateTimedOverlaps(event.timed_overlaps),
                         interaction.type, interaction.occupancy_a,
                         interaction.occupancy_b, event.last_t);

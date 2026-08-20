@@ -265,6 +265,33 @@ int main() {
         return fail("insufficient braking margin was not detected");
     }
 
+    // An OPPOSING candidate that remains unsafe at t=0 must not leave a
+    // nominal "winner" moving under an accepted coordination result.
+    VehicleAgent immediate_a = crossingVehicle(10, 0.0, false, 0.0);
+    VehicleAgent immediate_b = crossingVehicle(11, 0.0, false, 0.0);
+    immediate_b.track.set(RoughPath{
+        wp(0.0, 0.0, 3.14159265358979323846),
+        wp(-2.0, 0.0, 3.14159265358979323846)});
+    PairInteractionResult immediate_baseline;
+    immediate_baseline.type = PairInteractionType::OPPOSING;
+    immediate_baseline.event.valid = true;
+    immediate_baseline.event.first_t = 0.0;
+    immediate_baseline.shared_segment.valid = true;
+    immediate_baseline.shared_segment.s_a_enter = 0.0;
+    immediate_baseline.shared_segment.s_a_exit = 1.0;
+    immediate_baseline.shared_segment.s_b_enter = 0.0;
+    immediate_baseline.shared_segment.s_b_exit = 1.0;
+    const auto unresolved = evaluatePairSpeedCoordination(
+        immediate_a, immediate_b, {}, immediate_baseline, map_param,
+        config, 15.0, immediate_b.id, true);
+    if (unresolved.evaluation.conflict_free ||
+        unresolved.selected_action_a != VehicleAction::STOP ||
+        unresolved.selected_action_b != VehicleAction::STOP ||
+        unresolved.selected_winner_id != -1 ||
+        unresolved.reason != "rolling_unresolved_immediate_stop") {
+        return fail("unresolved immediate conflict retained a moving winner");
+    }
+
     std::cout << "[MID-DELAY] baseline_first_t="
               << *escalated_mid->original_first_conflict_t
               << " raw_yield_delay=" << *raw_yield_delay

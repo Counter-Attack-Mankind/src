@@ -85,6 +85,8 @@ public:
 
     bool hasValidOutbound(int slot) const;
     bool hasValidPickupLeg(int slot) const;
+    double slotDepartureClearS(const PathTrack& track,
+                               int source_slot) const;
 
     // Independent A1 facility definition.
     Slot a1PickupSlot() const;

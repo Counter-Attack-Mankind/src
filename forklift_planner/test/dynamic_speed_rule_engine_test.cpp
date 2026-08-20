@@ -84,6 +84,61 @@ int main() {
     config.prediction_horizon = 15.0;
     config.prediction_step = 0.05;
 
+    // Slot departure admission gives an already ACTIVE road vehicle priority
+    // only when synchronized OBB overlap occurs before the candidate clears
+    // its source-slot prefix. A later conflict remains rolling-coordinator
+    // work and must not hold the parked vehicle.
+    RuleEngine admission_engine(map_param, config);
+    VehicleAgent launch_candidate = crossingVehicle(20, 0.0, false);
+    launch_candidate.track.set(RoughPath{
+        wp(0.0, 0.0, 0.0), wp(2.0, 0.0, 0.0)});
+    launch_candidate.slot_departure_clear_s = 0.5;
+    VehicleAgent immediate_occupant = crossingVehicle(21, 0.0, true);
+    immediate_occupant.track.set(RoughPath{
+        wp(0.0, 0.0, 1.5707963267948966),
+        wp(0.0, 2.0, 1.5707963267948966)});
+    const auto immediate_admission =
+        admission_engine.checkSlotDepartureAdmission(
+            nullptr, launch_candidate, {immediate_occupant}, 15.0);
+    if (immediate_admission.clear ||
+        !immediate_admission.ordinary_road_conflict ||
+        immediate_admission.blocker_id != immediate_occupant.id ||
+        immediate_admission.candidate_conflict_s >
+            launch_candidate.slot_departure_clear_s + 1e-9) {
+        return fail("immediate slot departure conflict was not held");
+    }
+
+    VehicleAgent later_occupant = crossingVehicle(22, 0.0, true);
+    later_occupant.track.set(RoughPath{
+        wp(1.5, -1.5, 1.5707963267948966),
+        wp(1.5, 2.0, 1.5707963267948966)});
+    const auto later_admission =
+        admission_engine.checkSlotDepartureAdmission(
+            nullptr, launch_candidate, {later_occupant}, 15.0);
+    if (!later_admission.clear ||
+        later_admission.ordinary_road_conflict) {
+        return fail("post-slot future conflict over-held departure");
+    }
+
+    VehicleAgent service_owner = crossingVehicle(23, 1.0, true);
+    service_owner.pending_dropoff_valid = true;
+    service_owner.pending_dropoff_track = later_occupant.track;
+    service_owner.a1_departure_priority_until_s =
+        service_owner.pending_dropoff_track.length();
+    const auto far_a1 = admission_engine.checkA1LaunchAdmission(
+        service_owner, launch_candidate);
+    if (far_a1.departure_resource_conflict) {
+        return fail("far A1 departure closure over-held slot launch");
+    }
+    service_owner.pending_dropoff_track = immediate_occupant.track;
+    service_owner.a1_departure_priority_until_s =
+        service_owner.pending_dropoff_track.length();
+    const auto near_a1 = admission_engine.checkA1LaunchAdmission(
+        service_owner, launch_candidate);
+    if (!near_a1.departure_resource_conflict) {
+        return fail("immediate A1 departure prefix conflict was not held");
+    }
+
     RuleEngine far_engine(map_param, config);
     std::vector<VehicleAgent> far{
         crossingVehicle(0, 2.50, false),
