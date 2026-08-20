@@ -25,6 +25,7 @@ VehicleAgent crossingVehicle(int id, double approach, bool vertical,
     result.mode = VehicleMode::ACTIVE;
     result.action = VehicleAction::NOMINAL;
     result.requested_action = VehicleAction::NOMINAL;
+    result.mission_phase = MissionPhase::TO_A1;
     result.path_gen = 1;
     result.current_speed = speed;
     result.track.set(vertical
@@ -155,18 +156,116 @@ int main() {
         return fail("ordinary already-inside reservation was not retired");
     }
 
-    RuleEngine a1_engine(map_param, config);
-    std::vector<VehicleAgent> a1{
+    // A single vehicle departure flag is not pair-level A1 authority.
+    RuleEngine departure_flag_engine(map_param, config);
+    std::vector<VehicleAgent> departure_flag{
         crossingVehicle(0, 0.30, false),
         crossingVehicle(1, 0.70, true)};
-    a1[0].a1_departure_committed = true;
-    a1[0].a1_departure_priority_until_s = 1.0;
-    a1_engine.decide(a1, 0.1, 15.0);
-    if (a1_engine.snapshot().reservations.empty() ||
-        a1_engine.snapshot().reservations.begin()->second.create_reason !=
-            "a1_related" ||
-        a1_engine.dynamicSpeedMetrics().a1_fallbacks == 0) {
-        return fail("A1 special pair did not retain legacy reservation");
+    departure_flag[0].mission_phase = MissionPhase::TO_B;
+    departure_flag[1].mission_phase = MissionPhase::TO_B;
+    departure_flag[0].a1_departure_committed = true;
+    departure_flag[0].a1_departure_priority_until_s = 1.0;
+    departure_flag_engine.decide(departure_flag, 0.1, 15.0);
+    if (!departure_flag_engine.snapshot().reservations.empty() ||
+        departure_flag_engine.dynamicSpeedMetrics().baseline_conflicts == 0 ||
+        departure_flag_engine.dynamicSpeedMetrics().a1_fallbacks != 0) {
+        return fail("single A1 departure flag still captured an ordinary pair");
+    }
+
+    // Future owner identity without a real future-exit conflict remains an
+    // ordinary crossing and must use rolling dynamic coordination.
+    RuleEngine identity_engine(map_param, config);
+    std::vector<VehicleAgent> identity{
+        crossingVehicle(0, 1.50, false),
+        crossingVehicle(1, 1.90, true)};
+    identity[0].pending_dropoff_valid = true;
+    identity[0].pending_dropoff_track.set(
+        RoughPath{wp(10.0, 10.0, 0.0), wp(12.0, 10.0, 0.0)});
+    identity[0].a1_departure_priority_until_s = 1.0;
+    RuleEngine::FutureA1Commitment identity_owner;
+    identity_owner.owner_id = 0;
+    identity_owner.owner_path_gen = 1;
+    identity_owner.predicted_a1_arrival_time = 5.0;
+    identity_owner.predicted_to_b_time = 10.0;
+    identity_engine.setFutureA1Commitment(identity_owner);
+    identity_engine.decide(identity, 0.1, 15.0);
+    if (!identity_engine.snapshot().reservations.empty() ||
+        identity_engine.dynamicSpeedMetrics().mid_decisions == 0 ||
+        identity_engine.dynamicSpeedMetrics().a1_fallbacks != 0) {
+        return fail("Future A1 owner identity still captured an ordinary pair");
+    }
+
+    // An inactive staged handoff is retained for TO_B activation, but it is
+    // not current pair authority while the future exit has no real conflict.
+    RuleEngine staged_engine(map_param, config);
+    std::vector<VehicleAgent> staged = identity;
+    RuleEngine::SimSnapshot staged_state;
+    RuleEngine::DepartureClusterCommitment staged_commitment;
+    staged_commitment.owner_id = 0;
+    staged_commitment.owner_path_gen = 2;
+    staged_commitment.other_id = 1;
+    staged_commitment.other_path_gen = 1;
+    staged_commitment.active = false;
+    staged_state.departure_clusters[{0, 1}] = staged_commitment;
+    staged_engine.restore(staged_state);
+    staged_engine.setFutureA1Commitment(identity_owner);
+    staged_engine.decide(staged, 0.1, 15.0);
+    if (!staged_engine.snapshot().reservations.empty() ||
+        staged_engine.dynamicSpeedMetrics().mid_decisions == 0 ||
+        staged_engine.dynamicSpeedMetrics().a1_fallbacks != 0) {
+        return fail("inactive staged handoff still captured an ordinary pair");
+    }
+
+    // A valid active departure cluster remains strong pair-level A1
+    // authority and retains the legacy A1 reservation chain.
+    RuleEngine active_cluster_engine(map_param, config);
+    std::vector<VehicleAgent> active_cluster{
+        crossingVehicle(0, 0.30, false),
+        crossingVehicle(1, 0.70, true)};
+    active_cluster[0].mission_phase = MissionPhase::TO_B;
+    RuleEngine::SimSnapshot active_state;
+    RuleEngine::DepartureClusterCommitment active_commitment;
+    active_commitment.owner_id = 0;
+    active_commitment.owner_path_gen = 1;
+    active_commitment.other_id = 1;
+    active_commitment.other_path_gen = 1;
+    active_commitment.intervals.push_back(
+        FutureA1ConflictInterval{0.10, 1.50, 0.40, 1.60});
+    active_commitment.owner_release_exit_s = 1.50;
+    active_commitment.other_release_exit_s = 1.60;
+    active_commitment.active = true;
+    active_state.departure_clusters[{0, 1}] = active_commitment;
+    active_cluster_engine.restore(active_state);
+    active_cluster_engine.decide(active_cluster, 0.1, 15.0);
+    if (active_cluster_engine.snapshot().reservations.empty() ||
+        active_cluster_engine.snapshot().reservations.begin()->second.
+                create_reason != "a1_related" ||
+        active_cluster_engine.dynamicSpeedMetrics().a1_fallbacks == 0) {
+        return fail("active departure cluster lost A1 pair authority");
+    }
+
+    // PICKUP_DWELL is inactive for pairwise motion, but future admission must
+    // still stage the synthetic TO_B conflict for a TO_A1 vehicle.
+    RuleEngine pickup_engine(map_param, config);
+    std::vector<VehicleAgent> pickup{
+        crossingVehicle(0, 0.30, false),
+        crossingVehicle(1, 0.70, true)};
+    pickup[0].mode = VehicleMode::DWELL;
+    pickup[0].mission_phase = MissionPhase::PICKUP_DWELL;
+    pickup[0].pending_dropoff_valid = true;
+    pickup[0].pending_dropoff_track = pickup[0].track;
+    pickup[0].a1_departure_priority_until_s = 1.0;
+    RuleEngine::FutureA1Commitment pickup_owner;
+    pickup_owner.owner_id = 0;
+    pickup_owner.owner_path_gen = 1;
+    pickup_owner.predicted_a1_arrival_time = 0.0;
+    pickup_owner.predicted_to_b_time = 5.0;
+    pickup_engine.setFutureA1Commitment(pickup_owner);
+    pickup_engine.decide(pickup, 0.1, 15.0);
+    const auto pickup_state = pickup_engine.snapshot();
+    if (pickup_state.departure_clusters.empty() ||
+        pickup_state.departure_clusters.begin()->second.active) {
+        return fail("PICKUP_DWELL future departure protection was not staged");
     }
 
     // Three mutually crossing vehicles exercise all three pairwise dynamic

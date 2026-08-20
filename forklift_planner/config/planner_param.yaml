@@ -28,7 +28,7 @@ forklift_planner:
 
   multi_vehicle:
     # 多车基础配置
-    vehicle_count: 8
+    vehicle_count: 2
     random_seed: 2026
     # true: 固定伪随机序列，使用 random_seed，便于重复实验与横向比较
     # false: 每次启动使用系统随机种子，任务目标序列会变化
@@ -135,5 +135,5 @@ forklift_planner:
     recent_row_memory: 4
 
     # 可视化
-    show_paths: true
+    show_paths: false
     show_prediction_conflicts: true

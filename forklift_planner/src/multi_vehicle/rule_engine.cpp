@@ -1588,24 +1588,13 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 }
             }
 
-            const bool a_a1_departure =
-                a.a1_departure_committed &&
-                a.path_s < a.a1_departure_priority_until_s - 1e-9;
-            const bool b_a1_departure =
-                b.a1_departure_committed &&
-                b.path_s < b.a1_departure_priority_until_s - 1e-9;
-            const bool future_a1_pair =
-                future_a1_commitment_.valid() &&
-                ((a.id == future_a1_commitment_.owner_id &&
-                  a.path_gen == future_a1_commitment_.owner_path_gen) ||
-                 (b.id == future_a1_commitment_.owner_id &&
-                  b.path_gen == future_a1_commitment_.owner_path_gen));
             int departure_cluster_owner =
                 departureClusterOwnerForPair(a, b);
             int future_owner = futureA1OwnerForPair(a, b);
+            // A1 ownership is pair/resource scoped, not owner-identity scoped.
+            // A staged handoff or a vehicle's departure flag alone does not
+            // remove its current-road interactions from rolling coordination.
             const bool a1_related =
-                departure_cluster_commitments_.count(key) != 0 ||
-                future_a1_pair || a_a1_departure || b_a1_departure ||
                 departure_cluster_owner >= 0 || future_owner >= 0;
             const bool ordinary = !a1_related;
 
@@ -2038,13 +2027,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     holder = departure_cluster_owner;
                 } else if (future_owner >= 0) {
                     holder = future_owner;
-                } else if (a_a1_departure != b_a1_departure) {
-                    // Normal A1 case: neither vehicle has entered this event,
-                    // so the prepared pickup departure owns only this visible
-                    // spatiotemporal conflict. An already-inside vehicle is
-                    // handled by the branch above and is never forced to obey
-                    // an impossible late stop.
-                    holder = a_a1_departure ? a.id : b.id;
                 } else {
                     if (a_terminal != b_terminal) {
                         holder = a_terminal ? a.id : b.id;
