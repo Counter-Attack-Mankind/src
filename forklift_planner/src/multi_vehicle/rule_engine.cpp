@@ -1143,6 +1143,62 @@ int RuleEngine::departureClusterOwnerForPair(const VehicleAgent& a,
     return owner->id;
 }
 
+RuleEngine::A1LaunchAdmission RuleEngine::checkA1LaunchAdmission(
+    const VehicleAgent& service_owner,
+    const VehicleAgent& launch_candidate) const {
+    A1LaunchAdmission result;
+    if (!launch_candidate.active() || launch_candidate.track.empty() ||
+        launch_candidate.mission_phase != MissionPhase::TO_A1 ||
+        service_owner.id == launch_candidate.id ||
+        service_owner.a1_departure_priority_until_s <= 1e-9) {
+        return result;
+    }
+
+    VehicleAgent exit = service_owner;
+    if ((service_owner.mission_phase == MissionPhase::TO_A1 ||
+         service_owner.mission_phase == MissionPhase::PICKUP_DWELL) &&
+        service_owner.pending_dropoff_valid &&
+        !service_owner.pending_dropoff_track.empty()) {
+        exit.track = service_owner.pending_dropoff_track;
+        exit.path_s = 0.0;
+        exit.path_gen = service_owner.path_gen + 1;
+        exit.mode = VehicleMode::ACTIVE;
+        exit.mission_phase = MissionPhase::TO_B;
+        result.owner_uses_pending_preview = true;
+    } else if (service_owner.active() &&
+               service_owner.mission_phase == MissionPhase::TO_B &&
+               service_owner.a1_departure_committed &&
+               !service_owner.track.empty() &&
+               service_owner.path_s <
+                   service_owner.a1_departure_priority_until_s - 1e-9) {
+        // Use the actual TO_B path and current progress while its protected
+        // prefix is still occupied.
+    } else {
+        return result;
+    }
+
+    const bool exit_is_lo = exit.id < launch_candidate.id;
+    const VehicleAgent& lo = exit_is_lo ? exit : launch_candidate;
+    const VehicleAgent& hi = exit_is_lo ? launch_candidate : exit;
+    const std::vector<ConflictZone> blocks = computeConflictZonesFull(lo, hi);
+    const FutureA1ZoneSelection selected = selectFutureA1ProtectedZones(
+        blocks, exit_is_lo, service_owner.a1_departure_priority_until_s,
+        launch_candidate.path_s);
+    result.actual_occupancy_priority = selected.other_already_inside;
+    if (selected.other_already_inside) return result;
+
+    for (size_t index : selected.protected_indices) {
+        const ConflictZone& zone = selected.normalized_zones[index];
+        if (!result.owner_uses_pending_preview &&
+            service_owner.path_s > zone.s_self_exit + 1e-9) {
+            continue;
+        }
+        ++result.protected_zone_count;
+    }
+    result.departure_resource_conflict = result.protected_zone_count > 0;
+    return result;
+}
+
 void RuleEngine::enforceDepartureClusterCommitments(
     std::vector<VehicleAgent>& vehicles, double dt) {
     auto agentById = [&](int id) -> VehicleAgent* {

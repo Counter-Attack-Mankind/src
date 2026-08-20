@@ -14,7 +14,6 @@ using forklift_planner::multi_vehicle::departureClusterGenerationsMatch;
 using forklift_planner::multi_vehicle::futureA1ArrivalWithinHorizon;
 using forklift_planner::multi_vehicle::futureA1OtherInsideCluster;
 using forklift_planner::multi_vehicle::futureA1StopS;
-using forklift_planner::multi_vehicle::futureA1TransitionReason;
 using forklift_planner::multi_vehicle::selectFutureA1ProtectedCluster;
 using forklift_planner::multi_vehicle::selectFutureA1Candidate;
 
@@ -38,7 +37,7 @@ int main() {
         return fail("arrival beyond horizon was accepted");
     }
 
-    // B. A clearly earlier new candidate replaces the old owner.
+    // B. With no service owner, ranking selects the clearly earlier candidate.
     const std::vector<FutureA1RankedCandidate> candidates{
         {0, 14.0}, {1, 6.0}};
     const int selected = selectFutureA1Candidate(
@@ -46,13 +45,7 @@ int main() {
             return std::min(lhs, rhs);
         });
     if (selected != 1) return fail("earlier candidate did not win");
-    if (futureA1TransitionReason(
-            true, 0, true, selected, false, true, false, false) !=
-        "earlier_candidate") {
-        return fail("owner change was not classified as earlier_candidate");
-    }
-    std::cout << "B event=CHANGE old=V0 new=V1 "
-                 "change_reason=earlier_candidate\n";
+    std::cout << "B event=SELECT owner=V1 reason=earlier_candidate\n";
 
     // C. Admission must stop before the most-upstream relevant entry.
     const std::optional<double> stop_s = futureA1StopS(3.075, 2.175, 0.01);

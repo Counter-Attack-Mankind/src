@@ -252,6 +252,20 @@ public:
         unsigned long long reservation_create_multi_vehicle = 0;
         unsigned long long reservation_create_other = 0;
     };
+
+    struct A1LaunchAdmission {
+        bool departure_resource_conflict = false;
+        bool actual_occupancy_priority = false;
+        bool owner_uses_pending_preview = false;
+        size_t protected_zone_count = 0;
+    };
+
+    // Read-only resource check for a vehicle that is still parked at B and is
+    // considering a TO_A1 launch. Service-owner identity alone is never a
+    // reason to hold: only overlap with the owner's protected A1->B prefix is.
+    A1LaunchAdmission checkA1LaunchAdmission(
+        const VehicleAgent& service_owner,
+        const VehicleAgent& launch_candidate) const;
     const DynamicSpeedMetrics& dynamicSpeedMetrics() const {
         return dynamic_speed_metrics_;
     }

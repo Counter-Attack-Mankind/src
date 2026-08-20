@@ -266,6 +266,32 @@ private:
         std::map<int, std::string> excluded;
     };
 
+    struct A1ServiceMetrics {
+        unsigned long long creates = 0;
+        unsigned long long holds = 0;
+        unsigned long long changes = 0;
+        unsigned long long releases = 0;
+        unsigned long long invalidates = 0;
+        unsigned long long arrival_ranking_preemptions = 0;
+        unsigned long long faster_candidate_observations = 0;
+        double active_since = -1.0;
+        double max_duration = 0.0;
+    };
+
+    struct A1LaunchMetrics {
+        unsigned long long allows = 0;
+        unsigned long long holds = 0;
+        unsigned long long retries = 0;
+        unsigned long long released_after_hold = 0;
+        double max_hold_duration = 0.0;
+    };
+
+    struct A1LaunchHoldState {
+        double since = 0.0;
+        int owner_id = -1;
+        int candidate_path_gen = -1;
+    };
+
     void initCoordLog() {
         if (!coord_log_enabled_) return;
         std::error_code error;
@@ -867,57 +893,117 @@ private:
     }
 
     forklift_planner::multi_vehicle::RuleEngine::FutureA1Commitment
-    retainLockedFutureA1Owner() const {
+    retainLockedFutureA1Owner(const A1ArrivalSummary& summary,
+                              std::string& retain_reason) const {
         using Commitment = forklift_planner::multi_vehicle::RuleEngine::
             FutureA1Commitment;
+        retain_reason = "no_service_owner";
         if (!future_a1_commitment_.valid()) return Commitment{};
 
         const VehicleAgent* owner =
             agentById_c(future_a1_commitment_.owner_id);
-        if (owner == nullptr ||
-            owner->path_gen != future_a1_commitment_.owner_path_gen ||
-            !owner->pending_dropoff_valid ||
-            owner->pending_dropoff_track.empty()) {
+        if (owner == nullptr) {
+            retain_reason = "owner_missing";
             return Commitment{};
         }
 
-        if (owner->mode != VehicleMode::DWELL ||
-            owner->mission_phase != MissionPhase::PICKUP_DWELL) {
-            return Commitment{};
-        }
         Commitment retained = future_a1_commitment_;
-        retained.predicted_a1_arrival_time = 0.0;
-        retained.predicted_to_b_time = std::max(0.0, owner->dwell_remaining);
-        return retained;
-    }
+        if (owner->mission_phase == MissionPhase::TO_A1) {
+            if (owner->mode != VehicleMode::ACTIVE ||
+                owner->leg_target != LegTargetKind::A1 ||
+                owner->path_gen != retained.owner_path_gen ||
+                !owner->pending_dropoff_valid ||
+                owner->pending_dropoff_track.empty()) {
+                retain_reason = "to_a1_service_invalid";
+                return Commitment{};
+            }
+            const auto prediction = summary.candidates.find(owner->id);
+            if (prediction != summary.candidates.end()) {
+                retained.predicted_a1_arrival_time =
+                    prediction->second.arrival_time;
+                retained.predicted_to_b_time = prediction->second.to_b_time;
+            }
+            retain_reason = "service_owner_locked_to_a1";
+            return retained;
+        }
 
-    std::string futureA1ChangeReason(
-        const forklift_planner::multi_vehicle::RuleEngine::
-            FutureA1Commitment& previous,
-        const forklift_planner::multi_vehicle::RuleEngine::
-            FutureA1Commitment& current,
-        const A1ArrivalSummary& summary,
-        bool owner_locked) const {
-        const VehicleAgent* old_owner = agentById_c(previous.owner_id);
-        const bool departure_handoff =
-            old_owner != nullptr &&
-            old_owner->mission_phase == MissionPhase::TO_B;
-        const bool previous_owner_valid =
-            old_owner != nullptr &&
-            old_owner->path_gen == previous.owner_path_gen &&
-            old_owner->pending_dropoff_valid &&
-            !old_owner->pending_dropoff_track.empty() &&
-            (old_owner->mission_phase == MissionPhase::TO_A1 ||
-             old_owner->mission_phase == MissionPhase::PICKUP_DWELL);
-        const auto excluded = summary.excluded.find(previous.owner_id);
-        const bool horizon_exceeded =
-            excluded != summary.excluded.end() &&
-            excluded->second == "horizon_exceeded";
-        return forklift_planner::multi_vehicle::futureA1TransitionReason(
-            previous.valid(), previous.owner_id,
-            current.valid(), current.owner_id,
-            owner_locked, previous_owner_valid, horizon_exceeded,
-            departure_handoff);
+        if (owner->mission_phase == MissionPhase::PICKUP_DWELL) {
+            if (owner->mode != VehicleMode::DWELL ||
+                owner->path_gen != retained.owner_path_gen ||
+                !owner->pending_dropoff_valid ||
+                owner->pending_dropoff_track.empty()) {
+                retain_reason = "pickup_service_invalid";
+                return Commitment{};
+            }
+            retained.predicted_a1_arrival_time = 0.0;
+            retained.predicted_to_b_time =
+                std::max(0.0, owner->dwell_remaining);
+            retain_reason = "service_owner_locked_pickup";
+            return retained;
+        }
+
+        if (owner->mission_phase == MissionPhase::UNLOAD_DWELL &&
+            owner->path_gen == retained.owner_path_gen &&
+            owner->path_s >=
+                owner->a1_departure_priority_until_s - 1e-9) {
+            size_t active_clusters = 0;
+            const auto rule_state = rule_engine_->snapshot();
+            for (const auto& entry : rule_state.departure_clusters) {
+                if (entry.second.active &&
+                    entry.second.owner_id == owner->id) {
+                    ++active_clusters;
+                }
+            }
+            if (active_clusters == 0) {
+                retain_reason = "departure_resource_clear";
+                return Commitment{};
+            }
+        }
+
+        if (owner->mission_phase != MissionPhase::TO_B ||
+            owner->mode != VehicleMode::ACTIVE ||
+            owner->leg_target != LegTargetKind::B_SLOT || !owner->loaded ||
+            owner->a1_departure_priority_until_s <= 1e-9) {
+            retain_reason = "service_phase_invalid";
+            return Commitment{};
+        }
+
+        const bool same_generation =
+            owner->path_gen == retained.owner_path_gen;
+        const bool prepared_handoff =
+            owner->path_gen == retained.owner_path_gen + 1;
+        if (!same_generation && !prepared_handoff) {
+            retain_reason = "unexplained_path_gen_change";
+            return Commitment{};
+        }
+
+        size_t active_clusters = 0;
+        const auto rule_state = rule_engine_->snapshot();
+        for (const auto& entry : rule_state.departure_clusters) {
+            if (entry.second.active && entry.second.owner_id == owner->id) {
+                ++active_clusters;
+            }
+        }
+        const bool prefix_clear =
+            owner->path_s >= owner->a1_departure_priority_until_s - 1e-9;
+        if (prefix_clear && active_clusters == 0) {
+            retain_reason = "departure_resource_clear";
+            return Commitment{};
+        }
+        if (!owner->a1_departure_committed && !prefix_clear) {
+            retain_reason = "departure_commitment_lost_before_clear";
+            return Commitment{};
+        }
+
+        // The only permitted generation handoff is the prepared A1 service's
+        // TO_A1 N -> TO_B N+1 transition.
+        retained.owner_path_gen = owner->path_gen;
+        retained.predicted_a1_arrival_time = 0.0;
+        retained.predicted_to_b_time = 0.0;
+        retain_reason = active_clusters > 0
+            ? "service_owner_locked_active_cluster"
+            : "service_owner_locked_departure_prefix";
+        return retained;
     }
 
     void logFutureA1Transition(
@@ -929,16 +1015,16 @@ private:
         const std::string& change_reason) {
         const bool same_owner =
             previous.valid() && current.valid() &&
-            previous.owner_id == current.owner_id &&
-            previous.owner_path_gen == current.owner_path_gen;
+            previous.owner_id == current.owner_id;
         std::string event;
         if (same_owner) {
             event = "HOLD";
-        } else if (!previous.valid()) {
+        } else if (!previous.valid() && current.valid()) {
             event = "CREATE";
-        } else if (!current.valid()) {
-            event = "RELEASE";
-        } else if (previous.valid()) {
+        } else if (previous.valid() && !current.valid()) {
+            event = change_reason == "departure_resource_clear"
+                ? "RELEASE" : "INVALIDATE";
+        } else if (previous.valid() && current.valid()) {
             event = "CHANGE";
         } else {
             event = "HOLD";
@@ -965,6 +1051,46 @@ private:
         }
         excluded << "]";
 
+        const int observed_owner = current.valid()
+            ? current.owner_id : previous.owner_id;
+        int faster_candidate_id = -1;
+        const auto owner_prediction = summary.candidates.find(observed_owner);
+        if (owner_prediction != summary.candidates.end()) {
+            const double tie_window = std::max(0.02, cfg_.prediction_step);
+            for (const auto& item : summary.candidates) {
+                if (item.first != observed_owner &&
+                    item.second.arrival_time + tie_window <
+                        owner_prediction->second.arrival_time) {
+                    faster_candidate_id = item.first;
+                    break;
+                }
+            }
+        }
+        const VehicleAgent* logged_owner = agentById_c(observed_owner);
+        const std::string owner_phase = logged_owner == nullptr
+            ? "MISSING" : missionPhaseName(logged_owner->mission_phase);
+
+        if (event == "CREATE") {
+            ++a1_service_metrics_.creates;
+            a1_service_metrics_.active_since = sim_time_;
+        } else if (event == "HOLD" && current.valid()) {
+            ++a1_service_metrics_.holds;
+        } else if (event == "CHANGE") {
+            ++a1_service_metrics_.changes;
+            ++a1_service_metrics_.arrival_ranking_preemptions;
+        } else if (event == "RELEASE" || event == "INVALIDATE") {
+            const double duration = a1_service_metrics_.active_since >= 0.0
+                ? sim_time_ - a1_service_metrics_.active_since : 0.0;
+            a1_service_metrics_.max_duration = std::max(
+                a1_service_metrics_.max_duration, duration);
+            a1_service_metrics_.active_since = -1.0;
+            if (event == "RELEASE") ++a1_service_metrics_.releases;
+            else ++a1_service_metrics_.invalidates;
+        }
+        if (same_owner && faster_candidate_id >= 0) {
+            ++a1_service_metrics_.faster_candidate_observations;
+        }
+
         char line[1024];
         if (current.valid()) {
             const std::string old_owner = previous.valid()
@@ -974,22 +1100,27 @@ private:
                 line, sizeof(line),
                 "[FUTURE_A1] time=%s event=%s old=%s owner=V%d "
                 "arrival=%.2fs to_b=%.2fs path_gen=%d "
-                "horizon=%.2fs candidates=%s excluded=%s change_reason=%s",
+                "phase=%s horizon=%.2fs candidates=%s excluded=%s "
+                "faster_candidate=%s change_reason=%s",
                 readableSimTime(sim_time_).c_str(), event.c_str(),
                 old_owner.c_str(),
                 current.owner_id, current.predicted_a1_arrival_time,
                 current.predicted_to_b_time, current.owner_path_gen,
-                rb_horizon_, candidates.str().c_str(),
+                owner_phase.c_str(), rb_horizon_, candidates.str().c_str(),
                 excluded.str().c_str(),
+                faster_candidate_id >= 0
+                    ? ("V" + std::to_string(faster_candidate_id)).c_str()
+                    : "none",
                 change_reason.c_str());
         } else if (previous.valid()) {
             std::snprintf(
                 line, sizeof(line),
-                "[FUTURE_A1] time=%s event=RELEASE owner=V%d "
-                "path_gen=%d horizon=%.2fs candidates=%s excluded=%s "
-                "change_reason=%s",
-                readableSimTime(sim_time_).c_str(), previous.owner_id,
-                previous.owner_path_gen, rb_horizon_,
+                "[FUTURE_A1] time=%s event=%s owner=V%d "
+                "path_gen=%d phase=%s horizon=%.2fs candidates=%s "
+                "excluded=%s change_reason=%s",
+                readableSimTime(sim_time_).c_str(), event.c_str(),
+                previous.owner_id, previous.owner_path_gen,
+                owner_phase.c_str(), rb_horizon_,
                 candidates.str().c_str(), excluded.str().c_str(),
                 change_reason.c_str());
         } else {
@@ -1017,11 +1148,13 @@ private:
 
         const auto previous_commitment = future_a1_commitment_;
         const A1ArrivalSummary arrivals = predictA1Arrivals(rb_horizon_);
-        auto commitment = retainLockedFutureA1Owner();
-        const bool owner_locked = commitment.valid();
-        if (!owner_locked) commitment = selectFutureA1Owner(arrivals);
-        const std::string change_reason = futureA1ChangeReason(
-            previous_commitment, commitment, arrivals, owner_locked);
+        std::string change_reason;
+        auto commitment = retainLockedFutureA1Owner(arrivals, change_reason);
+        if (!previous_commitment.valid()) {
+            commitment = selectFutureA1Owner(arrivals);
+            change_reason = commitment.valid()
+                ? "service_owner_selected" : "no_candidate";
+        }
 
         rule_engine_->clearFutureA1Commitment();
         if (commitment.valid()) {
@@ -1502,6 +1635,114 @@ private:
     }
 
     //==============《任务指派与路径生成函数》===================================
+    void logA1Launch(const VehicleAgent& vehicle,
+                     const VehicleAgent* owner,
+                     const char* result,
+                     const std::string& reason,
+                     int candidate_path_gen,
+                     const forklift_planner::multi_vehicle::RuleEngine::
+                         A1LaunchAdmission* admission = nullptr) {
+        std::ostringstream line;
+        line << "[A1_LAUNCH] time=" << readableSimTime(sim_time_)
+             << " vehicle=V" << vehicle.id << " owner=";
+        if (owner != nullptr) line << "V" << owner->id;
+        else line << "none";
+        line << " result=" << result
+             << " reason=" << reason
+             << " candidate_path_gen=" << candidate_path_gen
+             << " vehicle_mode=" << modeName(vehicle.mode)
+             << " vehicle_speed=" << std::fixed << std::setprecision(3)
+             << vehicle.current_speed
+             << " vehicle_path_s=" << vehicle.path_s;
+        if (owner != nullptr) {
+            line << " owner_phase=" << missionPhaseName(owner->mission_phase)
+                 << " owner_path_gen=" << owner->path_gen;
+        }
+        if (admission != nullptr) {
+            line << " geometry="
+                 << (admission->owner_uses_pending_preview
+                         ? "pending_preview" : "actual_to_b")
+                 << " protected_zones=" << admission->protected_zone_count
+                 << " actual_occupancy_priority="
+                 << (admission->actual_occupancy_priority ? 1 : 0);
+        }
+        ROS_WARN("%s", line.str().c_str());
+        coordLogWithContext(line.str(), "REAL", sim_plan_id_, -1, -1);
+    }
+
+    bool launchPickupLegWithA1Admission(VehicleAgent& vehicle) {
+        VehicleAgent candidate = vehicle;
+        if (!allocator_->assignPickupLeg(candidate, /*emit_log=*/false)) {
+            vehicle.mission_phase = MissionPhase::TO_A1;
+            vehicle.leg_target = LegTargetKind::A1;
+            vehicle.mode = VehicleMode::NEED_TASK;
+            return allocator_->assignPickupLeg(vehicle);
+        }
+
+        VehicleAgent* owner = nullptr;
+        if (future_a1_commitment_.valid() &&
+            future_a1_commitment_.owner_id != vehicle.id) {
+            owner = agentById(future_a1_commitment_.owner_id);
+        }
+
+        forklift_planner::multi_vehicle::RuleEngine::A1LaunchAdmission
+            admission;
+        if (owner != nullptr) {
+            admission = rule_engine_->checkA1LaunchAdmission(*owner,
+                                                              candidate);
+        }
+        const bool hold = owner != nullptr &&
+                          admission.departure_resource_conflict;
+        auto held = a1_launch_holds_.find(vehicle.id);
+        if (hold) {
+            if (held == a1_launch_holds_.end()) {
+                A1LaunchHoldState state;
+                state.since = sim_time_;
+                state.owner_id = owner->id;
+                state.candidate_path_gen = candidate.path_gen;
+                a1_launch_holds_[vehicle.id] = state;
+                ++a1_launch_metrics_.holds;
+                logA1Launch(vehicle, owner, "HOLD",
+                            "departure_resource_conflict",
+                            candidate.path_gen, &admission);
+            } else {
+                ++a1_launch_metrics_.retries;
+            }
+            vehicle.mode = VehicleMode::DWELL;
+            vehicle.dwell_remaining = 0.0;
+            vehicle.action = VehicleAction::STOP;
+            vehicle.requested_action = VehicleAction::STOP;
+            vehicle.current_speed = 0.0;
+            vehicle.reason = "a1_launch_hold_V" +
+                             std::to_string(owner->id);
+            return false;
+        }
+
+        std::string allow_reason = "no_service_owner";
+        if (owner != nullptr) {
+            allow_reason = admission.actual_occupancy_priority
+                ? "actual_occupancy_priority"
+                : "departure_resource_clear";
+        }
+        if (held != a1_launch_holds_.end()) {
+            const double duration = sim_time_ - held->second.since;
+            a1_launch_metrics_.max_hold_duration = std::max(
+                a1_launch_metrics_.max_hold_duration, duration);
+            ++a1_launch_metrics_.released_after_hold;
+            allow_reason = "departure_resource_clear_after_retry";
+            a1_launch_holds_.erase(held);
+        }
+
+        const bool assigned = allocator_->assignPickupLeg(vehicle);
+        if (assigned) {
+            ++a1_launch_metrics_.allows;
+            logA1Launch(vehicle, owner, "ALLOW", allow_reason,
+                        vehicle.path_gen,
+                        owner != nullptr ? &admission : nullptr);
+        }
+        return assigned;
+    }
+
     void updateDwellAndTasks(double dt) {
         for (VehicleAgent& v : agents_) {
 
@@ -1572,11 +1813,8 @@ private:
                         continue;
                     }
 
-                    v.mission_phase = MissionPhase::TO_A1;
-                    v.leg_target = LegTargetKind::A1;
-                    v.mode = VehicleMode::NEED_TASK;
                     const int old_gen = v.path_gen;
-                    allocator_->assignPickupLeg(v);
+                    launchPickupLegWithA1Admission(v);
                     if (v.path_gen != old_gen) force_horizon_refresh_ = true;
                     continue;
                 }
@@ -2973,6 +3211,9 @@ private:
     double sim_plan_start_time_ = 0.0;
     forklift_planner::multi_vehicle::RuleEngine::FutureA1Commitment
         future_a1_commitment_;
+    A1ServiceMetrics a1_service_metrics_;
+    A1LaunchMetrics a1_launch_metrics_;
+    std::map<int, A1LaunchHoldState> a1_launch_holds_;
     ExecutedRollingDecisionMetrics executed_rolling_metrics_;
     bool previous_ordinary_conflict_active_ = false;
     
@@ -3874,6 +4115,36 @@ public:
                  executed.reservation_create_deadlock,
                  executed.reservation_create_multi_vehicle,
                  executed.reservation_create_other);
+        double max_service_duration = a1_service_metrics_.max_duration;
+        if (a1_service_metrics_.active_since >= 0.0) {
+            max_service_duration = std::max(
+                max_service_duration,
+                sim_time_ - a1_service_metrics_.active_since);
+        }
+        double max_launch_hold = a1_launch_metrics_.max_hold_duration;
+        for (const auto& entry : a1_launch_holds_) {
+            max_launch_hold = std::max(
+                max_launch_hold, sim_time_ - entry.second.since);
+        }
+        ROS_WARN("[BATCH_A1_SERVICE] create=%llu hold=%llu change=%llu "
+                 "release=%llu invalidate=%llu arrival_preemptions=%llu "
+                 "faster_candidate_observed=%llu max_duration=%.1f",
+                 a1_service_metrics_.creates,
+                 a1_service_metrics_.holds,
+                 a1_service_metrics_.changes,
+                 a1_service_metrics_.releases,
+                 a1_service_metrics_.invalidates,
+                 a1_service_metrics_.arrival_ranking_preemptions,
+                 a1_service_metrics_.faster_candidate_observations,
+                 max_service_duration);
+        ROS_WARN("[BATCH_A1_LAUNCH] allow=%llu hold=%llu retries=%llu "
+                 "released_after_hold=%llu max_hold=%.1f "
+                 "active_holds=%zu",
+                 a1_launch_metrics_.allows,
+                 a1_launch_metrics_.holds,
+                 a1_launch_metrics_.retries,
+                 a1_launch_metrics_.released_after_hold,
+                 max_launch_hold, a1_launch_holds_.size());
         ROS_WARN("[BATCH_RUNTIME] requested_ticks=%llu completed_ticks=%llu "
                  "real_sim_t=%.1f dt=%.3f wedge_episodes=%llu "
                  "reciprocal_stop_cycles=%llu",

@@ -54,7 +54,7 @@ public:
     void buildCache();
     bool assignNextTask(VehicleAgent& vehicle,
                         const std::vector<VehicleAgent>& all);
-    bool assignPickupLeg(VehicleAgent& vehicle);
+    bool assignPickupLeg(VehicleAgent& vehicle, bool emit_log = true);
     bool assignDropoffLeg(VehicleAgent& vehicle,
                           const std::vector<VehicleAgent>& all);
     bool prepareDropoffLeg(VehicleAgent& vehicle,

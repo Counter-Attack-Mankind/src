@@ -1141,7 +1141,7 @@ bool TaskAllocator::hasValidPickupLeg(int slot) const {
     return leg.ready && leg.valid && !leg.path.empty();
 }
 
-bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
+bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle, bool emit_log) {
     if (!cfg_.use_a1_cycle) return false;
     if (vehicle.current_slot < 0 ||
         vehicle.current_slot >= static_cast<int>(map_.slots().size())) {
@@ -1156,9 +1156,11 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
         vehicle.requested_action = VehicleAction::STOP;
         vehicle.current_speed = 0.0;
         vehicle.reason = "no_b_to_a1_leg";
-        ROS_ERROR("[multi_patrol][A1] V%d has no valid B%d->A1 leg (%s)",
-                  vehicle.id, vehicle.current_slot,
-                  rejectReasonName(leg.reject_reason));
+        if (emit_log) {
+            ROS_ERROR("[multi_patrol][A1] V%d has no valid B%d->A1 leg (%s)",
+                      vehicle.id, vehicle.current_slot,
+                      rejectReasonName(leg.reject_reason));
+        }
         return false;
     }
 
@@ -1181,9 +1183,11 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle) {
     vehicle.action = VehicleAction::NOMINAL;
     vehicle.requested_action = VehicleAction::NOMINAL;
     vehicle.reason = "new_pickup_leg";
-    ROS_INFO("[multi_patrol][A1] V%d pickup leg: B%d -> A1  wpts=%zu len=%.3f",
-             vehicle.id, vehicle.current_slot, vehicle.track.path().size(),
-             vehicle.track.length());
+    if (emit_log) {
+        ROS_INFO("[multi_patrol][A1] V%d pickup leg: B%d -> A1  wpts=%zu len=%.3f",
+                 vehicle.id, vehicle.current_slot, vehicle.track.path().size(),
+                 vehicle.track.length());
+    }
     return true;
 }
 
