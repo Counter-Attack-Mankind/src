@@ -60,6 +60,7 @@ add_executable(multi_vehicle_patrol_node
   src/multi_vehicle/multi_vehicle_config.cpp
   src/multi_vehicle/path_track.cpp
   src/multi_vehicle/rule_engine.cpp
+  src/multi_vehicle/shared_segment_geometry.cpp
   src/multi_vehicle/spatiotemporal_interaction.cpp
   src/multi_vehicle/task_allocator.cpp
   src/multi_vehicle/traffic_resource_map.cpp
@@ -118,6 +119,7 @@ if(CATKIN_ENABLE_TESTING)
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
     src/multi_vehicle/rule_engine.cpp
+    src/multi_vehicle/shared_segment_geometry.cpp
     src/multi_vehicle/spatiotemporal_interaction.cpp
     src/multi_vehicle/traffic_resource_map.cpp
   )
@@ -146,6 +148,7 @@ if(CATKIN_ENABLE_TESTING)
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
     src/multi_vehicle/rule_engine.cpp
+    src/multi_vehicle/shared_segment_geometry.cpp
     src/multi_vehicle/spatiotemporal_interaction.cpp
     src/multi_vehicle/traffic_resource_map.cpp
   )
@@ -175,6 +178,7 @@ if(CATKIN_ENABLE_TESTING)
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
     src/multi_vehicle/rule_engine.cpp
+    src/multi_vehicle/shared_segment_geometry.cpp
     src/multi_vehicle/spatiotemporal_interaction.cpp
     src/multi_vehicle/traffic_resource_map.cpp
   )
@@ -183,6 +187,19 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME rolling_decision_timing_test
            COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
                    $<TARGET_FILE:rolling_decision_timing_test>)
+
+  add_executable(shared_segment_geometry_test
+    test/shared_segment_geometry_test.cpp
+    src/multi_vehicle/footprint.cpp
+    src/multi_vehicle/path_track.cpp
+    src/multi_vehicle/shared_segment_geometry.cpp
+    src/multi_vehicle/spatiotemporal_interaction.cpp
+  )
+  add_dependencies(shared_segment_geometry_test ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(shared_segment_geometry_test ${catkin_LIBRARIES})
+  add_test(NAME shared_segment_geometry_test
+           COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
+                   $<TARGET_FILE:shared_segment_geometry_test>)
 endif()
 
 install(TARGETS planner_node two_vehicle_sim_node multi_vehicle_patrol_node

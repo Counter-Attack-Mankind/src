@@ -568,9 +568,52 @@ const std::vector<RuleEngine::ConflictZone>& RuleEngine::conflictBlocksCanonical
     ConflictCacheEntry& e = conflict_cache_[key];
     if (e.gen_lo != lo.path_gen || e.gen_hi != hi.path_gen) {
         e.blocks = computeConflictZonesFull(lo, hi);  // self=lo, other=hi
+        e.shared_segment_candidates = computeSharedSegmentCandidates(
+            lo.track, lo.path_gen, hi.track, hi.path_gen, mp_, cfg_);
         e.display_overlap_polygons.clear();
         e.gen_lo = lo.path_gen;
         e.gen_hi = hi.path_gen;
+        if (coord_log_sink_) {
+            for (const SharedSegmentCandidate& candidate :
+                 e.shared_segment_candidates) {
+                std::ostringstream line;
+                line << std::fixed << std::setprecision(3)
+                     << "[SHARED-SEGMENT-STATIC] pair=V" << lo.id << "-V"
+                     << hi.id << " candidate_id=" << candidate.id
+                     << " path_gen=" << candidate.path_gen_a << "/"
+                     << candidate.path_gen_b
+                     << " traversal=" << candidate.traversal_a << "/"
+                     << candidate.traversal_b
+                     << " direction="
+                     << (candidate.direction_a == WpType::REVERSE ? "R" : "F")
+                     << "/"
+                     << (candidate.direction_b == WpType::REVERSE ? "R" : "F")
+                     << " sA=[" << candidate.s_a_enter << ","
+                     << candidate.s_a_exit << "]"
+                     << " sB=[" << candidate.s_b_enter << ","
+                     << candidate.s_b_exit << "]"
+                     << " span="
+                     << (candidate.s_a_exit - candidate.s_a_enter) << "/"
+                     << (candidate.s_b_exit - candidate.s_b_enter)
+                     << " direction_dot=[" << candidate.direction_dot_min
+                     << "," << candidate.direction_dot_max << "]"
+                     << " direction_dot_mean="
+                     << candidate.direction_dot_mean
+                     << " samples=" << candidate.sample_count
+                     << " strong_samples="
+                     << candidate.strong_opposing_count
+                     << " strong_ratio="
+                     << candidate.strong_opposing_ratio
+                     << " qualification=min_span:"
+                     << cfg_.shared_segment_min_span
+                     << ",strong_threshold:"
+                     << cfg_.shared_segment_strong_opposing_threshold
+                     << ",min_strong_ratio:"
+                     << cfg_.shared_segment_min_strong_ratio
+                     << " static_prior=true control_input=false";
+                coord_log_sink_(line.str());
+            }
+        }
     }
     return e.blocks;
 }
@@ -759,6 +802,58 @@ std::vector<ConflictMarker> RuleEngine::conflictResourceMarkers(
                     a, b, zones[zone_index],
                     static_cast<int>(zone_index),
                     ConflictMarkerKind::POTENTIAL_CONFLICT_ZONE, -1, -1));
+            }
+
+            const bool a_is_lo = a.id < b.id;
+            const VehicleAgent& lo = a_is_lo ? a : b;
+            const VehicleAgent& hi = a_is_lo ? b : a;
+            (void)conflictBlocksCanonical(lo, hi);
+            const ConflictCacheEntry& cache = conflict_cache_.at({lo.id, hi.id});
+            for (const SharedSegmentCandidate& candidate :
+                 cache.shared_segment_candidates) {
+                ConflictMarker marker;
+                marker.vehicle_a = a.id;
+                marker.vehicle_b = b.id;
+                marker.path_gen_a = a.path_gen;
+                marker.path_gen_b = b.path_gen;
+                marker.shared_candidate_id = candidate.id;
+                marker.kind = ConflictMarkerKind::SHARED_SEGMENT_CANDIDATE;
+                marker.traversal_a = a_is_lo
+                    ? candidate.traversal_a : candidate.traversal_b;
+                marker.traversal_b = a_is_lo
+                    ? candidate.traversal_b : candidate.traversal_a;
+                marker.direction_a = a_is_lo
+                    ? candidate.direction_a : candidate.direction_b;
+                marker.direction_b = a_is_lo
+                    ? candidate.direction_b : candidate.direction_a;
+                marker.s_a_enter = a_is_lo
+                    ? candidate.s_a_enter : candidate.s_b_enter;
+                marker.s_a_exit = a_is_lo
+                    ? candidate.s_a_exit : candidate.s_b_exit;
+                marker.s_b_enter = a_is_lo
+                    ? candidate.s_b_enter : candidate.s_a_enter;
+                marker.s_b_exit = a_is_lo
+                    ? candidate.s_b_exit : candidate.s_a_exit;
+                marker.direction_dot_min = candidate.direction_dot_min;
+                marker.direction_dot_max = candidate.direction_dot_max;
+                marker.direction_dot_mean = candidate.direction_dot_mean;
+                marker.shared_sample_count = candidate.sample_count;
+                marker.strong_opposing_count =
+                    candidate.strong_opposing_count;
+                marker.strong_opposing_ratio =
+                    candidate.strong_opposing_ratio;
+                if (candidate.aabb_valid) {
+                    marker.x = 0.5 * (candidate.aabb_min_x +
+                                      candidate.aabb_max_x);
+                    marker.y = 0.5 * (candidate.aabb_min_y +
+                                      candidate.aabb_max_y);
+                    marker.scale_x = std::max(
+                        0.01, candidate.aabb_max_x - candidate.aabb_min_x);
+                    marker.scale_y = std::max(
+                        0.01, candidate.aabb_max_y - candidate.aabb_min_y);
+                    marker.zone_aabb_valid = true;
+                }
+                markers.push_back(std::move(marker));
             }
         }
     }

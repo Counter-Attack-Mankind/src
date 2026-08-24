@@ -14,6 +14,7 @@
 #include "forklift_planner/multi_vehicle/dynamic_speed_coordination.h"
 #include "forklift_planner/multi_vehicle/future_a1_policy.h"
 #include "forklift_planner/multi_vehicle/multi_vehicle_config.h"
+#include "forklift_planner/multi_vehicle/shared_segment_geometry.h"
 #include "forklift_planner/multi_vehicle/spatiotemporal_interaction.h"
 #include "forklift_planner/multi_vehicle/traffic_resource.h"
 #include "forklift_planner/multi_vehicle/traffic_resource_map.h"
@@ -26,6 +27,7 @@ enum class ConflictMarkerKind {
     SAME_DIRECTION,
     CROSSING_OR_OPPOSING,
     POTENTIAL_CONFLICT_ZONE,
+    SHARED_SEGMENT_CANDIDATE,
     CONFLICT_RESERVATION,
 };
 
@@ -76,6 +78,17 @@ struct ConflictMarker {
     double s_a_exit = 0.0;
     double s_b_enter = 0.0;
     double s_b_exit = 0.0;
+    int shared_candidate_id = -1;
+    int traversal_a = -1;
+    int traversal_b = -1;
+    WpType direction_a = WpType::FORWARD;
+    WpType direction_b = WpType::FORWARD;
+    double direction_dot_min = 0.0;
+    double direction_dot_max = 0.0;
+    double direction_dot_mean = 0.0;
+    std::size_t shared_sample_count = 0;
+    std::size_t strong_opposing_count = 0;
+    double strong_opposing_ratio = 0.0;
     ConflictMarkerKind kind = ConflictMarkerKind::CROSSING_OR_OPPOSING;
 };
 
@@ -461,6 +474,8 @@ private:
         int gen_lo = -1;
         int gen_hi = -1;
         std::vector<ConflictZone> blocks;  // canonical: s_self_*=lo, s_other_*=hi
+        // Static diagnostic priors only. They never carry runtime authority.
+        std::vector<SharedSegmentCandidate> shared_segment_candidates;
         // Lazily reconstructed RViz geometry, aligned one-to-one with blocks.
         // It is diagnostic-only and has no role in conflict decisions.
         std::vector<std::vector<std::vector<ConflictMarker::Point>>>

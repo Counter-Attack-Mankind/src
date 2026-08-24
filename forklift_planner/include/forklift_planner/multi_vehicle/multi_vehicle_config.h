@@ -22,6 +22,14 @@ struct MultiVehicleConfig {
     double safety_margin = 0.0;
     double conflict_margin = 0.12;
 
+    // Static SharedSegmentCandidate qualification only. These parameters do
+    // not participate in TTC, priority, reservations or vehicle actions.
+    // 0.50 m is approximately two inflated vehicle lengths for the current
+    // map geometry (0.211 m body + 0.040 m total conflict inflation).
+    double shared_segment_min_span = 0.50;
+    double shared_segment_strong_opposing_threshold = -0.80;
+    double shared_segment_min_strong_ratio = 0.60;
+
     double dwell_time = 20.0;       // sleep time
     double pickup_dwell_time = 5.0; // A1 pickup operation
     double unload_dwell_time = 5.0; // B-slot unload operation

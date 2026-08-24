@@ -48,6 +48,21 @@ int stableZoneMarkerId(const ConflictMarker& marker) {
     return static_cast<int>(hash & 0x7fffffffu);
 }
 
+int stableSharedCandidateMarkerId(const ConflictMarker& marker) {
+    uint32_t hash = 2166136261u;
+    for (int value : {marker.vehicle_a, marker.vehicle_b,
+                      marker.path_gen_a, marker.path_gen_b,
+                      marker.traversal_a, marker.traversal_b,
+                      marker.shared_candidate_id}) {
+        const uint32_t word = static_cast<uint32_t>(value);
+        for (int shift = 0; shift < 32; shift += 8) {
+            hash ^= (word >> shift) & 0xffu;
+            hash *= 16777619u;
+        }
+    }
+    return static_cast<int>(hash & 0x7fffffffu);
+}
+
 RoughWp displayPose(const VehicleAgent& v) {
     // 实车:显示真实 /object 位姿(实际在哪就画在哪,偏离路径多少看得见),而非投影点。
     if (v.real_pose_valid) {
@@ -337,6 +352,9 @@ void MarkerPublisher::addConflictMarkers(
     const char* potential_zone_ns = "potential_conflict_zone_overlap";
     const char* potential_zone_label_ns = "potential_conflict_zone_explanation";
     const char* zone_aabb_ns = "conflict_zone_aabb";
+    const char* shared_candidate_ns = "shared_segment_candidate_aabb";
+    const char* shared_candidate_label_ns =
+        "shared_segment_candidate_explanation";
     auto deleteMarker = [&](const char* marker_ns, int id) {
         visualization_msgs::Marker m;
         m.header.frame_id = pp_.frame_id;
@@ -375,6 +393,11 @@ void MarkerPublisher::addConflictMarkers(
             deleteMarker(zone_aabb_ns, id);
         }
         last_zone_marker_ids_.clear();
+        for (int id : last_shared_candidate_marker_ids_) {
+            deleteMarker(shared_candidate_ns, id);
+            deleteMarker(shared_candidate_label_ns, id);
+        }
+        last_shared_candidate_marker_ids_.clear();
         last_same_direction_conflict_marker_count_ = 0;
         last_crossing_opposing_conflict_marker_count_ = 0;
         last_potential_conflict_zone_marker_count_ = 0;
@@ -387,6 +410,7 @@ void MarkerPublisher::addConflictMarkers(
     int potential_zone_id = 0;
 
     std::set<int> current_zone_ids;
+    std::set<int> current_shared_candidate_ids;
     auto addSpatialResource = [&](const ConflictMarker& c, int marker_id) {
         const ros::Time now = ros::Time::now();
         current_zone_ids.insert(marker_id);
@@ -439,6 +463,59 @@ void MarkerPublisher::addConflictMarkers(
 
     for (const ConflictMarker* marker_ptr : all_markers) {
         const ConflictMarker& c = *marker_ptr;
+        if (c.kind == ConflictMarkerKind::SHARED_SEGMENT_CANDIDATE) {
+            const int marker_id = stableSharedCandidateMarkerId(c);
+            current_shared_candidate_ids.insert(marker_id);
+            const ros::Time now = ros::Time::now();
+
+            visualization_msgs::Marker geometry;
+            geometry.header.frame_id = pp_.frame_id;
+            geometry.header.stamp = now;
+            geometry.ns = shared_candidate_ns;
+            geometry.id = marker_id;
+            geometry.type = visualization_msgs::Marker::CUBE;
+            geometry.action = visualization_msgs::Marker::ADD;
+            geometry.pose.position.x = c.x;
+            geometry.pose.position.y = c.y;
+            geometry.pose.position.z = 0.030;
+            geometry.pose.orientation.w = 1.0;
+            geometry.scale.x = c.scale_x;
+            geometry.scale.y = c.scale_y;
+            geometry.scale.z = 0.006;
+            geometry.color = rgba(0.92f, 0.18f, 0.95f, 0.24f);
+            arr.markers.push_back(geometry);
+
+            visualization_msgs::Marker label;
+            label.header = geometry.header;
+            label.ns = shared_candidate_label_ns;
+            label.id = marker_id;
+            label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+            label.action = visualization_msgs::Marker::ADD;
+            label.pose.position.x = c.x;
+            label.pose.position.y = c.y;
+            label.pose.position.z = 0.135;
+            label.pose.orientation.w = 1.0;
+            label.scale.z = 0.052;
+            label.color = rgba(1.00f, 0.45f, 1.00f, 1.0f);
+            std::ostringstream text;
+            text << std::fixed << std::setprecision(2)
+                 << "STATIC SHARED C" << c.shared_candidate_id
+                 << " V" << c.vehicle_a << " T" << c.traversal_a
+                 << (c.direction_a == WpType::REVERSE ? "R" : "F")
+                 << " / V" << c.vehicle_b << " T" << c.traversal_b
+                 << (c.direction_b == WpType::REVERSE ? "R" : "F")
+                 << "\nsA=[" << c.s_a_enter << "," << c.s_a_exit
+                 << "] sB=[" << c.s_b_enter << "," << c.s_b_exit << "]"
+                 << "\ndot=[" << c.direction_dot_min << ","
+                 << c.direction_dot_max << "] mean="
+                 << c.direction_dot_mean
+                 << "\nstrong=" << c.strong_opposing_count << "/"
+                 << c.shared_sample_count << " ("
+                 << c.strong_opposing_ratio << ") AABB diagnostic only";
+            label.text = text.str();
+            arr.markers.push_back(label);
+            continue;
+        }
         if (c.kind == ConflictMarkerKind::POTENTIAL_CONFLICT_ZONE) {
             addSpatialResource(c, stableZoneMarkerId(c));
             ++potential_zone_id;
@@ -631,11 +708,18 @@ void MarkerPublisher::addConflictMarkers(
         deleteMarker(potential_zone_label_ns, stale);
         deleteMarker(zone_aabb_ns, stale);
     }
+    for (int stale : last_shared_candidate_marker_ids_) {
+        if (current_shared_candidate_ids.count(stale) != 0) continue;
+        deleteMarker(shared_candidate_ns, stale);
+        deleteMarker(shared_candidate_label_ns, stale);
+    }
     last_same_direction_conflict_marker_count_ = same_id;
     last_crossing_opposing_conflict_marker_count_ = mutual_id;
     last_potential_conflict_zone_marker_count_ = potential_zone_id;
     last_conflict_reservation_marker_count_ = 0;
     last_zone_marker_ids_ = std::move(current_zone_ids);
+    last_shared_candidate_marker_ids_ =
+        std::move(current_shared_candidate_ids);
 }
 
 void MarkerPublisher::addOriginAxes(visualization_msgs::MarkerArray& arr) const {
