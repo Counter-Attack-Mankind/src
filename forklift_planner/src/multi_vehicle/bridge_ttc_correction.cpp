@@ -18,10 +18,14 @@ struct NearestMatch {
 
 struct NearestCursor {
     const PathTrack* track = nullptr;
-    WpType traversal_type = WpType::FORWARD;
-    std::size_t first_index = 0;
-    std::size_t last_index = 0;
     std::size_t index = 0;
+};
+
+enum class RelationState {
+    VALID,
+    DISTANCE_LOST,
+    DIRECTION_LOST,
+    INVALID_GEOMETRY,
 };
 
 double squaredDistance(const RoughWp& a, const RoughWp& b,
@@ -35,7 +39,6 @@ double squaredDistance(const RoughWp& a, const RoughWp& b,
 NearestCursor makeNearestCursor(const PathTrack& track, double seed_s) {
     NearestCursor cursor;
     cursor.track = &track;
-    cursor.traversal_type = track.typeAtS(seed_s);
     const auto& path = track.path();
     const auto& cumulative_s = track.cumulative_s();
     auto it = std::lower_bound(cumulative_s.begin(), cumulative_s.end(),
@@ -43,20 +46,6 @@ NearestCursor makeNearestCursor(const PathTrack& track, double seed_s) {
     std::size_t index = it == cumulative_s.end()
         ? path.size() - 1
         : static_cast<std::size_t>(std::distance(cumulative_s.begin(), it));
-    if (path[index].type != cursor.traversal_type && index > 0 &&
-        path[index - 1].type == cursor.traversal_type) {
-        --index;
-    }
-    cursor.first_index = index;
-    while (cursor.first_index > 0 &&
-           path[cursor.first_index - 1].type == cursor.traversal_type) {
-        --cursor.first_index;
-    }
-    cursor.last_index = index;
-    while (cursor.last_index + 1 < path.size() &&
-           path[cursor.last_index + 1].type == cursor.traversal_type) {
-        ++cursor.last_index;
-    }
     cursor.index = index;
     return cursor;
 }
@@ -85,27 +74,27 @@ NearestMatch projectToSegment(const RoughWp& query,
         distance};
 }
 
-NearestMatch nearestOnTraversal(const RoughWp& query, NearestCursor& cursor,
+NearestMatch nearestOnPathLocal(const RoughWp& query, NearestCursor& cursor,
                                 int& evaluations) {
     const auto& path = cursor.track->path();
     double best_sq = squaredDistance(query, path[cursor.index], evaluations);
     for (;;) {
         std::size_t best_index = cursor.index;
         double candidate_sq = best_sq;
-        if (cursor.index > cursor.first_index) {
+        // A two-waypoint local window can cross a duplicated/near-duplicated
+        // cusp without opening a full-path search. The cursor still moves only
+        // through adjacent path order, so an overlapping remote traversal
+        // cannot cause a discontinuous s jump.
+        const std::size_t first = cursor.index > 2 ? cursor.index - 2 : 0;
+        const std::size_t last = std::min(
+            path.size() - 1, cursor.index + 2);
+        for (std::size_t candidate = first; candidate <= last; ++candidate) {
+            if (candidate == cursor.index) continue;
             const double value = squaredDistance(
-                query, path[cursor.index - 1], evaluations);
+                query, path[candidate], evaluations);
             if (value + kEpsilon < candidate_sq) {
                 candidate_sq = value;
-                best_index = cursor.index - 1;
-            }
-        }
-        if (cursor.index < cursor.last_index) {
-            const double value = squaredDistance(
-                query, path[cursor.index + 1], evaluations);
-            if (value + kEpsilon < candidate_sq) {
-                candidate_sq = value;
-                best_index = cursor.index + 1;
+                best_index = candidate;
             }
         }
         if (best_index == cursor.index) break;
@@ -120,16 +109,25 @@ NearestMatch nearestOnTraversal(const RoughWp& query, NearestCursor& cursor,
             query, *cursor.track, from, to, evaluations);
         if (candidate.distance + kEpsilon < best.distance) best = candidate;
     };
-    if (cursor.index > cursor.first_index) {
-        consider(cursor.index - 1, cursor.index);
-    }
-    if (cursor.index < cursor.last_index) {
-        consider(cursor.index, cursor.index + 1);
+    // Include the immediately adjacent segments on both sides of a possible
+    // duplicated cusp waypoint. This is still a constant local window and is
+    // needed because equal-distance duplicate vertices cannot win the strict
+    // hill-climb comparison above.
+    const std::size_t first_segment = cursor.index > 2
+        ? cursor.index - 2 : 0;
+    const std::size_t last_segment = std::min(
+        path.size() - 2, cursor.index + 2);
+    for (std::size_t from = first_segment; from <= last_segment; ++from) {
+        consider(from, from + 1);
     }
     return best;
 }
 
 double motionHeading(const PathTrack& track, double s) {
+    // Production path generation stores body heading along FORWARD motion and
+    // body heading = motion + pi along REVERSE motion. Keep that established
+    // representation here; WpType selects motion heading but does not delimit
+    // bridge backtracking.
     const RoughWp pose = track.poseAtS(s);
     return pose.theta +
         (track.typeAtS(s) == WpType::REVERSE ? kPi : 0.0);
@@ -161,61 +159,146 @@ VehicleBridgeTtcCorrection evaluateVehicle(
     result.near_boundary_s = collision_s;
     result.original_ttc = original_ttc;
     result.corrected_ttc = original_ttc;
+    result.collision_type = self.track.typeAtS(collision_s);
+    result.boundary_type = result.collision_type;
     if (self.track.empty() || other.track.empty() ||
         self_prediction.empty()) {
+        result.backtrack_end_reason =
+            BridgeBacktrackEndReason::INVALID_GEOMETRY;
         return result;
     }
 
     const double proximity_limit =
         map_param.vehicle_width + config.conflict_margin;
-    const WpType self_seed_type = self.track.typeAtS(collision_s);
     NearestCursor other_cursor = makeNearestCursor(
         other.track, other_collision_s);
 
     auto relationAt = [&](double self_s, double& match_s,
                           double& direction_dot, double& distance) {
         const RoughWp self_pose = self.track.poseAtS(self_s);
-        const NearestMatch match = nearestOnTraversal(
+        const NearestMatch match = nearestOnPathLocal(
             self_pose, other_cursor, result.nearest_search_evaluations);
         match_s = match.s;
         distance = match.distance;
         direction_dot = std::cos(
             motionHeading(self.track, self_s) -
             motionHeading(other.track, match.s));
-        return match.distance <= proximity_limit + kEpsilon &&
-               direction_dot < config.bridge_opposing_threshold;
+        if (!std::isfinite(match.s) || !std::isfinite(match.distance) ||
+            !std::isfinite(direction_dot)) {
+            return RelationState::INVALID_GEOMETRY;
+        }
+        if (match.distance > proximity_limit + kEpsilon) {
+            return RelationState::DISTANCE_LOST;
+        }
+        if (direction_dot >= config.bridge_opposing_threshold) {
+            return RelationState::DIRECTION_LOST;
+        }
+        return RelationState::VALID;
+    };
+
+    auto endReason = [](RelationState state) {
+        switch (state) {
+            case RelationState::DISTANCE_LOST:
+                return BridgeBacktrackEndReason::RELATION_DISTANCE_LOST;
+            case RelationState::DIRECTION_LOST:
+                return BridgeBacktrackEndReason::RELATION_DIRECTION_LOST;
+            case RelationState::INVALID_GEOMETRY:
+                return BridgeBacktrackEndReason::INVALID_GEOMETRY;
+            case RelationState::VALID:
+                break;
+        }
+        return BridgeBacktrackEndReason::NOT_EVALUATED;
     };
 
     ++result.backtrack_samples;
-    if (!relationAt(collision_s, result.matched_other_s,
-                    result.collision_direction_dot,
-                    result.collision_match_distance)) {
+    const RelationState collision_relation = relationAt(
+        collision_s, result.matched_other_s,
+        result.collision_direction_dot, result.collision_match_distance);
+    result.end_query_s = collision_s;
+    result.end_matched_other_s = result.matched_other_s;
+    result.end_match_distance = result.collision_match_distance;
+    result.end_direction_dot = result.collision_direction_dot;
+    if (collision_relation != RelationState::VALID) {
+        result.backtrack_end_reason = endReason(collision_relation);
         return result;
     }
     result.bridge_related = true;
+    WpType previous_self_type = result.collision_type;
+    WpType previous_other_type = other.track.typeAtS(
+        result.matched_other_s);
 
     const double step = std::max(0.005, config.bridge_backtrack_step);
     double cursor_s = collision_s;
+    if (cursor_s <= kEpsilon) {
+        result.backtrack_end_reason =
+            BridgeBacktrackEndReason::PATH_START;
+    }
     while (cursor_s > 0.0 + kEpsilon) {
         const double query_s = std::max(0.0, cursor_s - step);
-        if (self.track.typeAtS(query_s) != self_seed_type) break;
+        const WpType query_self_type = self.track.typeAtS(query_s);
+        if (query_self_type != previous_self_type) {
+            ++result.self_traversal_changes;
+            previous_self_type = query_self_type;
+        }
         double match_s = 0.0;
         double direction_dot = 1.0;
         double distance = std::numeric_limits<double>::infinity();
         ++result.backtrack_samples;
-        if (!relationAt(query_s, match_s, direction_dot, distance)) break;
+        const RelationState relation = relationAt(
+            query_s, match_s, direction_dot, distance);
+        result.end_query_s = query_s;
+        result.end_matched_other_s = match_s;
+        result.end_match_distance = distance;
+        result.end_direction_dot = direction_dot;
+        if (std::isfinite(match_s)) {
+            const WpType other_type = other.track.typeAtS(match_s);
+            if (other_type != previous_other_type) {
+                ++result.nearest_other_traversal_changes;
+                previous_other_type = other_type;
+            }
+        }
+        if (relation != RelationState::VALID) {
+            result.backtrack_end_reason = endReason(relation);
+            break;
+        }
         result.near_boundary_s = query_s;
         cursor_s = query_s;
-        if (query_s <= kEpsilon) break;
+        if (query_s <= kEpsilon) {
+            result.backtrack_end_reason =
+                BridgeBacktrackEndReason::PATH_START;
+            break;
+        }
     }
+    result.boundary_type = self.track.typeAtS(result.near_boundary_s);
 
     const double boundary_ttc = timeAtS(
         self_prediction, result.near_boundary_s);
+    if (!std::isfinite(boundary_ttc)) {
+        result.backtrack_end_reason =
+            BridgeBacktrackEndReason::INVALID_GEOMETRY;
+        return result;
+    }
     result.corrected_ttc = std::min(original_ttc, boundary_ttc);
     return result;
 }
 
 }  // namespace
+
+const char* bridgeBacktrackEndReasonName(BridgeBacktrackEndReason reason) {
+    switch (reason) {
+        case BridgeBacktrackEndReason::NOT_EVALUATED:
+            return "not_evaluated";
+        case BridgeBacktrackEndReason::RELATION_DISTANCE_LOST:
+            return "relation_distance_lost";
+        case BridgeBacktrackEndReason::RELATION_DIRECTION_LOST:
+            return "relation_direction_lost";
+        case BridgeBacktrackEndReason::PATH_START:
+            return "path_start";
+        case BridgeBacktrackEndReason::INVALID_GEOMETRY:
+            return "invalid_geometry";
+    }
+    return "invalid_geometry";
+}
 
 PairBridgeTtcCorrection evaluateBridgeTtcCorrection(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,

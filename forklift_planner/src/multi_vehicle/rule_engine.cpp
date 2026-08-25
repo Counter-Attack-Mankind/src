@@ -2014,10 +2014,22 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                             << bridge_correction.a.collision_match_distance
                             << " match_distance_b="
                             << bridge_correction.b.collision_match_distance
+                            << " collision_type_a="
+                            << (bridge_correction.a.collision_type ==
+                                        WpType::REVERSE ? "R" : "F")
+                            << " collision_type_b="
+                            << (bridge_correction.b.collision_type ==
+                                        WpType::REVERSE ? "R" : "F")
                             << " boundary_s_a="
                             << bridge_correction.a.near_boundary_s
                             << " boundary_s_b="
                             << bridge_correction.b.near_boundary_s
+                            << " boundary_type_a="
+                            << (bridge_correction.a.boundary_type ==
+                                        WpType::REVERSE ? "R" : "F")
+                            << " boundary_type_b="
+                            << (bridge_correction.b.boundary_type ==
+                                        WpType::REVERSE ? "R" : "F")
                             << " corrected_ttc_a="
                             << bridge_correction.a.corrected_ttc
                             << " corrected_ttc_b="
@@ -2035,6 +2047,34 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                             << " backtrack_samples="
                             << bridge_correction.a.backtrack_samples << "/"
                             << bridge_correction.b.backtrack_samples
+                            << " self_traversal_changes="
+                            << bridge_correction.a.self_traversal_changes
+                            << "/"
+                            << bridge_correction.b.self_traversal_changes
+                            << " nearest_other_traversal_changes="
+                            << bridge_correction.a.
+                                   nearest_other_traversal_changes
+                            << "/"
+                            << bridge_correction.b.
+                                   nearest_other_traversal_changes
+                            << " backtrack_end_reason="
+                            << bridgeBacktrackEndReasonName(
+                                   bridge_correction.a.backtrack_end_reason)
+                            << "/"
+                            << bridgeBacktrackEndReasonName(
+                                   bridge_correction.b.backtrack_end_reason)
+                            << " end_query_s="
+                            << bridge_correction.a.end_query_s << "/"
+                            << bridge_correction.b.end_query_s
+                            << " end_match_s="
+                            << bridge_correction.a.end_matched_other_s << "/"
+                            << bridge_correction.b.end_matched_other_s
+                            << " end_match_distance="
+                            << bridge_correction.a.end_match_distance << "/"
+                            << bridge_correction.b.end_match_distance
+                            << " end_direction_dot="
+                            << bridge_correction.a.end_direction_dot << "/"
+                            << bridge_correction.b.end_direction_dot
                             << " nearest_evaluations="
                             << bridge_correction.a.nearest_search_evaluations
                             << "/"

@@ -23,8 +23,8 @@ struct MultiVehicleConfig {
     double conflict_margin = 0.12;
 
     // Stateless bridge-aware TTC correction. The first threshold preserves
-    // the existing local opposing definition; backtracking never crosses a
-    // FORWARD/REVERSE cusp.
+    // the existing local opposing definition. Traversal changes update actual
+    // motion headings but do not themselves terminate backtracking.
     double bridge_opposing_threshold = -0.50;
     double bridge_backtrack_step = 0.025;
 

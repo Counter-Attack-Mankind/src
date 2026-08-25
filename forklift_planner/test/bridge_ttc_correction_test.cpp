@@ -127,20 +127,60 @@ int main() {
         return fail("far opposing paths passed bridge proximity");
     }
 
-    // Backtracking is constrained to the collision traversal and must stop at
-    // an F/R cusp even if the geometry beyond it remains opposing.
-    const VehicleAgent cusp = vehicle(
-        6, {wp(0.0, 0.0, 0.0, WpType::REVERSE),
+    // A traversal change is diagnostic, not a bridge boundary. When actual
+    // motion remains opposing across a duplicated F/R cusp, backtracking must
+    // continue to the real relation boundary at path start.
+    const VehicleAgent consistent_cusp = vehicle(
+        6, {wp(0.0, 0.0, kPi, WpType::REVERSE),
+            wp(0.5, 0.0, kPi, WpType::REVERSE),
             wp(0.5, 0.0, 0.0, WpType::FORWARD),
             wp(2.0, 0.0, 0.0, WpType::FORWARD)});
+    // REVERSE theta=pi has increasing-s actual motion heading zero.
     const PairBridgeTtcCorrection cusp_result = evaluateBridgeTtcCorrection(
-        cusp, opposing, forward_prediction, opposing_prediction,
+        consistent_cusp, opposing, forward_prediction, opposing_prediction,
         conflict(8.0, 1.5, 0.5), map, config);
     if (!cusp_result.a.bridge_related ||
-        cusp.track.typeAtS(cusp_result.a.near_boundary_s) !=
-            cusp.track.typeAtS(1.5) ||
-        cusp_result.a.near_boundary_s <= 1e-9) {
-        return fail("bridge backtracking crossed an F/R cusp");
+        cusp_result.a.near_boundary_s > 1e-9 ||
+        cusp_result.a.self_traversal_changes != 1 ||
+        cusp_result.a.backtrack_end_reason !=
+            BridgeBacktrackEndReason::PATH_START) {
+        return fail("F/R cusp incorrectly terminated a persistent relation");
+    }
+
+    // If actual motion really ceases to oppose after crossing the cusp, the
+    // direction predicate--not the type transition--ends the relation.
+    const VehicleAgent direction_change_cusp = vehicle(
+        8, {wp(0.0, 0.0, 0.0, WpType::REVERSE),
+            wp(0.5, 0.0, 0.0, WpType::REVERSE),
+            wp(0.5, 0.0, 0.0, WpType::FORWARD),
+            wp(2.0, 0.0, 0.0, WpType::FORWARD)});
+    const PairBridgeTtcCorrection direction_lost =
+        evaluateBridgeTtcCorrection(
+            direction_change_cusp, opposing, forward_prediction,
+            opposing_prediction, conflict(8.0, 1.5, 0.5), map, config);
+    if (!direction_lost.a.bridge_related ||
+        direction_lost.a.self_traversal_changes != 1 ||
+        direction_lost.a.backtrack_end_reason !=
+            BridgeBacktrackEndReason::RELATION_DIRECTION_LOST) {
+        return fail("cusp direction change did not end by direction predicate");
+    }
+
+    // The other-path cursor may cross its own adjacent traversal when that is
+    // the locally nearest geometry. It is not forced by a self type change.
+    const VehicleAgent other_cusp = vehicle(
+        9, {wp(2.0, 0.04, kPi, WpType::FORWARD),
+            wp(1.0, 0.04, kPi, WpType::FORWARD),
+            wp(1.0, 0.04, 0.0, WpType::REVERSE),
+            wp(0.0, 0.04, 0.0, WpType::REVERSE)});
+    const PairBridgeTtcCorrection other_cusp_result =
+        evaluateBridgeTtcCorrection(
+            forward, other_cusp, forward_prediction, opposing_prediction,
+            conflict(8.0, 1.6, 0.4), map, config);
+    if (!other_cusp_result.a.bridge_related ||
+        other_cusp_result.a.near_boundary_s > 1e-9 ||
+        other_cusp_result.a.self_traversal_changes != 0 ||
+        other_cusp_result.a.nearest_other_traversal_changes != 1) {
+        return fail("local nearest cursor could not cross other-path cusp");
     }
 
     // A and B are evaluated independently. Here A's collision point matches
