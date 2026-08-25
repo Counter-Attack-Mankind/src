@@ -195,11 +195,6 @@ int main() {
     crossing_label.type = PairInteractionType::CROSSING;
     PairInteractionResult opposing_label = mid_baseline;
     opposing_label.type = PairInteractionType::OPPOSING;
-    opposing_label.shared_segment.valid = true;
-    opposing_label.shared_segment.s_a_enter = 0.0;
-    opposing_label.shared_segment.s_a_exit = mid_a.track.length();
-    opposing_label.shared_segment.s_b_enter = 0.0;
-    opposing_label.shared_segment.s_b_exit = mid_b.track.length();
     PairInteractionResult following_label = mid_baseline;
     following_label.type = PairInteractionType::SAME_DIRECTION;
     const auto crossing_result = evaluatePairSpeedCoordination(
@@ -312,11 +307,6 @@ int main() {
     immediate_baseline.type = PairInteractionType::OPPOSING;
     immediate_baseline.event.valid = true;
     immediate_baseline.event.first_t = 0.0;
-    immediate_baseline.shared_segment.valid = true;
-    immediate_baseline.shared_segment.s_a_enter = 0.0;
-    immediate_baseline.shared_segment.s_a_exit = 1.0;
-    immediate_baseline.shared_segment.s_b_enter = 0.0;
-    immediate_baseline.shared_segment.s_b_exit = 1.0;
     const auto unresolved = evaluatePairSpeedCoordination(
         immediate_a, immediate_b, {}, immediate_baseline, map_param,
         config, 15.0, immediate_b.id, true);

@@ -223,6 +223,63 @@ int main() {
         return fail("braking emergency did not remain reservation-free STOP");
     }
 
+    // A real head-on corridor conflict is corrected to each vehicle's local
+    // near boundary before the unchanged priority policy selects the yielding
+    // side. No bridge ownership or reservation is created.
+    RuleEngine bridge_engine(map_param, config);
+    std::vector<std::string> bridge_logs;
+    bridge_engine.setCoordLogSink(
+        [&](const std::string& line) { bridge_logs.push_back(line); });
+    VehicleAgent bridge_a = crossingVehicle(0, 0.0, false);
+    VehicleAgent bridge_b = crossingVehicle(1, 0.0, false);
+    bridge_a.track.set(RoughPath{wp(0.0, 0.0, 0.0),
+                                 wp(4.0, 0.0, 0.0)});
+    bridge_b.track.set(RoughPath{wp(4.0, 0.04, 3.14159265358979323846),
+                                 wp(0.0, 0.04, 3.14159265358979323846)});
+    std::vector<VehicleAgent> bridge_pair{bridge_a, bridge_b};
+    bridge_engine.decide(bridge_pair, 0.1, 15.0);
+    const auto& bridge_metrics = bridge_engine.dynamicSpeedMetrics();
+    bool saw_bridge_log = false;
+    for (const std::string& line : bridge_logs) {
+        saw_bridge_log = saw_bridge_log ||
+            (line.find("[BRIDGE-TTC]") != std::string::npos &&
+             line.find("bridge_a=true") != std::string::npos &&
+             line.find("bridge_b=true") != std::string::npos &&
+             line.find("effective_ttc=0.000") != std::string::npos);
+    }
+    if (bridge_metrics.bridge_checked_pairs != 1 ||
+        bridge_metrics.opposing_conflicts != 1 ||
+        bridge_metrics.bridge_corrected_pairs != 1 ||
+        bridge_metrics.bridge_nearest_evaluations == 0 ||
+        !saw_bridge_log ||
+        !hasDynamicReason(bridge_pair, VehicleAction::STOP) ||
+        !bridge_engine.snapshot().reservations.empty()) {
+        return fail("head-on bridge TTC did not drive reservation-free action");
+    }
+
+    // A nominally clear pair does not even enter bridge matching and emits no
+    // BRIDGE-TTC record.
+    RuleEngine clear_engine(map_param, config);
+    std::vector<std::string> clear_logs;
+    clear_engine.setCoordLogSink(
+        [&](const std::string& line) { clear_logs.push_back(line); });
+    std::vector<VehicleAgent> clear_pair{
+        laneVehicle(10, 0.0, 0.0), laneVehicle(11, 0.0, 0.0)};
+    clear_pair[1].track.set(
+        RoughPath{wp(0.0, 2.0, 0.0), wp(4.0, 2.0, 0.0)});
+    clear_engine.decide(clear_pair, 0.1, 15.0);
+    for (const std::string& line : clear_logs) {
+        if (line.find("[BRIDGE-TTC]") != std::string::npos) {
+            return fail("clear baseline emitted bridge log");
+        }
+    }
+    if (clear_engine.dynamicSpeedMetrics().bridge_checked_pairs != 0 ||
+        clear_pair[0].requested_action != VehicleAction::NOMINAL ||
+        clear_pair[1].requested_action != VehicleAction::NOMINAL ||
+        !clear_engine.snapshot().reservations.empty()) {
+        return fail("clear baseline activated bridge coordination");
+    }
+
     RuleEngine reserved_engine(map_param, config);
     std::vector<VehicleAgent> reserved{
         crossingVehicle(0, 0.30, false),

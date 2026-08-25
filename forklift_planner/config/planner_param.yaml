@@ -52,13 +52,9 @@ forklift_planner:
     safety_margin: 0.00
     conflict_margin: 0.04
 
-    # 静态 SharedSegmentCandidate 的 component-level 资格筛选；不参与实时控制。
-    # 0.50 m 约为当前膨胀车长(0.211 + 0.040 m)的两倍，用于排除仅由换向/弯道
-    # 姿态过渡形成的短 opposing component。strong threshold 只做完整 component
-    # 的方向分布统计，不改变第一层 local opposing 判据 direction_dot < -0.5。
-    shared_segment_min_span: 0.50                  # m，A/B 双方都必须满足
-    shared_segment_strong_opposing_threshold: -0.80
-    shared_segment_min_strong_ratio: 0.60
+    # Stateless correction after a real synchronized-OBB conflict.
+    bridge_opposing_threshold: -0.50     # local actual-motion-heading dot threshold
+    bridge_backtrack_step: 0.025        # m，沿本车路径向后回溯
 
     # 滚动轨迹与休眠配置
     dwell_time: 5.0               # s，到达目标货位后的休眠/等待时间

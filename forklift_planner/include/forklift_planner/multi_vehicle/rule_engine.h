@@ -14,7 +14,6 @@
 #include "forklift_planner/multi_vehicle/dynamic_speed_coordination.h"
 #include "forklift_planner/multi_vehicle/future_a1_policy.h"
 #include "forklift_planner/multi_vehicle/multi_vehicle_config.h"
-#include "forklift_planner/multi_vehicle/shared_segment_geometry.h"
 #include "forklift_planner/multi_vehicle/spatiotemporal_interaction.h"
 #include "forklift_planner/multi_vehicle/traffic_resource.h"
 #include "forklift_planner/multi_vehicle/traffic_resource_map.h"
@@ -27,7 +26,6 @@ enum class ConflictMarkerKind {
     SAME_DIRECTION,
     CROSSING_OR_OPPOSING,
     POTENTIAL_CONFLICT_ZONE,
-    SHARED_SEGMENT_CANDIDATE,
     CONFLICT_RESERVATION,
 };
 
@@ -58,8 +56,14 @@ struct ConflictMarker {
     double leader_x = 0.0;
     double leader_y = 0.0;
     PairInteractionType interaction_type = PairInteractionType::NONE;
-    OccupancyInterval occupancy_a;
-    OccupancyInterval occupancy_b;
+    bool bridge_a_related = false;
+    bool bridge_b_related = false;
+    double bridge_boundary_a_x = 0.0;
+    double bridge_boundary_a_y = 0.0;
+    double bridge_boundary_b_x = 0.0;
+    double bridge_boundary_b_y = 0.0;
+    double bridge_corrected_ttc_a = 0.0;
+    double bridge_corrected_ttc_b = 0.0;
     std::vector<TimedOverlap> timed_overlaps;
     // Static, time-independent OBB intersections reconstructed from one
     // ConflictZone/reservation arc-length rectangle. Kept separate from
@@ -78,17 +82,6 @@ struct ConflictMarker {
     double s_a_exit = 0.0;
     double s_b_enter = 0.0;
     double s_b_exit = 0.0;
-    int shared_candidate_id = -1;
-    int traversal_a = -1;
-    int traversal_b = -1;
-    WpType direction_a = WpType::FORWARD;
-    WpType direction_b = WpType::FORWARD;
-    double direction_dot_min = 0.0;
-    double direction_dot_max = 0.0;
-    double direction_dot_mean = 0.0;
-    std::size_t shared_sample_count = 0;
-    std::size_t strong_opposing_count = 0;
-    double strong_opposing_ratio = 0.0;
     ConflictMarkerKind kind = ConflictMarkerKind::CROSSING_OR_OPPOSING;
 };
 
@@ -237,6 +230,13 @@ public:
         unsigned long long baseline_conflicts = 0;
         unsigned long long crossing_conflicts = 0;
         unsigned long long opposing_conflicts = 0;
+        unsigned long long bridge_checked_pairs = 0;
+        unsigned long long bridge_related_a = 0;
+        unsigned long long bridge_related_b = 0;
+        unsigned long long bridge_corrected_pairs = 0;
+        unsigned long long bridge_backtrack_samples = 0;
+        unsigned long long bridge_max_backtrack_samples = 0;
+        unsigned long long bridge_nearest_evaluations = 0;
         unsigned long long same_direction_conflicts = 0;
         unsigned long long far_decisions = 0;
         unsigned long long mid_decisions = 0;
@@ -392,8 +392,6 @@ private:
                                  timed_overlaps = {},
                              PairInteractionType interaction_type =
                                  PairInteractionType::NONE,
-                             const OccupancyInterval& occupancy_a = {},
-                             const OccupancyInterval& occupancy_b = {},
                              double last_conflict_t = -1.0);
     double timeToReachS(const VehicleAgent& v, VehicleAction action,
                         double target_s) const;
@@ -474,8 +472,6 @@ private:
         int gen_lo = -1;
         int gen_hi = -1;
         std::vector<ConflictZone> blocks;  // canonical: s_self_*=lo, s_other_*=hi
-        // Static diagnostic priors only. They never carry runtime authority.
-        std::vector<SharedSegmentCandidate> shared_segment_candidates;
         // Lazily reconstructed RViz geometry, aligned one-to-one with blocks.
         // It is diagnostic-only and has no role in conflict decisions.
         std::vector<std::vector<std::vector<ConflictMarker::Point>>>

@@ -43,15 +43,12 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     nh.param(ns + "max_decel", c.max_decel, c.max_decel);
     nh.param(ns + "safety_margin", c.safety_margin, c.safety_margin);
     nh.param(ns + "conflict_margin", c.conflict_margin, c.conflict_margin);
-    nh.param(ns + "shared_segment_min_span",
-             c.shared_segment_min_span,
-             c.shared_segment_min_span);
-    nh.param(ns + "shared_segment_strong_opposing_threshold",
-             c.shared_segment_strong_opposing_threshold,
-             c.shared_segment_strong_opposing_threshold);
-    nh.param(ns + "shared_segment_min_strong_ratio",
-             c.shared_segment_min_strong_ratio,
-             c.shared_segment_min_strong_ratio);
+    nh.param(ns + "bridge_opposing_threshold",
+             c.bridge_opposing_threshold,
+             c.bridge_opposing_threshold);
+    nh.param(ns + "bridge_backtrack_step",
+             c.bridge_backtrack_step,
+             c.bridge_backtrack_step);
     nh.param(ns + "dwell_time", c.dwell_time, c.dwell_time);
     nh.param(ns + "pickup_dwell_time", c.pickup_dwell_time,
              c.pickup_dwell_time);
@@ -168,11 +165,9 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     c.nominal_speed = std::max(0.01, c.nominal_speed);
     c.max_speed = std::max(c.nominal_speed, c.max_speed);
     c.conflict_margin = std::max(0.0, c.conflict_margin);
-    c.shared_segment_min_span = std::max(0.0, c.shared_segment_min_span);
-    c.shared_segment_strong_opposing_threshold = std::max(
-        -1.0, std::min(-0.5, c.shared_segment_strong_opposing_threshold));
-    c.shared_segment_min_strong_ratio = std::max(
-        0.0, std::min(1.0, c.shared_segment_min_strong_ratio));
+    c.bridge_opposing_threshold = std::max(
+        -1.0, std::min(0.0, c.bridge_opposing_threshold));
+    c.bridge_backtrack_step = std::max(0.005, c.bridge_backtrack_step);
     c.creep_ratio = std::max(0.0, std::min(c.creep_ratio, 1.0));
     c.yield_ratio = std::max(c.creep_ratio, std::min(c.yield_ratio, 1.0));
     c.boost_ratio = std::max(1.0, c.boost_ratio);

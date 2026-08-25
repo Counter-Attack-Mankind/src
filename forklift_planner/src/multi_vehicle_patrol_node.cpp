@@ -4035,8 +4035,17 @@ public:
                      nominal_ratio, action_transitions[i]);
         }
         const auto& dynamic = rule_engine_->dynamicSpeedMetrics();
+        const double bridge_average_backtrack =
+            dynamic.bridge_checked_pairs == 0
+                ? 0.0
+                : static_cast<double>(dynamic.bridge_backtrack_samples) /
+                      (2.0 * dynamic.bridge_checked_pairs);
         ROS_WARN("[BATCH_DYN_SPEED_EVALUATED] baseline_conflicts=%llu "
                  "crossing=%llu opposing=%llu same_direction=%llu "
+                 "bridge_checked=%llu bridge_related_a=%llu "
+                 "bridge_related_b=%llu bridge_corrected_pairs=%llu "
+                 "bridge_backtrack_avg=%.2f bridge_backtrack_max=%llu "
+                 "bridge_nearest_evaluations=%llu "
                  "far=%llu mid=%llu near=%llu emergency_stop=%llu "
                  "yield_eval=%llu yield_clear=%llu yield_delayed=%llu "
                  "creep_eval=%llu creep_clear=%llu creep_delayed=%llu "
@@ -4051,6 +4060,13 @@ public:
                  dynamic.baseline_conflicts, dynamic.crossing_conflicts,
                  dynamic.opposing_conflicts,
                  dynamic.same_direction_conflicts,
+                 dynamic.bridge_checked_pairs,
+                 dynamic.bridge_related_a,
+                 dynamic.bridge_related_b,
+                 dynamic.bridge_corrected_pairs,
+                 bridge_average_backtrack,
+                 dynamic.bridge_max_backtrack_samples,
+                 dynamic.bridge_nearest_evaluations,
                  dynamic.far_decisions, dynamic.mid_decisions,
                  dynamic.near_decisions,
                  dynamic.emergency_stop_decisions,

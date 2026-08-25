@@ -55,8 +55,8 @@ SelectedSpeedActionEvaluation evaluateSelectedAction(
     const auto prediction_b = predictTrajectory(
         vehicle_b, map_param, config, action_b, prediction_horizon);
     // Candidate validation deliberately uses the same synchronized physical
-    // OBB detector as the nominal baseline. Interaction labels and static
-    // SharedSegment occupancy are diagnostic helpers, not control inputs.
+    // OBB detector as the nominal baseline. Interaction labels are not a
+    // separate control authority.
     const PairInteractionResult interaction =
         detectPairInteractionFromPredictions(
             vehicle_a, vehicle_b, potential_zones,

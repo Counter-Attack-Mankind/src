@@ -50,6 +50,8 @@ struct TimedConflictEvent {
     bool valid = false;
     int associated_zone_index = -1;
     double first_t = 0.0;
+    double first_s_a = 0.0;
+    double first_s_b = 0.0;
     double last_t = 0.0;
     std::vector<TimedOverlapGeometry> timed_overlaps;
 };
@@ -61,30 +63,6 @@ enum class PairInteractionType {
     SAME_DIRECTION,
 };
 
-// Fixed path-space extent of one physically continuous, non-passing section.
-// Unlike a ConflictReservation this carries no owner and no cross-period
-// coordination state.
-struct SharedSegment {
-    bool valid = false;
-    double s_a_enter = 0.0;
-    double s_a_exit = 0.0;
-    double s_b_enter = 0.0;
-    double s_b_exit = 0.0;
-    double direction_dot = 0.0;
-    double aabb_min_x = 0.0;
-    double aabb_min_y = 0.0;
-    double aabb_max_x = 0.0;
-    double aabb_max_y = 0.0;
-    bool aabb_valid = false;
-};
-
-struct OccupancyInterval {
-    bool valid = false;
-    bool actually_inside = false;
-    double t_enter = 0.0;
-    double t_exit = 0.0;
-};
-
 struct PairInteractionResult {
     int vehicle_a = -1;
     int vehicle_b = -1;
@@ -92,9 +70,6 @@ struct PairInteractionResult {
     int path_gen_b = -1;
     std::vector<PotentialConflictZone> potential_zones;
     PairInteractionType type = PairInteractionType::NONE;
-    SharedSegment shared_segment;
-    OccupancyInterval occupancy_a;
-    OccupancyInterval occupancy_b;
     TimedConflictEvent event;
 };
 
@@ -114,20 +89,6 @@ PairInteractionResult detectPairInteractionFromPredictions(
     const std::vector<PotentialConflictZone>& potential_zones,
     const std::vector<PredictedKinematicSample>& prediction_a,
     const std::vector<PredictedKinematicSample>& prediction_b);
-
-OccupancyInterval predictOccupancyInterval(
-    const std::vector<PredictedKinematicSample>& prediction,
-    double segment_enter_s, double segment_exit_s);
-
-// Detects an opposing occupancy violation. When preferred_winner_id is valid,
-// the result enforces loser.enter >= winner.exit + clearance_time. With no
-// winner it reports any overlap and lets the unified coordinator choose one.
-PairInteractionResult detectSharedSegmentInteraction(
-    const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
-    const SharedSegment& segment,
-    const std::vector<PredictedKinematicSample>& prediction_a,
-    const std::vector<PredictedKinematicSample>& prediction_b,
-    double clearance_time, int preferred_winner_id = -1);
 
 std::vector<InteractionPoint> intersectObbs(const OBB& a, const OBB& b);
 

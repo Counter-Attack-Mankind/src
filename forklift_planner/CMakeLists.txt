@@ -55,12 +55,12 @@ target_link_libraries(two_vehicle_sim_node
 add_executable(multi_vehicle_patrol_node
   ${PATH_GENERATOR_SOURCES}
   src/multi_vehicle/footprint.cpp
+  src/multi_vehicle/bridge_ttc_correction.cpp
   src/multi_vehicle/dynamic_speed_coordination.cpp
   src/multi_vehicle/marker_publisher.cpp
   src/multi_vehicle/multi_vehicle_config.cpp
   src/multi_vehicle/path_track.cpp
   src/multi_vehicle/rule_engine.cpp
-  src/multi_vehicle/shared_segment_geometry.cpp
   src/multi_vehicle/spatiotemporal_interaction.cpp
   src/multi_vehicle/task_allocator.cpp
   src/multi_vehicle/traffic_resource_map.cpp
@@ -103,6 +103,17 @@ target_link_libraries(conflict_zone_geometry_diag
 )
 
 if(CATKIN_ENABLE_TESTING)
+  add_executable(bridge_ttc_correction_test
+    test/bridge_ttc_correction_test.cpp
+    src/multi_vehicle/bridge_ttc_correction.cpp
+    src/multi_vehicle/path_track.cpp
+  )
+  add_dependencies(bridge_ttc_correction_test ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(bridge_ttc_correction_test ${catkin_LIBRARIES})
+  add_test(NAME bridge_ttc_correction_test
+           COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
+                   $<TARGET_FILE:bridge_ttc_correction_test>)
+
   add_executable(conflict_zone_closure_test
     test/conflict_zone_closure_test.cpp
   )
@@ -115,11 +126,11 @@ if(CATKIN_ENABLE_TESTING)
 
   add_executable(spatiotemporal_interaction_test
     test/spatiotemporal_interaction_test.cpp
+    src/multi_vehicle/bridge_ttc_correction.cpp
     src/multi_vehicle/dynamic_speed_coordination.cpp
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
     src/multi_vehicle/rule_engine.cpp
-    src/multi_vehicle/shared_segment_geometry.cpp
     src/multi_vehicle/spatiotemporal_interaction.cpp
     src/multi_vehicle/traffic_resource_map.cpp
   )
@@ -144,11 +155,11 @@ if(CATKIN_ENABLE_TESTING)
 
   add_executable(dynamic_speed_rule_engine_test
     test/dynamic_speed_rule_engine_test.cpp
+    src/multi_vehicle/bridge_ttc_correction.cpp
     src/multi_vehicle/dynamic_speed_coordination.cpp
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
     src/multi_vehicle/rule_engine.cpp
-    src/multi_vehicle/shared_segment_geometry.cpp
     src/multi_vehicle/spatiotemporal_interaction.cpp
     src/multi_vehicle/traffic_resource_map.cpp
   )
@@ -174,11 +185,11 @@ if(CATKIN_ENABLE_TESTING)
 
   add_executable(rolling_decision_timing_test
     test/rolling_decision_timing_test.cpp
+    src/multi_vehicle/bridge_ttc_correction.cpp
     src/multi_vehicle/dynamic_speed_coordination.cpp
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
     src/multi_vehicle/rule_engine.cpp
-    src/multi_vehicle/shared_segment_geometry.cpp
     src/multi_vehicle/spatiotemporal_interaction.cpp
     src/multi_vehicle/traffic_resource_map.cpp
   )
@@ -188,18 +199,6 @@ if(CATKIN_ENABLE_TESTING)
            COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
                    $<TARGET_FILE:rolling_decision_timing_test>)
 
-  add_executable(shared_segment_geometry_test
-    test/shared_segment_geometry_test.cpp
-    src/multi_vehicle/footprint.cpp
-    src/multi_vehicle/path_track.cpp
-    src/multi_vehicle/shared_segment_geometry.cpp
-    src/multi_vehicle/spatiotemporal_interaction.cpp
-  )
-  add_dependencies(shared_segment_geometry_test ${catkin_EXPORTED_TARGETS})
-  target_link_libraries(shared_segment_geometry_test ${catkin_LIBRARIES})
-  add_test(NAME shared_segment_geometry_test
-           COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
-                   $<TARGET_FILE:shared_segment_geometry_test>)
 endif()
 
 install(TARGETS planner_node two_vehicle_sim_node multi_vehicle_patrol_node
