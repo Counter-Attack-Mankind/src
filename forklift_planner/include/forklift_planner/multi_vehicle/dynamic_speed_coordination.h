@@ -32,10 +32,15 @@ struct PairSpeedCoordinationResult {
     bool attempted = false;
     bool action_selected = false;
     bool emergency_stop = false;
+    bool residual_evaluated = false;
+    bool residual_conflict = false;
+    bool priority_safety_stop = false;
     VehicleAction selected_action_a = VehicleAction::NOMINAL;
     VehicleAction selected_action_b = VehicleAction::NOMINAL;
     int selected_winner_id = -1;
     std::optional<double> original_first_conflict_t;
+    std::optional<double> residual_first_conflict_t;
+    std::optional<double> priority_stop_threshold;
     std::string reason;
 };
 
@@ -51,11 +56,11 @@ SelectedSpeedActionEvaluation evaluateSelectedAction(
     std::optional<double> original_first_conflict_t = std::nullopt);
 
 // Pure two-vehicle rolling TTC response. The supplied priority vehicle is not
-// a reservation owner: it merely receives no speed reduction from this pair
-// during the current rolling period. The yielding vehicle receives exactly
-// one target: FAR=NOMINAL, MID=YIELD, NEAR=CREEP, or STOP when the caller's
-// independent baseline-TTC boundary reports an emergency. No selected action
-// is re-predicted here and the priority order is never swapped for feasibility.
+// a reservation owner. The yielding vehicle first receives FAR=NOMINAL,
+// MID=YIELD, NEAR=CREEP, or emergency STOP. One synchronized residual check
+// then predicts priority=NOMINAL with that selected yielding action; priority
+// stops only if the residual physical conflict is still inside the existing
+// NOMINAL TTC stop boundary. The priority order is never swapped.
 PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const std::vector<PotentialConflictZone>& potential_zones,

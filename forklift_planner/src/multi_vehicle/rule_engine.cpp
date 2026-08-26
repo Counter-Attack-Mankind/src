@@ -1965,6 +1965,24 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                              << actionName(speed_result.selected_action_b)
                              << " braking_stop="
                              << (speed_result.emergency_stop ? "true" : "false")
+                             << " residual_conflict="
+                             << (speed_result.residual_conflict
+                                     ? "true" : "false")
+                             << " residual_ttc=";
+                        if (speed_result.residual_first_conflict_t) {
+                            line << *speed_result.residual_first_conflict_t;
+                        } else {
+                            line << "CLEAR";
+                        }
+                        line << " priority_stop_threshold=";
+                        if (speed_result.priority_stop_threshold) {
+                            line << *speed_result.priority_stop_threshold;
+                        } else {
+                            line << "N/A";
+                        }
+                        line << " priority_safety_stop="
+                             << (speed_result.priority_safety_stop
+                                     ? "true" : "false")
                              << " reason=" << speed_result.reason;
                         if (ttc_stop_boundary) {
                             line << " planned_action="

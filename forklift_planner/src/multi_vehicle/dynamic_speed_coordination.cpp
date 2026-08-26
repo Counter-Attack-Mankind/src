@@ -79,9 +79,6 @@ PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const MapParam& map_param, const MultiVehicleConfig& config,
     double prediction_horizon, int preferred_winner_id,
     bool emergency_stop) {
-    (void)potential_zones;
-    (void)map_param;
-    (void)prediction_horizon;
     PairSpeedCoordinationResult result;
     if (!nominal_baseline.event.valid) {
         result.reason = "baseline_clear";
@@ -103,12 +100,30 @@ PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const bool a_is_priority = preferred_winner_id == vehicle_a.id;
     const VehicleAction yielding_action =
         selectRollingSpeedAction(band, emergency_stop);
-    result.selected_action_a = a_is_priority
+    const VehicleAction residual_action_a = a_is_priority
         ? VehicleAction::NOMINAL : yielding_action;
-    result.selected_action_b = a_is_priority
+    const VehicleAction residual_action_b = a_is_priority
         ? yielding_action : VehicleAction::NOMINAL;
+    const SelectedSpeedActionEvaluation residual = evaluateSelectedAction(
+        vehicle_a, vehicle_b, potential_zones, map_param, config,
+        prediction_horizon, residual_action_a, residual_action_b);
+    result.residual_evaluated = true;
+    result.residual_conflict = !residual.conflict_free;
+    result.residual_first_conflict_t = residual.first_conflict_t;
+    if (residual.first_conflict_t) {
+        const TtcStopBoundary priority_boundary = evaluateTtcStopBoundary(
+            *residual.first_conflict_t, VehicleAction::NOMINAL, config);
+        result.priority_stop_threshold = priority_boundary.stop_threshold;
+        result.priority_safety_stop = priority_boundary.stop_required;
+    }
+    const VehicleAction priority_action = result.priority_safety_stop
+        ? VehicleAction::STOP : VehicleAction::NOMINAL;
+    result.selected_action_a = a_is_priority
+        ? priority_action : yielding_action;
+    result.selected_action_b = a_is_priority
+        ? yielding_action : priority_action;
 
-    if (result.emergency_stop) {
+    if (result.emergency_stop || result.priority_safety_stop) {
         result.reason = "rolling_emergency_stop";
     } else if (band == DynamicInterventionBand::FAR) {
         result.reason = "rolling_far_nominal";

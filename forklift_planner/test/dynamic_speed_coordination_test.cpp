@@ -140,8 +140,12 @@ int main() {
     const auto emergency = evaluate(
         mid_a, mid_b, map_param, config, true);
     if (!emergency.emergency_stop ||
-        emergency.selected_action_b != VehicleAction::STOP) {
-        return fail("emergency did not directly select STOP");
+        emergency.selected_action_a != VehicleAction::NOMINAL ||
+        emergency.selected_action_b != VehicleAction::STOP ||
+        !emergency.residual_evaluated ||
+        emergency.residual_conflict ||
+        emergency.priority_safety_stop) {
+        return fail("clear residual did not keep priority nominal");
     }
 
     // A MID action is a rolling 2 s response, not a full-horizon reservation.
@@ -296,8 +300,8 @@ int main() {
         return fail("max deceleration did not move TTC STOP boundary");
     }
 
-    // Braking infeasibility stops only the yielding side; the supplied stable
-    // priority remains nominal and no alternate order is searched.
+    // An immediate residual physical conflict stops priority for safety;
+    // priority identity remains stable and no alternate order is searched.
     VehicleAgent immediate_a = crossingVehicle(10, 0.0, false, 0.0);
     VehicleAgent immediate_b = crossingVehicle(11, 0.0, false, 0.0);
     immediate_b.track.set(RoughPath{
@@ -311,7 +315,9 @@ int main() {
         immediate_a, immediate_b, {}, immediate_baseline, map_param,
         config, 15.0, immediate_b.id, true);
     if (unresolved.selected_action_a != VehicleAction::STOP ||
-        unresolved.selected_action_b != VehicleAction::NOMINAL ||
+        unresolved.selected_action_b != VehicleAction::STOP ||
+        !unresolved.residual_conflict ||
+        !unresolved.priority_safety_stop ||
         unresolved.selected_winner_id != immediate_b.id ||
         unresolved.reason != "rolling_emergency_stop") {
         return fail("braking emergency changed stable-priority response");
