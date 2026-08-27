@@ -49,9 +49,21 @@ struct PredictedKinematicSample {
 struct TimedConflictEvent {
     bool valid = false;
     int associated_zone_index = -1;
-    double first_t = 0.0;
-    double first_s_a = 0.0;
-    double first_s_b = 0.0;
+    // Pair-level diagnostic: time of the first synchronized OBB overlap.
+    // It is not a shared vehicle TTC and must not drive speed actions.
+    double first_overlap_t = 0.0;
+    // Per-vehicle danger positions at that first synchronized overlap.
+    double collision_s_a = 0.0;
+    double collision_s_b = 0.0;
+    // Control boundaries. Ordinary conflicts initialize these to collision_s;
+    // bridge correction may move either boundary upstream independently.
+    double danger_s_a = 0.0;
+    double danger_s_b = 0.0;
+    // Independently inverted from each vehicle's own prediction to its own
+    // collision_s. They may be numerically equal for a synchronized baseline,
+    // but remain separate vehicle-level control quantities.
+    double ttc_a = 0.0;
+    double ttc_b = 0.0;
     double last_t = 0.0;
     std::vector<TimedOverlapGeometry> timed_overlaps;
 };
@@ -80,6 +92,12 @@ std::vector<PredictedKinematicSample> predictTrajectory(
     const VehicleAgent& vehicle, const MapParam& map_param,
     const MultiVehicleConfig& config, VehicleAction target_action,
     double prediction_horizon);
+
+// Inverts one vehicle's existing kinematic prediction at its own path-space
+// danger position. Returns infinity when the prediction cannot reach target_s.
+double predictionTimeAtS(
+    const std::vector<PredictedKinematicSample>& prediction,
+    double target_s);
 
 // Pure synchronized-OBB detector.  It returns only the first contiguous
 // overlap event and associates its first sample with the nearest compressed

@@ -103,7 +103,7 @@ int main() {
     if (crossing.potential_zones.empty() || !crossing.event.valid ||
         crossing.event.associated_zone_index != -1 ||
         crossing.type != PairInteractionType::CROSSING ||
-        crossing.event.last_t < crossing.event.first_t ||
+        crossing.event.last_t < crossing.event.first_overlap_t ||
         crossing.event.timed_overlaps.empty()) {
         return fail("synchronized crossing event was not detected");
     }
@@ -119,7 +119,15 @@ int main() {
             direct_prediction_b);
     if (!zone_free_crossing.event.valid ||
         zone_free_crossing.event.associated_zone_index != -1 ||
-        zone_free_crossing.event.timed_overlaps.empty()) {
+        zone_free_crossing.event.timed_overlaps.empty() ||
+        !near(zone_free_crossing.event.ttc_a,
+              predictionTimeAtS(
+                  direct_prediction_a,
+                  zone_free_crossing.event.collision_s_a)) ||
+        !near(zone_free_crossing.event.ttc_b,
+              predictionTimeAtS(
+                  direct_prediction_b,
+                  zone_free_crossing.event.collision_s_b))) {
         return fail("zone-free synchronized crossing was not detected");
     }
 
@@ -142,7 +150,8 @@ int main() {
     const PairInteractionResult first_only =
         detectPairInteractionFromPredictions(
             crossing_a, crossing_b, two_zones, prediction_a, prediction_b);
-    if (!first_only.event.valid || !near(first_only.event.first_t, 1.0) ||
+    if (!first_only.event.valid ||
+        !near(first_only.event.first_overlap_t, 1.0) ||
         !near(first_only.event.last_t, 1.0) ||
         first_only.event.timed_overlaps.size() != 1 ||
         first_only.event.associated_zone_index != 0) {

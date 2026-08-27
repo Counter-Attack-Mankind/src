@@ -106,6 +106,8 @@ if(CATKIN_ENABLE_TESTING)
   add_executable(bridge_ttc_correction_test
     test/bridge_ttc_correction_test.cpp
     src/multi_vehicle/bridge_ttc_correction.cpp
+    src/multi_vehicle/spatiotemporal_interaction.cpp
+    src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
   )
   add_dependencies(bridge_ttc_correction_test ${catkin_EXPORTED_TARGETS})
@@ -142,6 +144,7 @@ if(CATKIN_ENABLE_TESTING)
 
   add_executable(dynamic_speed_coordination_test
     test/dynamic_speed_coordination_test.cpp
+    src/multi_vehicle/bridge_ttc_correction.cpp
     src/multi_vehicle/dynamic_speed_coordination.cpp
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp

@@ -319,7 +319,7 @@ public:
         bool emergency_stop = false;
         VehicleAction selected_action_a = VehicleAction::NOMINAL;
         VehicleAction selected_action_b = VehicleAction::NOMINAL;
-        std::optional<double> baseline_first_t;
+        std::optional<double> baseline_first_overlap_t;
         std::vector<Target> targets;
     };
     const RollingDynamicDecision& lastRollingDynamicDecision() const {

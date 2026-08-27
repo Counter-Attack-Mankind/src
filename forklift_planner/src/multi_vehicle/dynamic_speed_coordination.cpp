@@ -3,15 +3,17 @@
 #include <algorithm>
 #include <cmath>
 
+#include "forklift_planner/multi_vehicle/bridge_ttc_correction.h"
+
 namespace forklift_planner {
 namespace multi_vehicle {
 
 DynamicInterventionBand classifyDynamicInterventionBand(
-    double first_conflict_t, const MultiVehicleConfig& config) {
-    if (first_conflict_t >= config.dynamic_speed_far_threshold) {
+    double vehicle_ttc, const MultiVehicleConfig& config) {
+    if (vehicle_ttc >= config.dynamic_speed_far_threshold) {
         return DynamicInterventionBand::FAR;
     }
-    if (first_conflict_t >= config.dynamic_speed_near_threshold) {
+    if (vehicle_ttc >= config.dynamic_speed_near_threshold) {
         return DynamicInterventionBand::MID;
     }
     return DynamicInterventionBand::NEAR;
@@ -46,7 +48,7 @@ SelectedSpeedActionEvaluation evaluateSelectedAction(
     const MapParam& map_param, const MultiVehicleConfig& config,
     double prediction_horizon, VehicleAction action_a,
     VehicleAction action_b,
-    std::optional<double> original_first_conflict_t) {
+    std::optional<double> original_first_overlap_t) {
     SelectedSpeedActionEvaluation evaluation;
     evaluation.action_a = action_a;
     evaluation.action_b = action_b;
@@ -63,10 +65,20 @@ SelectedSpeedActionEvaluation evaluateSelectedAction(
             prediction_a, prediction_b);
     evaluation.conflict_free = !interaction.event.valid;
     if (interaction.event.valid) {
-        evaluation.first_conflict_t = interaction.event.first_t;
-        if (original_first_conflict_t) {
+        const PairBridgeTtcCorrection bridge = evaluateBridgeTtcCorrection(
+            vehicle_a, vehicle_b, prediction_a, prediction_b, interaction,
+            map_param, config);
+        evaluation.first_overlap_t = interaction.event.first_overlap_t;
+        evaluation.collision_s_a = interaction.event.collision_s_a;
+        evaluation.collision_s_b = interaction.event.collision_s_b;
+        evaluation.danger_s_a = bridge.a.near_boundary_s;
+        evaluation.danger_s_b = bridge.b.near_boundary_s;
+        evaluation.ttc_a = bridge.a.corrected_ttc;
+        evaluation.ttc_b = bridge.b.corrected_ttc;
+        if (original_first_overlap_t) {
             evaluation.conflict_delay =
-                interaction.event.first_t - *original_first_conflict_t;
+                interaction.event.first_overlap_t -
+                *original_first_overlap_t;
         }
     }
     return evaluation;
@@ -77,14 +89,15 @@ PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const std::vector<PotentialConflictZone>& potential_zones,
     const PairInteractionResult& nominal_baseline,
     const MapParam& map_param, const MultiVehicleConfig& config,
-    double prediction_horizon, int preferred_winner_id,
-    bool emergency_stop) {
+    double prediction_horizon, int preferred_winner_id) {
     PairSpeedCoordinationResult result;
     if (!nominal_baseline.event.valid) {
         result.reason = "baseline_clear";
         return result;
     }
-    result.original_first_conflict_t = nominal_baseline.event.first_t;
+    result.first_overlap_t = nominal_baseline.event.first_overlap_t;
+    result.baseline_ttc_a = nominal_baseline.event.ttc_a;
+    result.baseline_ttc_b = nominal_baseline.event.ttc_b;
     if (preferred_winner_id != vehicle_a.id &&
         preferred_winner_id != vehicle_b.id) {
         result.reason = "no_priority_winner";
@@ -93,13 +106,23 @@ PairSpeedCoordinationResult evaluatePairSpeedCoordination(
 
     result.attempted = true;
     result.action_selected = true;
-    result.emergency_stop = emergency_stop;
     result.selected_winner_id = preferred_winner_id;
-    const DynamicInterventionBand band = classifyDynamicInterventionBand(
-        nominal_baseline.event.first_t, config);
     const bool a_is_priority = preferred_winner_id == vehicle_a.id;
-    const VehicleAction yielding_action =
-        selectRollingSpeedAction(band, emergency_stop);
+    result.yielding_ttc = a_is_priority
+        ? nominal_baseline.event.ttc_b : nominal_baseline.event.ttc_a;
+    result.yielding_band = classifyDynamicInterventionBand(
+        *result.yielding_ttc, config);
+    VehicleAction yielding_action = selectRollingSpeedAction(
+        result.yielding_band, false);
+    const TtcStopBoundary baseline_yielding_boundary =
+        evaluateTtcStopBoundary(
+            *result.yielding_ttc, yielding_action, config);
+    result.yielding_stop_threshold =
+        baseline_yielding_boundary.stop_threshold;
+    if (baseline_yielding_boundary.stop_required) {
+        result.yielding_safety_stop = true;
+        yielding_action = VehicleAction::STOP;
+    }
     const VehicleAction residual_action_a = a_is_priority
         ? VehicleAction::NOMINAL : yielding_action;
     const VehicleAction residual_action_b = a_is_priority
@@ -109,12 +132,31 @@ PairSpeedCoordinationResult evaluatePairSpeedCoordination(
         prediction_horizon, residual_action_a, residual_action_b);
     result.residual_evaluated = true;
     result.residual_conflict = !residual.conflict_free;
-    result.residual_first_conflict_t = residual.first_conflict_t;
-    if (residual.first_conflict_t) {
+    result.residual_first_overlap_t = residual.first_overlap_t;
+    result.residual_ttc_a = residual.ttc_a;
+    result.residual_ttc_b = residual.ttc_b;
+    if (residual.ttc_a && residual.ttc_b) {
+        result.residual_priority_ttc = a_is_priority
+            ? residual.ttc_a : residual.ttc_b;
+        result.residual_yielding_ttc = a_is_priority
+            ? residual.ttc_b : residual.ttc_a;
         const TtcStopBoundary priority_boundary = evaluateTtcStopBoundary(
-            *residual.first_conflict_t, VehicleAction::NOMINAL, config);
+            *result.residual_priority_ttc,
+            VehicleAction::NOMINAL, config);
         result.priority_stop_threshold = priority_boundary.stop_threshold;
         result.priority_safety_stop = priority_boundary.stop_required;
+        if (yielding_action != VehicleAction::STOP) {
+            const TtcStopBoundary residual_yielding_boundary =
+                evaluateTtcStopBoundary(
+                    *result.residual_yielding_ttc,
+                    yielding_action, config);
+            result.yielding_stop_threshold =
+                residual_yielding_boundary.stop_threshold;
+            if (residual_yielding_boundary.stop_required) {
+                result.yielding_safety_stop = true;
+                yielding_action = VehicleAction::STOP;
+            }
+        }
     }
     const VehicleAction priority_action = result.priority_safety_stop
         ? VehicleAction::STOP : VehicleAction::NOMINAL;
@@ -123,11 +165,13 @@ PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     result.selected_action_b = a_is_priority
         ? yielding_action : priority_action;
 
-    if (result.emergency_stop || result.priority_safety_stop) {
+    result.emergency_stop = result.yielding_safety_stop ||
+                            result.priority_safety_stop;
+    if (result.emergency_stop) {
         result.reason = "rolling_emergency_stop";
-    } else if (band == DynamicInterventionBand::FAR) {
+    } else if (result.yielding_band == DynamicInterventionBand::FAR) {
         result.reason = "rolling_far_nominal";
-    } else if (band == DynamicInterventionBand::MID) {
+    } else if (result.yielding_band == DynamicInterventionBand::MID) {
         result.reason = "rolling_mid_yield";
     } else {
         result.reason = "rolling_near_creep";
@@ -136,7 +180,7 @@ PairSpeedCoordinationResult evaluatePairSpeedCoordination(
 }
 
 TtcStopBoundary evaluateTtcStopBoundary(
-    double first_conflict_t, VehicleAction planned_action,
+    double vehicle_ttc, VehicleAction planned_action,
     const MultiVehicleConfig& config) {
     TtcStopBoundary result;
     result.planned_action = planned_action;
@@ -168,7 +212,7 @@ TtcStopBoundary evaluateTtcStopBoundary(
     result.stop_threshold = result.decision_period + result.braking_time +
                             result.time_margin;
     result.stop_required =
-        first_conflict_t <= result.stop_threshold + 1e-9;
+        vehicle_ttc <= result.stop_threshold + 1e-9;
     return result;
 }
 

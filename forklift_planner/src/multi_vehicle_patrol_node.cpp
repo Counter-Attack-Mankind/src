@@ -1377,8 +1377,9 @@ private:
                 line << actionName(target);
             }
             line << " legacy=" << (decision.legacy_fallback ? 1 : 0);
-            if (decision.baseline_first_t) {
-                line << " baseline_first_t=" << *decision.baseline_first_t;
+            if (decision.baseline_first_overlap_t) {
+                line << " baseline_first_overlap_t="
+                     << *decision.baseline_first_overlap_t;
             }
             line << " candidate_rollout=NOT_EVALUATED";
             coordLogWithContext(line.str(), "REAL", sim_plan_id_, 0, -1);

@@ -93,8 +93,8 @@ std::optional<std::vector<VehicleAgent>> findFarBoundaryFixture(
                 crossingVehicle(1, approach_b, true)};
             const auto baseline = engine.detectPairInteraction(
                 vehicles[0], vehicles[1], 15.0);
-            if (baseline.event.valid && baseline.event.first_t >= 10.05 &&
-                baseline.event.first_t <= 10.25) {
+            if (baseline.event.valid && baseline.event.ttc_b >= 10.05 &&
+                baseline.event.ttc_b <= 10.25) {
                 return vehicles;
             }
         }
@@ -118,7 +118,7 @@ int main() {
     if (!far_fixture) return fail("could not construct FAR boundary fixture");
     std::vector<VehicleAgent> far = *far_fixture;
     const double far_start_t = far_engine.detectPairInteraction(
-        far[0], far[1], 15.0).event.first_t;
+        far[0], far[1], 15.0).event.first_overlap_t;
     far_engine.decide(far, 0.1, 15.0);
     if (!far_engine.lastRollingDynamicDecision().valid ||
         far_engine.lastRollingDynamicDecision().band !=
@@ -138,12 +138,12 @@ int main() {
             const auto future_baseline = far_engine.detectPairInteraction(
                 far[0], far[1], 15.0);
             if (future_baseline.event.valid &&
-                future_baseline.event.first_t >=
+                future_baseline.event.ttc_b >=
                     config.dynamic_speed_near_threshold &&
-                future_baseline.event.first_t <
+                future_baseline.event.ttc_b <
                     config.dynamic_speed_far_threshold) {
                 observed_mid_state = true;
-                observed_mid_t = future_baseline.event.first_t;
+                observed_mid_t = future_baseline.event.ttc_b;
             }
             far_engine.decide(far, 0.1, 15.0 - frame * 0.1,
                               /*reuse_ordinary_coordination=*/true,
@@ -165,7 +165,7 @@ int main() {
     const auto refresh_baseline = far_engine.detectPairInteraction(
         far[0], far[1], 15.0);
     if (!refresh_baseline.event.valid ||
-        refresh_baseline.event.first_t >= config.dynamic_speed_far_threshold) {
+        refresh_baseline.event.ttc_b >= config.dynamic_speed_far_threshold) {
         return fail("2 s refresh fixture did not enter MID/NEAR");
     }
     far_engine.decide(far, 0.1, 15.0);
@@ -230,7 +230,7 @@ int main() {
                                       VehicleAction::NOMINAL, 15.0));
             if (!candidate_baseline.event.valid) continue;
             if (classifyDynamicInterventionBand(
-                    candidate_baseline.event.first_t, config) !=
+                    candidate_baseline.event.ttc_b, config) !=
                 DynamicInterventionBand::MID) {
                 continue;
             }
@@ -240,14 +240,14 @@ int main() {
             const auto raw_yield = evaluateSelectedAction(
                 candidate_a, candidate_b, candidate_zones, map_param, config,
                 15.0, VehicleAction::NOMINAL, VehicleAction::YIELD,
-                candidate_baseline.event.first_t);
+                candidate_baseline.event.first_overlap_t);
             if (candidate_result.action_selected &&
                 candidate_result.selected_winner_id == candidate_a.id &&
                 candidate_result.selected_action_a == VehicleAction::NOMINAL &&
                 candidate_result.selected_action_b == VehicleAction::YIELD &&
                 !raw_yield.conflict_free) {
                 found_delayed_candidate = true;
-                delayed_candidate_t = candidate_baseline.event.first_t;
+                delayed_candidate_t = candidate_baseline.event.first_overlap_t;
                 break;
             }
         }
@@ -320,7 +320,7 @@ int main() {
               << " future_mid_first_t=" << observed_mid_t
               << " frames_nominal=20\n";
     std::cout << "[ROLLING-REFRESH] first_t="
-              << refresh_baseline.event.first_t << " new_target="
+              << refresh_baseline.event.first_overlap_t << " new_target="
               << actionName(far[0].requested_action) << "/"
               << actionName(far[1].requested_action) << '\n';
     std::cout << "[FULL-HORIZON-ACTION] baseline_conflict_t="

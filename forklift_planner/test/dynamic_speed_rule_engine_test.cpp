@@ -240,18 +240,30 @@ int main() {
     bridge_engine.decide(bridge_pair, 0.1, 15.0);
     const auto& bridge_metrics = bridge_engine.dynamicSpeedMetrics();
     bool saw_bridge_log = false;
+    bool saw_vehicle_ttc_log = false;
     for (const std::string& line : bridge_logs) {
         saw_bridge_log = saw_bridge_log ||
             (line.find("[BRIDGE-TTC]") != std::string::npos &&
              line.find("bridge_a=true") != std::string::npos &&
              line.find("bridge_b=true") != std::string::npos &&
-             line.find("effective_ttc=0.000") != std::string::npos);
+             line.find("V0_original_ttc=") != std::string::npos &&
+             line.find("V1_original_ttc=") != std::string::npos &&
+             line.find("V0_corrected_ttc=0.000") != std::string::npos);
+        saw_vehicle_ttc_log = saw_vehicle_ttc_log ||
+            (line.find("[DYN-TTC]") != std::string::npos &&
+             line.find("first_overlap_t=") != std::string::npos &&
+             line.find("collision_s_a=") != std::string::npos &&
+             line.find("collision_s_b=") != std::string::npos &&
+             line.find("ttc_a=") != std::string::npos &&
+             line.find("ttc_b=") != std::string::npos &&
+             line.find("priority_ttc=") != std::string::npos &&
+             line.find("yield_ttc=") != std::string::npos);
     }
     if (bridge_metrics.bridge_checked_pairs != 1 ||
         bridge_metrics.opposing_conflicts != 1 ||
         bridge_metrics.bridge_corrected_pairs != 1 ||
         bridge_metrics.bridge_nearest_evaluations == 0 ||
-        !saw_bridge_log ||
+        !saw_bridge_log || !saw_vehicle_ttc_log ||
         !hasDynamicReason(bridge_pair, VehicleAction::STOP) ||
         !bridge_engine.snapshot().reservations.empty()) {
         return fail("head-on bridge TTC did not drive reservation-free action");

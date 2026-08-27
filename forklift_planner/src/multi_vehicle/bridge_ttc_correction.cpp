@@ -133,22 +133,6 @@ double motionHeading(const PathTrack& track, double s) {
         (track.typeAtS(s) == WpType::REVERSE ? kPi : 0.0);
 }
 
-double timeAtS(const std::vector<PredictedKinematicSample>& prediction,
-               double target_s) {
-    if (prediction.empty()) return std::numeric_limits<double>::infinity();
-    if (target_s <= prediction.front().s + kEpsilon) return 0.0;
-    for (std::size_t i = 1; i < prediction.size(); ++i) {
-        if (prediction[i].s + kEpsilon < target_s) continue;
-        const double ds = prediction[i].s - prediction[i - 1].s;
-        if (ds <= kEpsilon) return prediction[i].t;
-        const double ratio = std::max(0.0, std::min(
-            1.0, (target_s - prediction[i - 1].s) / ds));
-        return prediction[i - 1].t +
-            ratio * (prediction[i].t - prediction[i - 1].t);
-    }
-    return std::numeric_limits<double>::infinity();
-}
-
 VehicleBridgeTtcCorrection evaluateVehicle(
     const VehicleAgent& self, const VehicleAgent& other,
     const std::vector<PredictedKinematicSample>& self_prediction,
@@ -271,7 +255,7 @@ VehicleBridgeTtcCorrection evaluateVehicle(
     }
     result.boundary_type = self.track.typeAtS(result.near_boundary_s);
 
-    const double boundary_ttc = timeAtS(
+    const double boundary_ttc = predictionTimeAtS(
         self_prediction, result.near_boundary_s);
     if (!std::isfinite(boundary_ttc)) {
         result.backtrack_end_reason =
@@ -309,16 +293,20 @@ PairBridgeTtcCorrection evaluateBridgeTtcCorrection(
     PairBridgeTtcCorrection result;
     if (!nominal_baseline.event.valid) return result;
     result.baseline_conflict = true;
+    const double original_ttc_a = predictionTimeAtS(
+        prediction_a, nominal_baseline.event.collision_s_a);
+    const double original_ttc_b = predictionTimeAtS(
+        prediction_b, nominal_baseline.event.collision_s_b);
     result.a = evaluateVehicle(
         vehicle_a, vehicle_b, prediction_a,
-        nominal_baseline.event.first_s_a,
-        nominal_baseline.event.first_s_b,
-        nominal_baseline.event.first_t, map_param, config);
+        nominal_baseline.event.collision_s_a,
+        nominal_baseline.event.collision_s_b,
+        original_ttc_a, map_param, config);
     result.b = evaluateVehicle(
         vehicle_b, vehicle_a, prediction_b,
-        nominal_baseline.event.first_s_b,
-        nominal_baseline.event.first_s_a,
-        nominal_baseline.event.first_t, map_param, config);
+        nominal_baseline.event.collision_s_b,
+        nominal_baseline.event.collision_s_a,
+        original_ttc_b, map_param, config);
     return result;
 }
 

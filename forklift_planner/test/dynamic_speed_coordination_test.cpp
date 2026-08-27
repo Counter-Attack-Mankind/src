@@ -61,12 +61,11 @@ PairInteractionResult baseline(const VehicleAgent& a, const VehicleAgent& b,
 
 PairSpeedCoordinationResult evaluate(
     const VehicleAgent& a, const VehicleAgent& b,
-    const MapParam& map_param, const MultiVehicleConfig& config,
-    bool emergency_stop = false) {
+    const MapParam& map_param, const MultiVehicleConfig& config) {
     const auto nominal = baseline(a, b, map_param, config, 15.0);
     return evaluatePairSpeedCoordination(
         a, b, std::vector<PotentialConflictZone>{broadZone(a, b)},
-        nominal, map_param, config, 15.0, 0, emergency_stop);
+        nominal, map_param, config, 15.0, 0);
 }
 
 bool near(double lhs, double rhs, double tolerance = 1e-9) {
@@ -117,7 +116,7 @@ int main() {
     const auto mid_baseline = baseline(mid_a, mid_b, map_param, config, 15.0);
     const auto mid_result = evaluate(mid_a, mid_b, map_param, config);
     if (!mid_baseline.event.valid ||
-        classifyDynamicInterventionBand(mid_baseline.event.first_t, config) !=
+        classifyDynamicInterventionBand(mid_baseline.event.ttc_b, config) !=
             DynamicInterventionBand::MID ||
         !mid_result.action_selected ||
         mid_result.selected_action_a != VehicleAction::NOMINAL ||
@@ -125,20 +124,40 @@ int main() {
         return fail("MID did not select exactly one YIELD target");
     }
 
-    const VehicleAgent near_a = crossingVehicle(0, 0.30, false);
-    const VehicleAgent near_b = crossingVehicle(1, 0.55, true);
+    // Role selection consumes the yielding vehicle's own TTC. Deliberately
+    // make the priority TTC NEAR and the yielding TTC MID; the band must stay
+    // MID instead of being driven by A or by first_overlap_t.
+    PairInteractionResult split_baseline = mid_baseline;
+    split_baseline.event.ttc_a = 1.0;
+    split_baseline.event.ttc_b = 6.0;
+    const auto split_result = evaluatePairSpeedCoordination(
+        mid_a, mid_b, std::vector<PotentialConflictZone>{broadZone(mid_a, mid_b)},
+        split_baseline, map_param, config, 15.0, mid_a.id);
+    if (!split_result.baseline_ttc_a || !split_result.baseline_ttc_b ||
+        near(*split_result.baseline_ttc_a, *split_result.baseline_ttc_b) ||
+        !split_result.yielding_ttc ||
+        !near(*split_result.yielding_ttc, 6.0) ||
+        split_result.yielding_band != DynamicInterventionBand::MID) {
+        return fail("yielding band still consumes a shared pair TTC");
+    }
+
+    const VehicleAgent near_a = crossingVehicle(0, 0.80, false);
+    const VehicleAgent near_b = crossingVehicle(1, 1.05, true);
     const auto near_baseline = baseline(
         near_a, near_b, map_param, config, 15.0);
     const auto near_result = evaluate(near_a, near_b, map_param, config);
     if (!near_baseline.event.valid ||
-        classifyDynamicInterventionBand(near_baseline.event.first_t, config) !=
+        classifyDynamicInterventionBand(near_baseline.event.ttc_b, config) !=
             DynamicInterventionBand::NEAR ||
         near_result.selected_action_b != VehicleAction::CREEP) {
         return fail("NEAR did not jump directly to CREEP");
     }
 
-    const auto emergency = evaluate(
-        mid_a, mid_b, map_param, config, true);
+    PairInteractionResult emergency_baseline = mid_baseline;
+    emergency_baseline.event.ttc_b = 1.0;
+    const auto emergency = evaluatePairSpeedCoordination(
+        mid_a, mid_b, std::vector<PotentialConflictZone>{broadZone(mid_a, mid_b)},
+        emergency_baseline, map_param, config, 15.0, mid_a.id);
     if (!emergency.emergency_stop ||
         emergency.selected_action_a != VehicleAction::NOMINAL ||
         emergency.selected_action_b != VehicleAction::STOP ||
@@ -165,7 +184,7 @@ int main() {
                 1, approach_b, true, speed_b);
             const auto nominal = baseline(a, b, map_param, config, 15.0);
             if (!nominal.event.valid ||
-                classifyDynamicInterventionBand(nominal.event.first_t,
+                classifyDynamicInterventionBand(nominal.event.ttc_b,
                                                 config) !=
                     DynamicInterventionBand::MID) {
                 continue;
@@ -173,7 +192,7 @@ int main() {
             const auto raw_yield = evaluateSelectedAction(
                 a, b, std::vector<PotentialConflictZone>{broadZone(a, b)},
                 map_param, config, 15.0, VehicleAction::NOMINAL,
-                VehicleAction::YIELD, nominal.event.first_t);
+                VehicleAction::YIELD, nominal.event.first_overlap_t);
             if (!raw_yield.conflict_free && raw_yield.conflict_delay &&
                 *raw_yield.conflict_delay > config.prediction_step) {
                 const auto result = evaluate(a, b, map_param, config);
@@ -300,6 +319,21 @@ int main() {
         return fail("max deceleration did not move TTC STOP boundary");
     }
 
+    // Distinct vehicle TTCs and action speeds must produce distinct safety
+    // decisions: priority=NOMINAL needs more braking time here, while the
+    // yielding CREEP vehicle remains outside its own STOP boundary.
+    const double distinct_priority_ttc = 2.50;
+    const double distinct_yielding_ttc = 3.00;
+    const auto distinct_priority_stop = evaluateTtcStopBoundary(
+        distinct_priority_ttc, VehicleAction::NOMINAL, config);
+    const auto distinct_yielding_stop = evaluateTtcStopBoundary(
+        distinct_yielding_ttc, VehicleAction::CREEP, config);
+    if (near(distinct_priority_ttc, distinct_yielding_ttc) ||
+        !distinct_priority_stop.stop_required ||
+        distinct_yielding_stop.stop_required) {
+        return fail("priority/yield STOP decisions still share one TTC");
+    }
+
     // An immediate residual physical conflict stops priority for safety;
     // priority identity remains stable and no alternate order is searched.
     VehicleAgent immediate_a = crossingVehicle(10, 0.0, false, 0.0);
@@ -310,21 +344,31 @@ int main() {
     PairInteractionResult immediate_baseline;
     immediate_baseline.type = PairInteractionType::OPPOSING;
     immediate_baseline.event.valid = true;
-    immediate_baseline.event.first_t = 0.0;
+    immediate_baseline.event.first_overlap_t = 0.0;
+    immediate_baseline.event.collision_s_a = 0.0;
+    immediate_baseline.event.collision_s_b = 0.0;
+    immediate_baseline.event.danger_s_a = 0.0;
+    immediate_baseline.event.danger_s_b = 0.0;
+    immediate_baseline.event.ttc_a = 0.0;
+    immediate_baseline.event.ttc_b = 0.0;
     const auto unresolved = evaluatePairSpeedCoordination(
         immediate_a, immediate_b, {}, immediate_baseline, map_param,
-        config, 15.0, immediate_b.id, true);
+        config, 15.0, immediate_b.id);
     if (unresolved.selected_action_a != VehicleAction::STOP ||
         unresolved.selected_action_b != VehicleAction::STOP ||
         !unresolved.residual_conflict ||
         !unresolved.priority_safety_stop ||
+        !unresolved.residual_priority_ttc ||
+        !evaluateTtcStopBoundary(
+             *unresolved.residual_priority_ttc,
+             VehicleAction::NOMINAL, config).stop_required ||
         unresolved.selected_winner_id != immediate_b.id ||
         unresolved.reason != "rolling_emergency_stop") {
         return fail("braking emergency changed stable-priority response");
     }
 
-    std::cout << "[MID-DIRECT] baseline_first_t="
-              << *direct_mid->original_first_conflict_t
+    std::cout << "[MID-DIRECT] first_overlap_t="
+              << *direct_mid->first_overlap_t
               << " raw_yield_delay=" << *raw_yield_delay
               << " selected_action="
               << static_cast<int>(direct_mid->selected_action_b) << '\n';

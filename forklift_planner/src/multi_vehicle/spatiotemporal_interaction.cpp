@@ -175,6 +175,24 @@ std::vector<PredictedKinematicSample> predictTrajectory(
     return output;
 }
 
+double predictionTimeAtS(
+    const std::vector<PredictedKinematicSample>& prediction,
+    double target_s) {
+    if (prediction.empty()) return std::numeric_limits<double>::infinity();
+    if (target_s <= prediction.front().s + 1e-9) return 0.0;
+    for (std::size_t i = 1; i < prediction.size(); ++i) {
+        if (prediction[i].s + 1e-9 < target_s) continue;
+        const double ds = prediction[i].s - prediction[i - 1].s;
+        if (ds <= 1e-9) return prediction[i].t;
+        const double ratio = std::max(
+            0.0, std::min(1.0,
+                          (target_s - prediction[i - 1].s) / ds));
+        return prediction[i - 1].t +
+            ratio * (prediction[i].t - prediction[i - 1].t);
+    }
+    return std::numeric_limits<double>::infinity();
+}
+
 PairInteractionResult detectPairInteractionFromPredictions(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const std::vector<PotentialConflictZone>& potential_zones,
@@ -197,11 +215,15 @@ PairInteractionResult detectPairInteractionFromPredictions(
         if (!result.event.valid) {
             result.event.valid = true;
             result.type = PairInteractionType::CROSSING;
-            result.event.first_t = prediction_a[k].t;
+            result.event.first_overlap_t = prediction_a[k].t;
             const double s_a = prediction_a[k].s;
             const double s_b = prediction_b[k].s;
-            result.event.first_s_a = s_a;
-            result.event.first_s_b = s_b;
+            result.event.collision_s_a = s_a;
+            result.event.collision_s_b = s_b;
+            result.event.danger_s_a = s_a;
+            result.event.danger_s_b = s_b;
+            result.event.ttc_a = predictionTimeAtS(prediction_a, s_a);
+            result.event.ttc_b = predictionTimeAtS(prediction_b, s_b);
             double best_score = std::numeric_limits<double>::infinity();
             for (size_t zone_index = 0;
                  zone_index < potential_zones.size(); ++zone_index) {

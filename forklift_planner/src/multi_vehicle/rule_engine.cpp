@@ -1241,18 +1241,18 @@ RuleEngine::SlotDepartureAdmission RuleEngine::checkSlotDepartureAdmission(
         if (!physical.event.valid) continue;
 
         const PredictedKinematicSample& candidate_sample = sampleAt(
-            candidate_prediction, physical.event.first_t);
+            candidate_prediction, physical.event.first_overlap_t);
         if (candidate_sample.s >
             launch_candidate.slot_departure_clear_s + 1e-9) {
             continue;
         }
         if (result.ordinary_road_conflict &&
-            physical.event.first_t >= result.first_conflict_t - 1e-9) {
+            physical.event.first_overlap_t >= result.first_conflict_t - 1e-9) {
             continue;
         }
 
         const PredictedKinematicSample& occupant_sample = sampleAt(
-            occupant_prediction, physical.event.first_t);
+            occupant_prediction, physical.event.first_overlap_t);
         const double direction_dot = std::cos(
             motionHeading(launch_candidate, candidate_sample.s) -
             motionHeading(occupant, occupant_sample.s));
@@ -1264,7 +1264,7 @@ RuleEngine::SlotDepartureAdmission RuleEngine::checkSlotDepartureAdmission(
         result.clear = false;
         result.ordinary_road_conflict = true;
         result.blocker_id = occupant.id;
-        result.first_conflict_t = physical.event.first_t;
+        result.first_conflict_t = physical.event.first_overlap_t;
         result.candidate_conflict_s = candidate_sample.s;
     }
     return result;
@@ -1529,9 +1529,9 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 });
             return it == prediction.end() ? prediction.back() : *it;
         };
-        const auto& first_a = sampleAt(pa, interaction.event.first_t);
+        const auto& first_a = sampleAt(pa, interaction.event.first_overlap_t);
         const auto& last_a = sampleAt(pa, interaction.event.last_t);
-        const auto& first_b = sampleAt(pb, interaction.event.first_t);
+        const auto& first_b = sampleAt(pb, interaction.event.first_overlap_t);
         const auto& last_b = sampleAt(pb, interaction.event.last_t);
         zone.s_self_enter = first_a.s;
         zone.s_self_exit = last_a.s;
@@ -1777,7 +1777,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 recordConflictZones(
                     a, b, std::vector<ConflictZone>{zone},
                     ConflictMarkerKind::CROSSING_OR_OPPOSING,
-                    event.first_t, -1, -1, 0.0,
+                    event.first_overlap_t, -1, -1, 0.0,
                     VehicleAction::NOMINAL, -1, -1,
                     decimateTimedOverlaps(event.timed_overlaps),
                     interaction.type, event.last_t);
@@ -1785,8 +1785,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 continue;
             }
 
-            bool emergency_stop_required = false;
-            std::optional<TtcStopBoundary> ttc_stop_boundary;
             if (dynamic_speed_enabled) {
                 ++dynamic_speed_metrics_.baseline_conflicts;
                 if (ordinary) {
@@ -1810,9 +1808,9 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         ++dynamic_speed_metrics_.bridge_related_b;
                     }
                     if (bridge_correction.a.corrected_ttc + 1e-9 <
-                            event.first_t ||
+                            event.ttc_a ||
                         bridge_correction.b.corrected_ttc + 1e-9 <
-                            event.first_t) {
+                            event.ttc_b) {
                         ++dynamic_speed_metrics_.bridge_corrected_pairs;
                     }
                     if (interaction.type == PairInteractionType::OPPOSING) {
@@ -1825,34 +1823,26 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 if (ordinary) {
                     preferred_winner = priorityWinner(a, b);
                 }
-                double effective_ttc = event.first_t;
-                if (ordinary && preferred_winner == a.id) {
-                    effective_ttc = bridge_correction.b.corrected_ttc;
-                } else if (ordinary && preferred_winner == b.id) {
-                    effective_ttc = bridge_correction.a.corrected_ttc;
-                }
-                const DynamicInterventionBand intervention_band =
-                    classifyDynamicInterventionBand(effective_ttc, cfg_);
-
-                if (ordinary &&
-                    intervention_band == DynamicInterventionBand::NEAR &&
-                    preferred_winner >= 0) {
-                    ttc_stop_boundary = evaluateTtcStopBoundary(
-                        effective_ttc, VehicleAction::CREEP, cfg_);
-                    emergency_stop_required =
-                        ttc_stop_boundary->stop_required;
-                }
 
                 PairSpeedCoordinationResult speed_result;
                 if (ordinary) {
                     PairInteractionResult effective_interaction = interaction;
-                    effective_interaction.event.first_t = effective_ttc;
+                    effective_interaction.event.danger_s_a =
+                        bridge_correction.a.near_boundary_s;
+                    effective_interaction.event.danger_s_b =
+                        bridge_correction.b.near_boundary_s;
+                    effective_interaction.event.ttc_a =
+                        bridge_correction.a.corrected_ttc;
+                    effective_interaction.event.ttc_b =
+                        bridge_correction.b.corrected_ttc;
                     speed_result = evaluatePairSpeedCoordination(
                         a, b, std::vector<ConflictZone>{},
                         effective_interaction,
                         mp_, cfg_, horizon,
-                        preferred_winner, emergency_stop_required);
+                        preferred_winner);
                     preferred_winner = speed_result.selected_winner_id;
+                    const DynamicInterventionBand intervention_band =
+                        speed_result.yielding_band;
                     last_rolling_dynamic_decision_.valid = true;
                     last_rolling_dynamic_decision_.baseline_evaluated = true;
                     last_rolling_dynamic_decision_.band = intervention_band;
@@ -1863,8 +1853,8 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         speed_result.selected_action_a;
                     last_rolling_dynamic_decision_.selected_action_b =
                         speed_result.selected_action_b;
-                    last_rolling_dynamic_decision_.baseline_first_t =
-                        event.first_t;
+                    last_rolling_dynamic_decision_.baseline_first_overlap_t =
+                        event.first_overlap_t;
                     if (intervention_band == DynamicInterventionBand::FAR) {
                         ++dynamic_speed_metrics_.far_decisions;
                     } else if (intervention_band ==
@@ -1939,12 +1929,57 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     }
 
                     if (coord_log_sink_) {
+                        const bool a_is_priority = preferred_winner == a.id;
+                        const VehicleAction priority_action = a_is_priority
+                            ? speed_result.selected_action_a
+                            : speed_result.selected_action_b;
+                        const VehicleAction yielding_action = a_is_priority
+                            ? speed_result.selected_action_b
+                            : speed_result.selected_action_a;
+                        std::ostringstream ttc_line;
+                        ttc_line << std::fixed << std::setprecision(3)
+                                 << "[DYN-TTC] pair=V" << key.first << "-V"
+                                 << key.second
+                                 << " first_overlap_t="
+                                 << event.first_overlap_t
+                                 << " collision_s_a=" << event.collision_s_a
+                                 << " collision_s_b=" << event.collision_s_b
+                                 << " danger_s_a="
+                                 << bridge_correction.a.near_boundary_s
+                                 << " danger_s_b="
+                                 << bridge_correction.b.near_boundary_s
+                                 << " ttc_a="
+                                 << bridge_correction.a.corrected_ttc
+                                 << " ttc_b="
+                                 << bridge_correction.b.corrected_ttc
+                                 << " priority=V" << preferred_winner
+                                 << " yield=V"
+                                 << (a_is_priority ? b.id : a.id)
+                                 << " priority_ttc="
+                                 << (a_is_priority
+                                     ? bridge_correction.a.corrected_ttc
+                                     : bridge_correction.b.corrected_ttc)
+                                 << " yield_ttc="
+                                 << *speed_result.yielding_ttc
+                                 << " residual_priority_ttc=";
+                        if (speed_result.residual_priority_ttc) {
+                            ttc_line << *speed_result.residual_priority_ttc;
+                        } else {
+                            ttc_line << "CLEAR";
+                        }
+                        ttc_line << " residual_yield_ttc=";
+                        if (speed_result.residual_yielding_ttc) {
+                            ttc_line << *speed_result.residual_yielding_ttc;
+                        } else {
+                            ttc_line << "CLEAR";
+                        }
+                        coord_log_sink_(ttc_line.str());
+
                         std::ostringstream line;
                         line << std::fixed << std::setprecision(3)
                              << "[DYN-SPEED] pair=V" << key.first << "-V"
                              << key.second
-                             << " baseline_first_t=" << event.first_t
-                             << " effective_ttc=" << effective_ttc
+                             << " first_overlap_t=" << event.first_overlap_t
                              << " interaction=GENERIC_TIMED_CONFLICT"
                              << " priority_vehicle=V" << preferred_winner
                              << " yielding_vehicle=V"
@@ -1959,6 +1994,34 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                              << " event_exit_b=" << zone.s_other_exit
                              << " band="
                              << dynamicInterventionBandName(intervention_band)
+                             << " residual_priority_ttc=";
+                        if (speed_result.residual_priority_ttc) {
+                            line << *speed_result.residual_priority_ttc;
+                        } else {
+                            line << "CLEAR";
+                        }
+                        line << " priority_action="
+                             << actionName(priority_action)
+                             << " priority_stop_threshold=";
+                        if (speed_result.priority_stop_threshold) {
+                            line << *speed_result.priority_stop_threshold;
+                        } else {
+                            line << "N/A";
+                        }
+                        line << " priority_safety_stop="
+                             << (speed_result.priority_safety_stop
+                                     ? "true" : "false")
+                             << " yield_ttc=" << *speed_result.yielding_ttc
+                             << " yield_action=" << actionName(yielding_action)
+                             << " yield_stop_threshold=";
+                        if (speed_result.yielding_stop_threshold) {
+                            line << *speed_result.yielding_stop_threshold;
+                        } else {
+                            line << "N/A";
+                        }
+                        line << " yield_safety_stop="
+                             << (speed_result.yielding_safety_stop
+                                     ? "true" : "false")
                              << " selected="
                              << actionName(speed_result.selected_action_a)
                              << "/"
@@ -1968,52 +2031,51 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                              << " residual_conflict="
                              << (speed_result.residual_conflict
                                      ? "true" : "false")
-                             << " residual_ttc=";
-                        if (speed_result.residual_first_conflict_t) {
-                            line << *speed_result.residual_first_conflict_t;
+                             << " residual_first_overlap_t=";
+                        if (speed_result.residual_first_overlap_t) {
+                            line << *speed_result.residual_first_overlap_t;
                         } else {
                             line << "CLEAR";
                         }
-                        line << " priority_stop_threshold=";
-                        if (speed_result.priority_stop_threshold) {
-                            line << *speed_result.priority_stop_threshold;
+                        line << " residual_ttc_a=";
+                        if (speed_result.residual_ttc_a) {
+                            line << *speed_result.residual_ttc_a;
                         } else {
-                            line << "N/A";
+                            line << "CLEAR";
                         }
-                        line << " priority_safety_stop="
-                             << (speed_result.priority_safety_stop
-                                     ? "true" : "false")
-                             << " reason=" << speed_result.reason;
-                        if (ttc_stop_boundary) {
-                            line << " planned_action="
-                                 << actionName(
-                                        ttc_stop_boundary->planned_action)
-                                 << " action_speed="
-                                 << ttc_stop_boundary->action_speed
-                                 << " decision_period="
-                                 << ttc_stop_boundary->decision_period
-                                 << " braking_time="
-                                 << ttc_stop_boundary->braking_time
-                                 << " time_margin="
-                                 << ttc_stop_boundary->time_margin
-                                 << " stop_threshold="
-                                 << ttc_stop_boundary->stop_threshold
-                                 << " stop_required="
-                                 << (ttc_stop_boundary->stop_required
-                                         ? "true" : "false");
+                        line << " residual_ttc_b=";
+                        if (speed_result.residual_ttc_b) {
+                            line << *speed_result.residual_ttc_b;
                         } else {
-                            line << " stop_gate=NOT_APPLICABLE";
+                            line << "CLEAR";
                         }
-                        line << " reservation=not_created";
+                        line << " reason=" << speed_result.reason
+                             << " reservation=not_created";
                         coord_log_sink_(line.str());
 
                         std::ostringstream bridge_line;
                         bridge_line << std::fixed << std::setprecision(3)
                             << "[BRIDGE-TTC] pair=V" << key.first << "-V"
                             << key.second
-                            << " original_ttc=" << event.first_t
-                            << " collision_s_a=" << event.first_s_a
-                            << " collision_s_b=" << event.first_s_b
+                            << " first_overlap_t=" << event.first_overlap_t
+                            << " V" << a.id
+                            << "_original_danger_s=" << event.collision_s_a
+                            << " V" << a.id
+                            << "_corrected_boundary_s="
+                            << bridge_correction.a.near_boundary_s
+                            << " V" << a.id << "_original_ttc="
+                            << bridge_correction.a.original_ttc
+                            << " V" << a.id << "_corrected_ttc="
+                            << bridge_correction.a.corrected_ttc
+                            << " V" << b.id
+                            << "_original_danger_s=" << event.collision_s_b
+                            << " V" << b.id
+                            << "_corrected_boundary_s="
+                            << bridge_correction.b.near_boundary_s
+                            << " V" << b.id << "_original_ttc="
+                            << bridge_correction.b.original_ttc
+                            << " V" << b.id << "_corrected_ttc="
+                            << bridge_correction.b.corrected_ttc
                             << " bridge_a="
                             << (bridge_correction.a.bridge_related
                                     ? "true" : "false")
@@ -2048,14 +2110,10 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                             << " boundary_type_b="
                             << (bridge_correction.b.boundary_type ==
                                         WpType::REVERSE ? "R" : "F")
-                            << " corrected_ttc_a="
-                            << bridge_correction.a.corrected_ttc
-                            << " corrected_ttc_b="
-                            << bridge_correction.b.corrected_ttc
                             << " priority_vehicle=V" << preferred_winner
                             << " yielding_vehicle=V"
                             << (preferred_winner == a.id ? b.id : a.id)
-                            << " effective_ttc=" << effective_ttc
+                            << " yielding_ttc=" << *speed_result.yielding_ttc
                             << " band="
                             << dynamicInterventionBandName(intervention_band)
                             << " selected="
@@ -2103,7 +2161,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     recordConflictZones(
                         a, b, std::vector<ConflictZone>{zone},
                         ConflictMarkerKind::CROSSING_OR_OPPOSING,
-                        event.first_t, -1, -1, 0.0,
+                        event.first_overlap_t, -1, -1, 0.0,
                         VehicleAction::NOMINAL,
                         preferred_winner,
                         preferred_winner == a.id
@@ -2120,9 +2178,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         line << std::fixed << std::setprecision(3)
                              << "[DYN-SPEED] pair=V" << key.first << "-V"
                              << key.second
-                             << " baseline_first_t=" << event.first_t
-                             << " band="
-                             << dynamicInterventionBandName(intervention_band)
+                             << " first_overlap_t=" << event.first_overlap_t
                              << " selection=SKIPPED reason="
                              << (a1_related ? "a1_protected"
                                             : "legacy_special_case")
@@ -2180,13 +2236,14 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     line << "both";
                 }
                 line << " conflict_type=CROSSING/OPPOSING"
-                     << " first_t=" << event.first_t;
+                     << " first_overlap_t=" << event.first_overlap_t;
                 coord_log_sink_(line.str());
             }
 
             recordConflictZones(
                 a, b, std::vector<ConflictZone>{zone},
-                ConflictMarkerKind::CROSSING_OR_OPPOSING, event.first_t,
+                ConflictMarkerKind::CROSSING_OR_OPPOSING,
+                event.first_overlap_t,
                 -1, -1, 0.0, VehicleAction::NOMINAL, holder,
                 holder == a.id ? b.id : (holder == b.id ? a.id : -1),
                 decimateTimedOverlaps(event.timed_overlaps));
@@ -2216,7 +2273,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             r.exit_hi = a_is_lo ? zone.s_other_exit : zone.s_self_exit;
             r.x = zone.x;
             r.y = zone.y;
-            r.first_conflict_t = event.first_t;
+            r.first_conflict_t = event.first_overlap_t;
             // Reaching the ownership path is now possible only for an A1
             // service transaction; every non-A1 timed conflict returned from
             // the rolling motion branch above.

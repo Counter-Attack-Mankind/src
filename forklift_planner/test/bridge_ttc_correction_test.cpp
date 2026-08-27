@@ -16,6 +16,10 @@ int fail(const std::string& message) {
     return 1;
 }
 
+bool near(double lhs, double rhs, double tolerance = 1e-9) {
+    return std::abs(lhs - rhs) <= tolerance;
+}
+
 RoughWp wp(double x, double y, double theta, WpType type) {
     return RoughWp{x, y, theta, type};
 }
@@ -43,9 +47,13 @@ std::vector<PredictedKinematicSample> prediction(double length,
 PairInteractionResult conflict(double t, double s_a, double s_b) {
     PairInteractionResult result;
     result.event.valid = true;
-    result.event.first_t = t;
-    result.event.first_s_a = s_a;
-    result.event.first_s_b = s_b;
+    result.event.first_overlap_t = t;
+    result.event.collision_s_a = s_a;
+    result.event.collision_s_b = s_b;
+    result.event.danger_s_a = s_a;
+    result.event.danger_s_b = s_b;
+    result.event.ttc_a = t;
+    result.event.ttc_b = t;
     return result;
 }
 
@@ -97,7 +105,8 @@ int main() {
     const PairBridgeTtcCorrection same = evaluateBridgeTtcCorrection(
         forward, same_direction, forward_prediction, forward_prediction,
         conflict(6.0, 1.0, 1.0), map, config);
-    if (same.a.bridge_related || same.a.corrected_ttc != 6.0) {
+    if (same.a.bridge_related || !near(same.a.original_ttc, 5.0) ||
+        !near(same.a.corrected_ttc, 5.0)) {
         return fail("same-direction proximity was classified as bridge");
     }
 
@@ -195,6 +204,20 @@ int main() {
         conflict(5.0, 1.0, 0.0), map, config);
     if (!one_side.a.bridge_related || one_side.b.bridge_related) {
         return fail("per-vehicle bridge evaluation was not independent");
+    }
+
+    // original_ttc is independently inverted from each prediction and is not
+    // copied from the pair-level first_overlap_t diagnostic.
+    const PairBridgeTtcCorrection independent_original =
+        evaluateBridgeTtcCorrection(
+            forward, opposing, prediction(2.0, 10.0),
+            prediction(2.0, 20.0), conflict(8.0, 1.2, 0.4),
+            map, config);
+    if (!near(independent_original.a.original_ttc, 6.0) ||
+        !near(independent_original.b.original_ttc, 4.0) ||
+        near(independent_original.a.original_ttc,
+             independent_original.b.original_ttc)) {
+        return fail("bridge original TTCs still share first_overlap_t");
     }
 
     std::cout << "bridge_ttc_correction_test: PASS\n";
