@@ -1855,6 +1855,48 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         speed_result.selected_action_b;
                     last_rolling_dynamic_decision_.baseline_first_overlap_t =
                         event.first_overlap_t;
+                    const bool a_is_priority = preferred_winner == a.id;
+                    auto recordVehicleTtc = [&](
+                            const VehicleAgent& vehicle,
+                            const std::optional<double>& ttc,
+                            const std::string& reason) {
+                        auto& diagnostics = last_rolling_dynamic_decision_.
+                            vehicle_ttc_diagnostics;
+                        auto existing = std::find_if(
+                            diagnostics.begin(), diagnostics.end(),
+                            [&](const RollingDynamicDecision::
+                                    VehicleTtcDiagnostic& diagnostic) {
+                                return diagnostic.vehicle_id == vehicle.id &&
+                                       diagnostic.path_gen == vehicle.path_gen;
+                            });
+                        const RollingDynamicDecision::VehicleTtcDiagnostic
+                            incoming{vehicle.id, vehicle.path_gen, ttc, reason};
+                        if (existing == diagnostics.end()) {
+                            diagnostics.push_back(incoming);
+                        } else if (ttc &&
+                                   (!existing->ttc ||
+                                    *ttc < *existing->ttc)) {
+                            *existing = incoming;
+                        }
+                    };
+                    const std::optional<double> priority_ttc =
+                        speed_result.residual_priority_ttc;
+                    const std::string priority_reason =
+                        speed_result.priority_safety_stop
+                            ? "safety_stop"
+                            : priority_ttc ? "residual_safe" : "clear";
+                    recordVehicleTtc(
+                        a, a_is_priority
+                               ? priority_ttc
+                               : speed_result.yielding_ttc,
+                        a_is_priority ? priority_reason
+                                      : speed_result.reason);
+                    recordVehicleTtc(
+                        b, a_is_priority
+                               ? speed_result.yielding_ttc
+                               : priority_ttc,
+                        a_is_priority ? speed_result.reason
+                                      : priority_reason);
                     if (intervention_band == DynamicInterventionBand::FAR) {
                         ++dynamic_speed_metrics_.far_decisions;
                     } else if (intervention_band ==
@@ -1929,7 +1971,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     }
 
                     if (coord_log_sink_) {
-                        const bool a_is_priority = preferred_winner == a.id;
                         const VehicleAction priority_action = a_is_priority
                             ? speed_result.selected_action_a
                             : speed_result.selected_action_b;
@@ -2063,6 +2104,10 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                             << " V" << a.id
                             << "_corrected_boundary_s="
                             << bridge_correction.a.near_boundary_s
+                            << " V" << a.id << "_opposing_boundary_s="
+                            << bridge_correction.a.opposing_boundary_s
+                            << " V" << a.id << "_geometric_boundary_s="
+                            << bridge_correction.a.geometric_boundary_s
                             << " V" << a.id << "_original_ttc="
                             << bridge_correction.a.original_ttc
                             << " V" << a.id << "_corrected_ttc="
@@ -2072,6 +2117,10 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                             << " V" << b.id
                             << "_corrected_boundary_s="
                             << bridge_correction.b.near_boundary_s
+                            << " V" << b.id << "_opposing_boundary_s="
+                            << bridge_correction.b.opposing_boundary_s
+                            << " V" << b.id << "_geometric_boundary_s="
+                            << bridge_correction.b.geometric_boundary_s
                             << " V" << b.id << "_original_ttc="
                             << bridge_correction.b.original_ttc
                             << " V" << b.id << "_corrected_ttc="
@@ -2154,7 +2203,51 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                             << " nearest_evaluations="
                             << bridge_correction.a.nearest_search_evaluations
                             << "/"
-                            << bridge_correction.b.nearest_search_evaluations;
+                            << bridge_correction.b.nearest_search_evaluations
+                            << " geometric_attempted="
+                            << (bridge_correction.a.
+                                    geometric_extension_attempted
+                                    ? "true" : "false")
+                            << "/"
+                            << (bridge_correction.b.
+                                    geometric_extension_attempted
+                                    ? "true" : "false")
+                            << " geometric_applied="
+                            << (bridge_correction.a.geometric_extension_applied
+                                    ? "true" : "false")
+                            << "/"
+                            << (bridge_correction.b.geometric_extension_applied
+                                    ? "true" : "false")
+                            << " geometric_samples="
+                            << bridge_correction.a.geometric_outer_samples
+                            << "/"
+                            << bridge_correction.b.geometric_outer_samples
+                            << " geometric_overlap_samples="
+                            << bridge_correction.a.geometric_overlap_samples
+                            << "/"
+                            << bridge_correction.b.geometric_overlap_samples
+                            << " geometric_end_reason="
+                            << bridgeGeometricEndReasonName(
+                                   bridge_correction.a.geometric_end_reason)
+                            << "/"
+                            << bridgeGeometricEndReasonName(
+                                   bridge_correction.b.geometric_end_reason)
+                            << " geometric_end_query_s="
+                            << bridge_correction.a.geometric_end_query_s
+                            << "/"
+                            << bridge_correction.b.geometric_end_query_s
+                            << " geometric_matched_other_s="
+                            << bridge_correction.a.
+                                   geometric_end_matched_other_s
+                            << "/"
+                            << bridge_correction.b.
+                                   geometric_end_matched_other_s
+                            << " cusp_near_lost="
+                            << (bridge_correction.a.cusp_near_relation_loss
+                                    ? "true" : "false")
+                            << "/"
+                            << (bridge_correction.b.cusp_near_relation_loss
+                                    ? "true" : "false");
                         coord_log_sink_(bridge_line.str());
                     }
 

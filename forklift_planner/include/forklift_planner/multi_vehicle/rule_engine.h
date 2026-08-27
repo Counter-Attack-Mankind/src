@@ -304,6 +304,12 @@ public:
     }
 
     struct RollingDynamicDecision {
+        struct VehicleTtcDiagnostic {
+            int vehicle_id = -1;
+            int path_gen = 0;
+            std::optional<double> ttc;
+            std::string reason = "clear";
+        };
         struct Target {
             int vehicle_id = -1;
             int path_gen = 0;
@@ -321,6 +327,7 @@ public:
         VehicleAction selected_action_b = VehicleAction::NOMINAL;
         std::optional<double> baseline_first_overlap_t;
         std::vector<Target> targets;
+        std::vector<VehicleTtcDiagnostic> vehicle_ttc_diagnostics;
     };
     const RollingDynamicDecision& lastRollingDynamicDecision() const {
         return last_rolling_dynamic_decision_;

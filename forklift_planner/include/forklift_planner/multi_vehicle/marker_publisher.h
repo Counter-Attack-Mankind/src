@@ -33,6 +33,10 @@ public:
                  const std::vector<bool>& visited_slots,
                  const std::vector<ConflictMarker>& conflicts,
                  const std::vector<ConflictMarker>& resource_markers) const;
+    void setRollingDecision(
+        const RuleEngine::RollingDynamicDecision& rolling_decision) {
+        rolling_decision_ = rolling_decision;
+    }
 
 private:
     void addPathMarker(visualization_msgs::MarkerArray& arr,
@@ -64,6 +68,7 @@ private:
     mutable int last_conflict_reservation_marker_count_ = 0;
     mutable std::set<int> last_zone_marker_ids_;
     mutable int publish_seq_ = 0;
+    RuleEngine::RollingDynamicDecision rolling_decision_;
 };
 
 }  // namespace multi_vehicle

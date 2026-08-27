@@ -1301,6 +1301,7 @@ private:
         }
         if (sim_plan_cursor_ == 0) {
             const auto& decision = frame.rolling_dynamic_decision;
+            marker_pub_->setRollingDecision(decision);
             if (previous_ordinary_conflict_active_ &&
                 decision.baseline_evaluated && !decision.valid) {
                 ++executed_rolling_metrics_.eventually_resolved;
@@ -2617,6 +2618,8 @@ private:
                     if (!one_shot_published_) one_shot_published_ = publishFullTrajectories();
                     updateDwellAndTasks(dt);        //检测到没有发送轨迹，一次性发布整条轨迹
                     rule_engine_->decide(agents_, dt);
+                    marker_pub_->setRollingDecision(
+                        rule_engine_->lastRollingDynamicDecision());
                 }
                 realAdvance(dt);        //根据真实车身位置重新定位
                 logAgentStatus();
@@ -2633,6 +2636,8 @@ private:
         //3. 实车模式----滚动时域规划
             updateDwellAndTasks(dt);    //更新任务---任务   dt 
             rule_engine_->decide(agents_, dt);      //规则调度---决策
+            marker_pub_->setRollingDecision(
+                rule_engine_->lastRollingDynamicDecision());
             realAdvance(dt);        //  用真实位姿更新车辆状态---执行
             if (tick_count_ % 5 == 0) runDeadlockRecovery();        //5*0.1=0.5s进行一次死锁检测
             updateSnapshotWedgeTrigger();
@@ -2661,6 +2666,8 @@ private:
         updateDwellAndTasks(dt);
         if (rb_one_shot_traj_) {
             rule_engine_->decide(agents_, dt);
+            marker_pub_->setRollingDecision(
+                rule_engine_->lastRollingDynamicDecision());
         } else {
             if (simulationPlanNeedsRefresh()) {
                 publishHorizon();
@@ -2678,6 +2685,8 @@ private:
                         "[sim_plan] no executable frame; using one safe "
                         "current-step decision");
                     rule_engine_->decide(agents_, dt);
+                    marker_pub_->setRollingDecision(
+                        rule_engine_->lastRollingDynamicDecision());
                 }
             }
         }
@@ -3804,6 +3813,8 @@ public:
                 force_horizon_refresh_ = false;
                 if (!executeSimulationPlanSample()) {
                     rule_engine_->decide(agents_, dt);
+                    marker_pub_->setRollingDecision(
+                        rule_engine_->lastRollingDynamicDecision());
                 }
             }
             for (size_t i = 0; i < agents_.size(); ++i) {

@@ -4,6 +4,8 @@
 #include <cmath>
 #include <limits>
 
+#include "forklift_planner/multi_vehicle/footprint.h"
+
 namespace forklift_planner {
 namespace multi_vehicle {
 namespace {
@@ -133,6 +135,19 @@ double motionHeading(const PathTrack& track, double s) {
         (track.typeAtS(s) == WpType::REVERSE ? kPi : 0.0);
 }
 
+bool hasTraversalChange(const PathTrack& track, double begin_s,
+                        double end_s, double step) {
+    begin_s = std::max(0.0, std::min(begin_s, track.length()));
+    end_s = std::max(begin_s, std::min(end_s, track.length()));
+    WpType previous = track.typeAtS(begin_s);
+    for (double s = begin_s + step; s < end_s + kEpsilon; s += step) {
+        const WpType current = track.typeAtS(std::min(s, end_s));
+        if (current != previous) return true;
+        previous = current;
+    }
+    return false;
+}
+
 VehicleBridgeTtcCorrection evaluateVehicle(
     const VehicleAgent& self, const VehicleAgent& other,
     const std::vector<PredictedKinematicSample>& self_prediction,
@@ -141,6 +156,8 @@ VehicleBridgeTtcCorrection evaluateVehicle(
     VehicleBridgeTtcCorrection result;
     result.collision_s = collision_s;
     result.near_boundary_s = collision_s;
+    result.opposing_boundary_s = collision_s;
+    result.geometric_boundary_s = collision_s;
     result.original_ttc = original_ttc;
     result.corrected_ttc = original_ttc;
     result.collision_type = self.track.typeAtS(collision_s);
@@ -253,6 +270,115 @@ VehicleBridgeTtcCorrection evaluateVehicle(
             break;
         }
     }
+    result.opposing_boundary_s = result.near_boundary_s;
+    result.geometric_boundary_s = result.opposing_boundary_s;
+
+    const bool relation_lost =
+        result.backtrack_end_reason ==
+            BridgeBacktrackEndReason::RELATION_DISTANCE_LOST ||
+        result.backtrack_end_reason ==
+            BridgeBacktrackEndReason::RELATION_DIRECTION_LOST;
+    if (result.bridge_related && relation_lost) {
+        result.geometric_extension_attempted = true;
+        const double current_s = std::max(
+            0.0, std::min(self.path_s, self.track.length()));
+        result.cusp_near_relation_loss = hasTraversalChange(
+            self.track, std::max(current_s, result.end_query_s - 2.0 * step),
+            std::min(self.track.length(),
+                     result.opposing_boundary_s + step),
+            std::max(0.0025, 0.5 * step));
+
+        const double margin = 0.5 * config.conflict_margin;
+        const double effective_length =
+            map_param.vehicle_length + 2.0 * margin;
+        const double effective_width =
+            map_param.vehicle_width + 2.0 * margin;
+        const double body_diagonal = std::hypot(
+            effective_length, effective_width);
+        double geometric_cursor = result.opposing_boundary_s;
+
+        // Phase one intentionally retains its historical backtracking
+        // semantics. If it has already crossed the live vehicle position,
+        // the final production boundary must nevertheless stay on the
+        // current/future path domain rather than expose a historical s.
+        if (geometric_cursor <= current_s + kEpsilon) {
+            result.geometric_boundary_s = current_s;
+            result.geometric_end_query_s = current_s;
+            result.geometric_end_reason =
+                BridgeGeometricEndReason::SELF_CURRENT_POSITION;
+        }
+
+        while (geometric_cursor > current_s + kEpsilon) {
+            const double query_s = std::max(
+                current_s, geometric_cursor - step);
+            ++result.geometric_outer_samples;
+            result.geometric_end_query_s = query_s;
+            const RoughWp self_pose = self.track.poseAtS(query_s);
+            const NearestMatch nearest = nearestOnPathLocal(
+                self_pose, other_cursor,
+                result.nearest_search_evaluations);
+            result.geometric_end_matched_other_s = nearest.s;
+            if (!std::isfinite(nearest.s) ||
+                !std::isfinite(nearest.distance) ||
+                !std::isfinite(body_diagonal)) {
+                result.geometric_end_reason =
+                    BridgeGeometricEndReason::INVALID_GEOMETRY;
+                break;
+            }
+
+            const double other_current_s = std::max(
+                0.0, std::min(other.path_s, other.track.length()));
+            const double local_begin = std::max(
+                other_current_s, nearest.s - body_diagonal);
+            const double local_end = std::min(
+                other.track.length(), nearest.s + body_diagonal);
+            if (local_begin > local_end + kEpsilon) {
+                result.geometric_end_reason =
+                    BridgeGeometricEndReason::INVALID_GEOMETRY;
+                break;
+            }
+
+            const OBB self_body = makeBody(self_pose, map_param, margin);
+            bool overlap_found = false;
+            double overlap_other_s = nearest.s;
+            auto testOther = [&](double other_s) {
+                ++result.geometric_candidate_samples;
+                if (overlaps(self_body, makeBody(
+                        other.track.poseAtS(other_s), map_param, margin))) {
+                    overlap_found = true;
+                    overlap_other_s = other_s;
+                    ++result.geometric_overlap_samples;
+                }
+            };
+            for (double other_s = local_begin;
+                 other_s < local_end - kEpsilon && !overlap_found;
+                 other_s += step) {
+                testOther(other_s);
+            }
+            if (!overlap_found) testOther(local_end);
+
+            if (!overlap_found) {
+                result.geometric_end_reason =
+                    BridgeGeometricEndReason::STATIC_OVERLAP_CLEARED;
+                break;
+            }
+            result.geometric_extension_applied = true;
+            result.geometric_boundary_s = query_s;
+            result.geometric_end_matched_other_s = overlap_other_s;
+            geometric_cursor = query_s;
+            if (query_s <= current_s + kEpsilon) {
+                result.geometric_end_reason =
+                    BridgeGeometricEndReason::SELF_CURRENT_POSITION;
+                break;
+            }
+        }
+        if (result.geometric_end_reason ==
+                BridgeGeometricEndReason::NOT_ATTEMPTED) {
+            result.geometric_end_reason =
+                BridgeGeometricEndReason::SELF_CURRENT_POSITION;
+        }
+        result.near_boundary_s = result.geometric_boundary_s;
+    }
     result.boundary_type = self.track.typeAtS(result.near_boundary_s);
 
     const double boundary_ttc = predictionTimeAtS(
@@ -279,6 +405,20 @@ const char* bridgeBacktrackEndReasonName(BridgeBacktrackEndReason reason) {
         case BridgeBacktrackEndReason::PATH_START:
             return "path_start";
         case BridgeBacktrackEndReason::INVALID_GEOMETRY:
+            return "invalid_geometry";
+    }
+    return "invalid_geometry";
+}
+
+const char* bridgeGeometricEndReasonName(BridgeGeometricEndReason reason) {
+    switch (reason) {
+        case BridgeGeometricEndReason::NOT_ATTEMPTED:
+            return "not_attempted";
+        case BridgeGeometricEndReason::STATIC_OVERLAP_CLEARED:
+            return "static_overlap_cleared";
+        case BridgeGeometricEndReason::SELF_CURRENT_POSITION:
+            return "self_current_position";
+        case BridgeGeometricEndReason::INVALID_GEOMETRY:
             return "invalid_geometry";
     }
     return "invalid_geometry";

@@ -260,6 +260,9 @@ void MarkerPublisher::addArrowMarker(visualization_msgs::MarkerArray& arr,
 void MarkerPublisher::addLabelMarker(visualization_msgs::MarkerArray& arr,
                                      const VehicleAgent& v) const {
     const RoughWp p = bodyCenterPose(displayPose(v), mp_);
+    constexpr double kLabelLongitudinalOffsetScale = 0.85;
+    const double offset =
+        kLabelLongitudinalOffsetScale * mp_.vehicle_length;
     visualization_msgs::Marker m;
     m.header.frame_id = pp_.frame_id;
     m.header.stamp = ros::Time::now();
@@ -267,30 +270,37 @@ void MarkerPublisher::addLabelMarker(visualization_msgs::MarkerArray& arr,
     m.id = v.id;
     m.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
     m.action = visualization_msgs::Marker::ADD;
-    m.pose.position.x = p.x;
-    m.pose.position.y = p.y;
+    m.pose.position.x = p.x + offset * std::cos(p.theta);
+    m.pose.position.y = p.y + offset * std::sin(p.theta);
     m.pose.position.z = 0.160;
     m.pose.orientation.w = 1.0;
     m.scale.z = 0.070;
     m.color = v.color;
-    m.text = "V" + std::to_string(v.id) + " " + actionName(v.action);
-    if (v.mode == VehicleMode::DWELL) {
-        m.text += " DWELL";
-    } else if (v.loaded) {
-        m.text += " L";
-    } else {
-        m.text += " E";
-    }
-    if (v.mode == VehicleMode::ACTIVE) {
-        std::ostringstream ss;
-        ss.setf(std::ios::fixed);
-        ss.precision(2);
-        ss << " v=" << v.current_speed;
-        if (!v.reason.empty()) {
-            ss << " " << v.reason;
+    std::ostringstream text;
+    text << std::fixed << std::setprecision(2)
+         << "V" << v.id << " " << actionName(v.action)
+         << " V=" << v.current_speed << "\nTTC=";
+    const RuleEngine::RollingDynamicDecision::VehicleTtcDiagnostic*
+        diagnostic = nullptr;
+    {
+        const auto it = std::find_if(
+            rolling_decision_.vehicle_ttc_diagnostics.begin(),
+            rolling_decision_.vehicle_ttc_diagnostics.end(),
+            [&](const RuleEngine::RollingDynamicDecision::
+                    VehicleTtcDiagnostic& item) {
+                return item.vehicle_id == v.id &&
+                       item.path_gen == v.path_gen;
+            });
+        if (it != rolling_decision_.vehicle_ttc_diagnostics.end()) {
+            diagnostic = &*it;
         }
-        m.text += ss.str();
     }
+    if (diagnostic != nullptr && diagnostic->ttc) {
+        text << *diagnostic->ttc << "s " << diagnostic->reason;
+    } else {
+        text << "clear";
+    }
+    m.text = text.str();
     arr.markers.push_back(m);
 }
 
@@ -606,20 +616,10 @@ void MarkerPublisher::addConflictMarkers(
             label.scale.z = 0.070;
             label.color = rgba(1.00f, 0.80f, 0.25f, 1.0f);
             std::ostringstream text;
-            text << std::fixed << std::setprecision(2)
-                 << "ACTIVE V" << c.vehicle_a << "-V" << c.vehicle_b
+            text << "V" << c.vehicle_a << "-V" << c.vehicle_b
                  << " type="
                  << (c.interaction_type == PairInteractionType::OPPOSING
-                         ? "OPPOSING" : "CROSSING")
-                 << " holder="
-                 << (c.holder_id >= 0 ? "V" + std::to_string(c.holder_id)
-                                      : "none")
-                 << " waiter="
-                 << (c.waiter_id >= 0 ? "V" + std::to_string(c.waiter_id)
-                                      : "both")
-                 << " first_t=" << c.t << "s"
-                 << " last_t=" << c.last_t << "s";
-            text << "\nred=timed OBB overlap; orange=dynamic overlap AABB";
+                         ? "OPPOSING" : "CROSSING");
             label.text = text.str();
             arr.markers.push_back(label);
         }

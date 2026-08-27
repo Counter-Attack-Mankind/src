@@ -21,11 +21,22 @@ enum class BridgeBacktrackEndReason {
 
 const char* bridgeBacktrackEndReasonName(BridgeBacktrackEndReason reason);
 
+enum class BridgeGeometricEndReason {
+    NOT_ATTEMPTED,
+    STATIC_OVERLAP_CLEARED,
+    SELF_CURRENT_POSITION,
+    INVALID_GEOMETRY,
+};
+
+const char* bridgeGeometricEndReasonName(BridgeGeometricEndReason reason);
+
 struct VehicleBridgeTtcCorrection {
     bool bridge_related = false;
     double collision_s = 0.0;
     double matched_other_s = 0.0;
     double near_boundary_s = 0.0;
+    double opposing_boundary_s = 0.0;
+    double geometric_boundary_s = 0.0;
     double original_ttc = std::numeric_limits<double>::infinity();
     double corrected_ttc = std::numeric_limits<double>::infinity();
     double collision_direction_dot = 1.0;
@@ -43,6 +54,16 @@ struct VehicleBridgeTtcCorrection {
         BridgeBacktrackEndReason::NOT_EVALUATED;
     int backtrack_samples = 0;
     int nearest_search_evaluations = 0;
+    bool geometric_extension_attempted = false;
+    bool geometric_extension_applied = false;
+    bool cusp_near_relation_loss = false;
+    int geometric_outer_samples = 0;
+    int geometric_candidate_samples = 0;
+    int geometric_overlap_samples = 0;
+    double geometric_end_query_s = 0.0;
+    double geometric_end_matched_other_s = 0.0;
+    BridgeGeometricEndReason geometric_end_reason =
+        BridgeGeometricEndReason::NOT_ATTEMPTED;
 };
 
 struct PairBridgeTtcCorrection {
