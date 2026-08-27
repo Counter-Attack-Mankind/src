@@ -341,6 +341,7 @@ void MarkerPublisher::addConflictMarkers(
     const char* same_ns = "conflict_same_direction";
     const char* mutual_ns = "conflict_crossing_or_opposing";
     const char* actual_ns = "conflict_timed_obb_overlap";
+    const char* collision_start_ns = "timed_collision_start";
     const char* bridge_boundary_ns = "bridge_ttc_near_boundary";
     const char* conflict_label_ns = "conflict_explanation";
     const char* following_relation_ns = "following_relation";
@@ -378,6 +379,8 @@ void MarkerPublisher::addConflictMarkers(
                       last_crossing_opposing_conflict_marker_count_);
         deleteMarkers(bridge_boundary_ns,
                       2 * last_crossing_opposing_conflict_marker_count_);
+        deleteMarkers(collision_start_ns,
+                      4 * last_crossing_opposing_conflict_marker_count_);
         deleteMarkers(potential_zone_ns,
                       last_potential_conflict_zone_marker_count_);
         deleteMarkers(potential_zone_label_ns,
@@ -472,6 +475,58 @@ void MarkerPublisher::addConflictMarkers(
             deleteMarker(actual_ns, marker_id);
         }
         if (!same_direction) {
+            auto addCollisionStart = [&](bool valid, double x, double y,
+                                         int vehicle_id, int point_offset,
+                                         const std_msgs::ColorRGBA& color) {
+                const int point_id = 4 * marker_id + point_offset;
+                const int label_id = 4 * marker_id + 2 + point_offset;
+                if (!valid) {
+                    deleteMarker(collision_start_ns, point_id);
+                    deleteMarker(collision_start_ns, label_id);
+                    return;
+                }
+                visualization_msgs::Marker point;
+                point.header.frame_id = pp_.frame_id;
+                point.header.stamp = now;
+                point.ns = collision_start_ns;
+                point.id = point_id;
+                point.type = visualization_msgs::Marker::CYLINDER;
+                point.action = visualization_msgs::Marker::ADD;
+                point.pose.position.x = x;
+                point.pose.position.y = y;
+                point.pose.position.z = 0.060;
+                point.pose.orientation.w = 1.0;
+                point.scale.x = 0.060;
+                point.scale.y = 0.060;
+                point.scale.z = 0.025;
+                point.color = color;
+                arr.markers.push_back(point);
+
+                visualization_msgs::Marker label;
+                label.header = point.header;
+                label.ns = collision_start_ns;
+                label.id = label_id;
+                label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+                label.action = visualization_msgs::Marker::ADD;
+                label.pose.position.x = x;
+                label.pose.position.y = y;
+                label.pose.position.z = 0.145;
+                label.pose.orientation.w = 1.0;
+                label.scale.z = 0.055;
+                label.color = color;
+                label.text = "V" + std::to_string(vehicle_id) +
+                    " collision";
+                arr.markers.push_back(label);
+            };
+            addCollisionStart(
+                c.timed_collision_start_valid,
+                c.collision_a_x, c.collision_a_y, c.vehicle_a, 0,
+                rgba(0.20f, 1.00f, 0.25f, 1.0f));
+            addCollisionStart(
+                c.timed_collision_start_valid,
+                c.collision_b_x, c.collision_b_y, c.vehicle_b, 1,
+                rgba(1.00f, 0.90f, 0.10f, 1.0f));
+
             auto addBridgeBoundary = [&](bool related, double x, double y,
                                          double corrected_ttc, int offset,
                                          const std_msgs::ColorRGBA& color) {
@@ -656,6 +711,10 @@ void MarkerPublisher::addConflictMarkers(
         deleteMarker(conflict_label_ns, stale);
         deleteMarker(bridge_boundary_ns, 2 * stale);
         deleteMarker(bridge_boundary_ns, 2 * stale + 1);
+        deleteMarker(collision_start_ns, 4 * stale);
+        deleteMarker(collision_start_ns, 4 * stale + 1);
+        deleteMarker(collision_start_ns, 4 * stale + 2);
+        deleteMarker(collision_start_ns, 4 * stale + 3);
     }
     for (int stale : last_zone_marker_ids_) {
         if (current_zone_ids.count(stale) != 0) continue;

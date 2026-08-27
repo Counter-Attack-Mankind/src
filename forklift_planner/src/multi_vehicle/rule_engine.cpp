@@ -1746,6 +1746,26 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 marker.bridge_corrected_ttc_b =
                     bridge_correction.b.corrected_ttc;
             };
+            auto annotateTimedCollisionStartMarker = [&]() {
+                if (conflicts_.empty()) return;
+                ConflictMarker& marker = conflicts_.back();
+                if (marker.vehicle_a != a.id || marker.vehicle_b != b.id ||
+                    marker.kind !=
+                        ConflictMarkerKind::CROSSING_OR_OPPOSING) {
+                    return;
+                }
+                const RoughWp collision_a = a.track.poseAtS(
+                    event.collision_s_a);
+                const RoughWp collision_b = b.track.poseAtS(
+                    event.collision_s_b);
+                marker.timed_collision_start_valid = true;
+                marker.collision_s_a = event.collision_s_a;
+                marker.collision_s_b = event.collision_s_b;
+                marker.collision_a_x = collision_a.x;
+                marker.collision_a_y = collision_a.y;
+                marker.collision_b_x = collision_b.x;
+                marker.collision_b_y = collision_b.y;
+            };
 
             pairwise_managed_pairs_.insert(key);
             if (ordinary) ordinary_dynamic_pairs_.insert(key);
@@ -1781,6 +1801,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     VehicleAction::NOMINAL, -1, -1,
                     decimateTimedOverlaps(event.timed_overlaps),
                     interaction.type, event.last_t);
+                annotateTimedCollisionStartMarker();
                 annotateBridgeMarker();
                 continue;
             }
@@ -2262,6 +2283,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                             : preferred_winner == b.id ? a.id : -1,
                         decimateTimedOverlaps(event.timed_overlaps),
                         interaction.type, event.last_t);
+                    annotateTimedCollisionStartMarker();
                     annotateBridgeMarker();
                     continue;
                 } else {
@@ -2340,6 +2362,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 -1, -1, 0.0, VehicleAction::NOMINAL, holder,
                 holder == a.id ? b.id : (holder == b.id ? a.id : -1),
                 decimateTimedOverlaps(event.timed_overlaps));
+            annotateTimedCollisionStartMarker();
             if (holder < 0) {
                 brakeBefore(a, zone.s_self_enter, b.id);
                 brakeBefore(b, zone.s_other_enter, a.id);

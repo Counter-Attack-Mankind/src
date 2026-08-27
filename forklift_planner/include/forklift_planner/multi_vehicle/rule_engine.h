@@ -56,6 +56,15 @@ struct ConflictMarker {
     double leader_x = 0.0;
     double leader_y = 0.0;
     PairInteractionType interaction_type = PairInteractionType::NONE;
+    // RViz-only location of the two vehicles at the first synchronized OBB
+    // overlap. These values never participate in arbitration or TTC logic.
+    bool timed_collision_start_valid = false;
+    double collision_s_a = 0.0;
+    double collision_s_b = 0.0;
+    double collision_a_x = 0.0;
+    double collision_a_y = 0.0;
+    double collision_b_x = 0.0;
+    double collision_b_y = 0.0;
     bool bridge_a_related = false;
     bool bridge_b_related = false;
     double bridge_boundary_a_x = 0.0;
