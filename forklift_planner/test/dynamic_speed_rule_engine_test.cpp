@@ -254,10 +254,12 @@ int main() {
              line.find("first_overlap_t=") != std::string::npos &&
              line.find("collision_s_a=") != std::string::npos &&
              line.find("collision_s_b=") != std::string::npos &&
-             line.find("ttc_a=") != std::string::npos &&
-             line.find("ttc_b=") != std::string::npos &&
-             line.find("priority_ttc=") != std::string::npos &&
-             line.find("yield_ttc=") != std::string::npos);
+             line.find("original_ttc_a=") != std::string::npos &&
+             line.find("original_ttc_b=") != std::string::npos &&
+             line.find("effective_ttc_a=") != std::string::npos &&
+             line.find("effective_ttc_b=") != std::string::npos &&
+             line.find("priority_original_ttc=") != std::string::npos &&
+             line.find("yield_effective_ttc=") != std::string::npos);
     }
     if (bridge_metrics.bridge_checked_pairs != 1 ||
         bridge_metrics.opposing_conflicts != 1 ||
@@ -267,6 +269,52 @@ int main() {
         !hasDynamicReason(bridge_pair, VehicleAction::STOP) ||
         !bridge_engine.snapshot().reservations.empty()) {
         return fail("head-on bridge TTC did not drive reservation-free action");
+    }
+
+    // Priority's exceptional brake is armed only on a later rolling period,
+    // after the yielding vehicle is already executing this pair's dynamic
+    // STOP on the public road and priority is still moving toward the event.
+    if (bridge_pair[0].requested_action != VehicleAction::NOMINAL ||
+        bridge_pair[1].requested_action != VehicleAction::STOP) {
+        return fail("first bridge period did not keep priority nominal");
+    }
+    bridge_pair[0].current_speed = config.nominal_speed;
+    bridge_engine.decide(bridge_pair, 0.1, 15.0);
+    bool saw_armed_priority_gate = false;
+    for (const std::string& line : bridge_logs) {
+        saw_armed_priority_gate = saw_armed_priority_gate ||
+            (line.find("[DYN-SPEED]") != std::string::npos &&
+             line.find("priority_emergency_eligible=true") !=
+                 std::string::npos);
+    }
+    if (!saw_armed_priority_gate) {
+        return fail("persistent public-road conflict did not arm priority gate");
+    }
+
+    RuleEngine slot_wait_engine(map_param, config);
+    std::vector<std::string> slot_wait_logs;
+    slot_wait_engine.setCoordLogSink(
+        [&](const std::string& line) { slot_wait_logs.push_back(line); });
+    std::vector<VehicleAgent> slot_wait_pair{bridge_a, bridge_b};
+    slot_wait_pair[1].slot_departure_clear_s = 0.50;
+    slot_wait_pair[1].path_s = 0.0;
+    slot_wait_engine.decide(slot_wait_pair, 0.1, 15.0);
+    slot_wait_pair[0].current_speed = config.nominal_speed;
+    slot_wait_engine.decide(slot_wait_pair, 0.1, 15.0);
+    bool saw_slot_exclusion = false;
+    for (const std::string& line : slot_wait_logs) {
+        saw_slot_exclusion = saw_slot_exclusion ||
+            (line.find("[DYN-SPEED]") != std::string::npos &&
+             line.find("conflict_periods=2") != std::string::npos &&
+             line.find("yielding_source_slot_clear=false") !=
+                 std::string::npos &&
+             line.find("priority_emergency_eligible=false") !=
+                 std::string::npos);
+    }
+    if (slot_wait_pair[0].requested_action != VehicleAction::NOMINAL ||
+        slot_wait_pair[1].requested_action != VehicleAction::STOP ||
+        !saw_slot_exclusion) {
+        return fail("source-slot yielding STOP armed priority emergency");
     }
 
     // A nominally clear pair does not even enter bridge matching and emits no

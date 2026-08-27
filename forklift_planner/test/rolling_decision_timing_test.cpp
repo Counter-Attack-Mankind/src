@@ -235,8 +235,9 @@ int main() {
                 continue;
             }
             const auto candidate_result = evaluatePairSpeedCoordination(
-                candidate_a, candidate_b, candidate_zones,
-                candidate_baseline, map_param, config, 15.0, 0);
+                candidate_a, candidate_b, candidate_baseline,
+                candidate_baseline.event.ttc_a,
+                candidate_baseline.event.ttc_b, config, 0);
             const auto raw_yield = evaluateSelectedAction(
                 candidate_a, candidate_b, candidate_zones, map_param, config,
                 15.0, VehicleAction::NOMINAL, VehicleAction::YIELD,

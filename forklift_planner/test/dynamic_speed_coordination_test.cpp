@@ -64,8 +64,7 @@ PairSpeedCoordinationResult evaluate(
     const MapParam& map_param, const MultiVehicleConfig& config) {
     const auto nominal = baseline(a, b, map_param, config, 15.0);
     return evaluatePairSpeedCoordination(
-        a, b, std::vector<PotentialConflictZone>{broadZone(a, b)},
-        nominal, map_param, config, 15.0, 0);
+        a, b, nominal, nominal.event.ttc_a, nominal.event.ttc_b, config, 0);
 }
 
 bool near(double lhs, double rhs, double tolerance = 1e-9) {
@@ -131,12 +130,11 @@ int main() {
     split_baseline.event.ttc_a = 1.0;
     split_baseline.event.ttc_b = 6.0;
     const auto split_result = evaluatePairSpeedCoordination(
-        mid_a, mid_b, std::vector<PotentialConflictZone>{broadZone(mid_a, mid_b)},
-        split_baseline, map_param, config, 15.0, mid_a.id);
-    if (!split_result.baseline_ttc_a || !split_result.baseline_ttc_b ||
-        near(*split_result.baseline_ttc_a, *split_result.baseline_ttc_b) ||
-        !split_result.yielding_ttc ||
-        !near(*split_result.yielding_ttc, 6.0) ||
+        mid_a, mid_b, split_baseline, 1.0, 6.0, config, mid_a.id);
+    if (!split_result.effective_ttc_a || !split_result.effective_ttc_b ||
+        near(*split_result.effective_ttc_a, *split_result.effective_ttc_b) ||
+        !split_result.yielding_effective_ttc ||
+        !near(*split_result.yielding_effective_ttc, 6.0) ||
         split_result.yielding_band != DynamicInterventionBand::MID) {
         return fail("yielding band still consumes a shared pair TTC");
     }
@@ -154,17 +152,16 @@ int main() {
     }
 
     PairInteractionResult emergency_baseline = mid_baseline;
+    emergency_baseline.event.ttc_a = 1.0;
     emergency_baseline.event.ttc_b = 1.0;
     const auto emergency = evaluatePairSpeedCoordination(
-        mid_a, mid_b, std::vector<PotentialConflictZone>{broadZone(mid_a, mid_b)},
-        emergency_baseline, map_param, config, 15.0, mid_a.id);
+        mid_a, mid_b, emergency_baseline, 8.0, 1.0, config, mid_a.id);
     if (!emergency.emergency_stop ||
         emergency.selected_action_a != VehicleAction::NOMINAL ||
         emergency.selected_action_b != VehicleAction::STOP ||
-        !emergency.residual_evaluated ||
-        emergency.residual_conflict ||
-        emergency.priority_safety_stop) {
-        return fail("clear residual did not keep priority nominal");
+        emergency.priority_safety_stop ||
+        !emergency.yielding_safety_stop) {
+        return fail("priority still stopped from effective TTC");
     }
 
     // A MID action is a rolling 2 s response, not a full-horizon reservation.
@@ -221,11 +218,14 @@ int main() {
     PairInteractionResult following_label = mid_baseline;
     following_label.type = PairInteractionType::SAME_DIRECTION;
     const auto crossing_result = evaluatePairSpeedCoordination(
-        mid_a, mid_b, {}, crossing_label, map_param, config, 15.0, mid_a.id);
+        mid_a, mid_b, crossing_label, crossing_label.event.ttc_a,
+        crossing_label.event.ttc_b, config, mid_a.id);
     const auto opposing_result = evaluatePairSpeedCoordination(
-        mid_a, mid_b, {}, opposing_label, map_param, config, 15.0, mid_a.id);
+        mid_a, mid_b, opposing_label, opposing_label.event.ttc_a,
+        opposing_label.event.ttc_b, config, mid_a.id);
     const auto following_result = evaluatePairSpeedCoordination(
-        mid_a, mid_b, {}, following_label, map_param, config, 15.0, mid_a.id);
+        mid_a, mid_b, following_label, following_label.event.ttc_a,
+        following_label.event.ttc_b, config, mid_a.id);
     const auto sameControl = [&](const PairSpeedCoordinationResult& result) {
         return result.selected_winner_id == crossing_result.selected_winner_id &&
                result.selected_action_a == crossing_result.selected_action_a &&
@@ -237,7 +237,8 @@ int main() {
     }
 
     const auto fixed_order = evaluatePairSpeedCoordination(
-        mid_a, mid_b, {}, mid_baseline, map_param, config, 15.0, mid_b.id);
+        mid_a, mid_b, mid_baseline, mid_baseline.event.ttc_a,
+        mid_baseline.event.ttc_b, config, mid_b.id);
     if (fixed_order.selected_winner_id != mid_b.id ||
         fixed_order.selected_action_a != VehicleAction::YIELD ||
         fixed_order.selected_action_b != VehicleAction::NOMINAL) {
@@ -334,8 +335,8 @@ int main() {
         return fail("priority/yield STOP decisions still share one TTC");
     }
 
-    // An immediate residual physical conflict stops priority for safety;
-    // priority identity remains stable and no alternate order is searched.
+    // An immediate corrected baseline conflict independently stops priority
+    // and yielding; priority identity remains stable.
     VehicleAgent immediate_a = crossingVehicle(10, 0.0, false, 0.0);
     VehicleAgent immediate_b = crossingVehicle(11, 0.0, false, 0.0);
     immediate_b.track.set(RoughPath{
@@ -351,16 +352,22 @@ int main() {
     immediate_baseline.event.danger_s_b = 0.0;
     immediate_baseline.event.ttc_a = 0.0;
     immediate_baseline.event.ttc_b = 0.0;
+    const auto unarmed = evaluatePairSpeedCoordination(
+        immediate_a, immediate_b, immediate_baseline, 0.0, 0.0, config,
+        immediate_b.id, false);
+    if (unarmed.selected_action_b != VehicleAction::NOMINAL ||
+        unarmed.priority_safety_stop) {
+        return fail("unarmed priority emergency did not remain nominal");
+    }
     const auto unresolved = evaluatePairSpeedCoordination(
-        immediate_a, immediate_b, {}, immediate_baseline, map_param,
-        config, 15.0, immediate_b.id);
+        immediate_a, immediate_b, immediate_baseline, 0.0, 0.0, config,
+        immediate_b.id, true);
     if (unresolved.selected_action_a != VehicleAction::STOP ||
         unresolved.selected_action_b != VehicleAction::STOP ||
-        !unresolved.residual_conflict ||
         !unresolved.priority_safety_stop ||
-        !unresolved.residual_priority_ttc ||
+        !unresolved.priority_original_ttc ||
         !evaluateTtcStopBoundary(
-             *unresolved.residual_priority_ttc,
+             *unresolved.priority_original_ttc,
              VehicleAction::NOMINAL, config).stop_required ||
         unresolved.selected_winner_id != immediate_b.id ||
         unresolved.reason != "rolling_emergency_stop") {

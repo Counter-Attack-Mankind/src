@@ -38,8 +38,6 @@ struct PairSpeedCoordinationResult {
     bool attempted = false;
     bool action_selected = false;
     bool emergency_stop = false;
-    bool residual_evaluated = false;
-    bool residual_conflict = false;
     bool priority_safety_stop = false;
     bool yielding_safety_stop = false;
     VehicleAction selected_action_a = VehicleAction::NOMINAL;
@@ -47,14 +45,11 @@ struct PairSpeedCoordinationResult {
     int selected_winner_id = -1;
     DynamicInterventionBand yielding_band = DynamicInterventionBand::FAR;
     std::optional<double> first_overlap_t;
-    std::optional<double> baseline_ttc_a;
-    std::optional<double> baseline_ttc_b;
-    std::optional<double> yielding_ttc;
-    std::optional<double> residual_first_overlap_t;
-    std::optional<double> residual_ttc_a;
-    std::optional<double> residual_ttc_b;
-    std::optional<double> residual_priority_ttc;
-    std::optional<double> residual_yielding_ttc;
+    std::optional<double> effective_ttc_a;
+    std::optional<double> effective_ttc_b;
+    std::optional<double> priority_original_ttc;
+    std::optional<double> yielding_effective_ttc;
+    bool priority_emergency_eligible = false;
     std::optional<double> priority_stop_threshold;
     std::optional<double> yielding_stop_threshold;
     std::string reason;
@@ -63,6 +58,8 @@ struct PairSpeedCoordinationResult {
 VehicleAction selectRollingSpeedAction(
     DynamicInterventionBand band, bool emergency_stop);
 
+// Standalone rollout probe retained for focused diagnostics/tests. The
+// ordinary-road rolling controller below does not call this helper.
 SelectedSpeedActionEvaluation evaluateSelectedAction(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const std::vector<PotentialConflictZone>& potential_zones,
@@ -71,18 +68,18 @@ SelectedSpeedActionEvaluation evaluateSelectedAction(
     VehicleAction action_b,
     std::optional<double> original_first_overlap_t = std::nullopt);
 
-// Pure two-vehicle rolling TTC response. The supplied priority vehicle is not
-// a reservation owner. The yielding vehicle first receives FAR=NOMINAL,
-// MID=YIELD, NEAR=CREEP, or emergency STOP from the yielding vehicle's own
-// TTC. One synchronized residual check then derives collision positions and
-// independent TTCs for both vehicles; each STOP boundary consumes only that
-// vehicle's TTC. The priority order is never swapped.
+// Pure two-vehicle rolling TTC response. The caller supplies the single
+// NOMINAL/NOMINAL baseline after synchronized OBB detection and per-vehicle
+// bridge correction. Yielding consumes its effective TTC. Priority defaults
+// to NOMINAL and may use only its original collision TTC after the caller has
+// armed the exceptional emergency gate. This function performs no second
+// prediction, and the priority order is never swapped.
 PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
-    const std::vector<PotentialConflictZone>& potential_zones,
     const PairInteractionResult& nominal_baseline,
-    const MapParam& map_param, const MultiVehicleConfig& config,
-    double prediction_horizon, int preferred_winner_id);
+    double original_ttc_a, double original_ttc_b,
+    const MultiVehicleConfig& config, int preferred_winner_id,
+    bool priority_emergency_eligible = false);
 
 struct TtcStopBoundary {
     VehicleAction planned_action = VehicleAction::STOP;

@@ -205,12 +205,22 @@ public:
     double speedForAction(VehicleAction action) const;
 
     // 前瞻仿真用:快照/恢复跨周期持久状态,使「克隆-空跑」忠实复现真实协调(确定性⇒预测准)。
+    struct OrdinaryPairEmergencyHistory {
+        int gen_lo = -1;
+        int gen_hi = -1;
+        int priority_id = -1;
+        int yielding_id = -1;
+        unsigned int consecutive_conflict_periods = 0;
+    };
+
     struct SimSnapshot {
         std::map<std::pair<int, int>, ConflictReservation> reservations;
         std::map<std::pair<int, int>, DepartureClusterCommitment>
             departure_clusters;
         std::set<std::pair<int, int>> following_pairs;
         ResourceTokenTable tokens;
+        std::map<std::pair<int, int>, OrdinaryPairEmergencyHistory>
+            ordinary_pair_emergency_history;
         // conflicts_ is frame output, but sandbox rollout calls decide() and
         // rewrites it on every predicted step. Snapshot it as well so a
         // rollout cannot leak its final predicted frame into current RViz.
@@ -469,6 +479,9 @@ private:
     // Reconstructed before each reset from the live vehicle reason. This is
     // diagnostic-only and never participates in coordination.
     std::map<std::pair<int, int>, VehicleAction> previous_dynamic_actions_;
+    // Reconstructed before the per-frame reset. Only a STOP produced by this
+    // ordinary dynamic pair is recorded; admission/DWELL/A1 holds are absent.
+    std::map<std::pair<int, int>, int> previous_dynamic_stop_yielders_;
     // Directed following actions applied in the preceding decision, captured
     // before VehicleAgent::reason is reset. Used only to release a stale
     // following action_hold when pairwise now grants that follower passage.
@@ -480,6 +493,10 @@ private:
     // unified rolling coordinator (including frozen-period reuse). This is
     // diagnostic input for detecting a downstream authority override.
     std::set<std::pair<int, int>> ordinary_dynamic_pairs_;
+    // Minimal cross-period evidence used only to arm priority's exceptional
+    // original-TTC emergency brake. It creates no ownership/reservation.
+    std::map<std::pair<int, int>, OrdinaryPairEmergencyHistory>
+        ordinary_pair_emergency_history_;
 
     // 静态冲突集 C_ij 缓存(协调图第一步)。key={lo.id,hi.id};块以 self=lo 朝向存储。
     // gen_lo/gen_hi 记录算定时两车的 path_gen;任一方 path_gen 变(换了固定路径)即失效

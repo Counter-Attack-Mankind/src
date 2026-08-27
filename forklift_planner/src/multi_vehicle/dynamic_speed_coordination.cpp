@@ -86,18 +86,18 @@ SelectedSpeedActionEvaluation evaluateSelectedAction(
 
 PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
-    const std::vector<PotentialConflictZone>& potential_zones,
     const PairInteractionResult& nominal_baseline,
-    const MapParam& map_param, const MultiVehicleConfig& config,
-    double prediction_horizon, int preferred_winner_id) {
+    double original_ttc_a, double original_ttc_b,
+    const MultiVehicleConfig& config, int preferred_winner_id,
+    bool priority_emergency_eligible) {
     PairSpeedCoordinationResult result;
     if (!nominal_baseline.event.valid) {
         result.reason = "baseline_clear";
         return result;
     }
     result.first_overlap_t = nominal_baseline.event.first_overlap_t;
-    result.baseline_ttc_a = nominal_baseline.event.ttc_a;
-    result.baseline_ttc_b = nominal_baseline.event.ttc_b;
+    result.effective_ttc_a = nominal_baseline.event.ttc_a;
+    result.effective_ttc_b = nominal_baseline.event.ttc_b;
     if (preferred_winner_id != vehicle_a.id &&
         preferred_winner_id != vehicle_b.id) {
         result.reason = "no_priority_winner";
@@ -108,55 +108,30 @@ PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     result.action_selected = true;
     result.selected_winner_id = preferred_winner_id;
     const bool a_is_priority = preferred_winner_id == vehicle_a.id;
-    result.yielding_ttc = a_is_priority
+    result.priority_original_ttc = a_is_priority
+        ? original_ttc_a : original_ttc_b;
+    result.yielding_effective_ttc = a_is_priority
         ? nominal_baseline.event.ttc_b : nominal_baseline.event.ttc_a;
+    result.priority_emergency_eligible = priority_emergency_eligible;
+
+    const TtcStopBoundary priority_boundary = evaluateTtcStopBoundary(
+        *result.priority_original_ttc, VehicleAction::NOMINAL, config);
+    result.priority_stop_threshold = priority_boundary.stop_threshold;
+    result.priority_safety_stop =
+        priority_emergency_eligible && priority_boundary.stop_required;
+
     result.yielding_band = classifyDynamicInterventionBand(
-        *result.yielding_ttc, config);
+        *result.yielding_effective_ttc, config);
     VehicleAction yielding_action = selectRollingSpeedAction(
         result.yielding_band, false);
     const TtcStopBoundary baseline_yielding_boundary =
         evaluateTtcStopBoundary(
-            *result.yielding_ttc, yielding_action, config);
+            *result.yielding_effective_ttc, yielding_action, config);
     result.yielding_stop_threshold =
         baseline_yielding_boundary.stop_threshold;
     if (baseline_yielding_boundary.stop_required) {
         result.yielding_safety_stop = true;
         yielding_action = VehicleAction::STOP;
-    }
-    const VehicleAction residual_action_a = a_is_priority
-        ? VehicleAction::NOMINAL : yielding_action;
-    const VehicleAction residual_action_b = a_is_priority
-        ? yielding_action : VehicleAction::NOMINAL;
-    const SelectedSpeedActionEvaluation residual = evaluateSelectedAction(
-        vehicle_a, vehicle_b, potential_zones, map_param, config,
-        prediction_horizon, residual_action_a, residual_action_b);
-    result.residual_evaluated = true;
-    result.residual_conflict = !residual.conflict_free;
-    result.residual_first_overlap_t = residual.first_overlap_t;
-    result.residual_ttc_a = residual.ttc_a;
-    result.residual_ttc_b = residual.ttc_b;
-    if (residual.ttc_a && residual.ttc_b) {
-        result.residual_priority_ttc = a_is_priority
-            ? residual.ttc_a : residual.ttc_b;
-        result.residual_yielding_ttc = a_is_priority
-            ? residual.ttc_b : residual.ttc_a;
-        const TtcStopBoundary priority_boundary = evaluateTtcStopBoundary(
-            *result.residual_priority_ttc,
-            VehicleAction::NOMINAL, config);
-        result.priority_stop_threshold = priority_boundary.stop_threshold;
-        result.priority_safety_stop = priority_boundary.stop_required;
-        if (yielding_action != VehicleAction::STOP) {
-            const TtcStopBoundary residual_yielding_boundary =
-                evaluateTtcStopBoundary(
-                    *result.residual_yielding_ttc,
-                    yielding_action, config);
-            result.yielding_stop_threshold =
-                residual_yielding_boundary.stop_threshold;
-            if (residual_yielding_boundary.stop_required) {
-                result.yielding_safety_stop = true;
-                yielding_action = VehicleAction::STOP;
-            }
-        }
     }
     const VehicleAction priority_action = result.priority_safety_stop
         ? VehicleAction::STOP : VehicleAction::NOMINAL;
