@@ -67,6 +67,9 @@ struct VehicleAgent {
     VehicleAction action = VehicleAction::STOP;
     VehicleAction requested_action = VehicleAction::STOP;
     double action_hold_remaining = 0.0;  // s left before action may relax
+    // TTC safety STOP commitment. Unlike action_hold_remaining (smoothing),
+    // this blocks replanning for one complete rolling decision period.
+    double ttc_stop_hold_remaining = 0.0;
     double wait_time = 0.0;
     double cycle_break_immunity = 0.0;  // s remaining where rules cannot re-STOP this vehicle
     // Phase 4(§9/§11.11):本车被等待图选为破环车。置位后在资源仲裁/优先级裁决中

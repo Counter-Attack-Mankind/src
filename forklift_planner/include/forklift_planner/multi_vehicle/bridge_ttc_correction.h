@@ -81,5 +81,14 @@ PairBridgeTtcCorrection evaluateBridgeTtcCorrection(
     const PairInteractionResult& nominal_baseline,
     const MapParam& map_param, const MultiVehicleConfig& config);
 
+// Reuses the production one-sided bridge backtrack with an externally
+// supplied collision seed. This is used when self future first overlaps the
+// other vehicle's current physical OBB; it performs no second pair rollout.
+VehicleBridgeTtcCorrection evaluateVehicleBridgeTtcCorrection(
+    const VehicleAgent& self, const VehicleAgent& other,
+    const std::vector<PredictedKinematicSample>& self_prediction,
+    double collision_s, double other_seed_s, double original_ttc,
+    const MapParam& map_param, const MultiVehicleConfig& config);
+
 }  // namespace multi_vehicle
 }  // namespace forklift_planner

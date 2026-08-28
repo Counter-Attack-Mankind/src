@@ -57,6 +57,8 @@ bool sameControlState(const VehicleAgent& lhs, const VehicleAgent& rhs) {
            lhs.requested_action == rhs.requested_action &&
            lhs.blocker_id == rhs.blocker_id &&
            near(lhs.action_hold_remaining, rhs.action_hold_remaining) &&
+           near(lhs.ttc_stop_hold_remaining,
+                rhs.ttc_stop_hold_remaining) &&
            near(lhs.wait_time, rhs.wait_time) &&
            near(lhs.cycle_break_immunity, rhs.cycle_break_immunity) &&
            lhs.deadlock_breaker == rhs.deadlock_breaker &&

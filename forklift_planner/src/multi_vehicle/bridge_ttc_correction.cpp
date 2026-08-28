@@ -450,5 +450,15 @@ PairBridgeTtcCorrection evaluateBridgeTtcCorrection(
     return result;
 }
 
+VehicleBridgeTtcCorrection evaluateVehicleBridgeTtcCorrection(
+    const VehicleAgent& self, const VehicleAgent& other,
+    const std::vector<PredictedKinematicSample>& self_prediction,
+    double collision_s, double other_seed_s, double original_ttc,
+    const MapParam& map_param, const MultiVehicleConfig& config) {
+    return evaluateVehicle(
+        self, other, self_prediction, collision_s, other_seed_s,
+        original_ttc, map_param, config);
+}
+
 }  // namespace multi_vehicle
 }  // namespace forklift_planner

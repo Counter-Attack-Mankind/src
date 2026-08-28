@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "forklift_planner/multi_vehicle/bridge_ttc_correction.h"
+#include "forklift_planner/multi_vehicle/footprint.h"
 
 namespace forklift_planner {
 namespace multi_vehicle {
@@ -26,6 +27,45 @@ const char* dynamicInterventionBandName(DynamicInterventionBand band) {
         case DynamicInterventionBand::FAR: return "FAR";
     }
     return "UNKNOWN";
+}
+
+PriorityPhysicalTtcEvaluation evaluatePriorityPhysicalTtc(
+    const VehicleAgent& priority, const VehicleAgent& other,
+    const std::vector<PredictedKinematicSample>& priority_prediction,
+    const MapParam& map_param, const MultiVehicleConfig& config) {
+    PriorityPhysicalTtcEvaluation result;
+    if (!priority.active() || !other.active() || priority.track.empty() ||
+        other.track.empty() || priority_prediction.empty()) {
+        return result;
+    }
+    RoughWp other_pose = other.track.poseAtS(std::max(
+        0.0, std::min(other.path_s, other.track.length())));
+    if (other.real_pose_valid) {
+        other_pose.x = other.real_x;
+        other_pose.y = other.real_y;
+        other_pose.theta = other.real_yaw;
+    }
+    const double margin = 0.5 * config.conflict_margin;
+    const OBB other_current_body = makeBody(other_pose, map_param, margin);
+    for (const PredictedKinematicSample& sample : priority_prediction) {
+        if (!overlaps(sample.body, other_current_body)) continue;
+        result.valid = true;
+        result.collision_t = sample.t;
+        result.collision_s = sample.s;
+        result.safety_ttc = sample.t;
+        result.safety_boundary_s = sample.s;
+        const VehicleBridgeTtcCorrection bridge =
+            evaluateVehicleBridgeTtcCorrection(
+                priority, other, priority_prediction, sample.s,
+                other.path_s, sample.t, map_param, config);
+        if (bridge.bridge_related) {
+            result.bridge_related = true;
+            result.safety_ttc = bridge.corrected_ttc;
+            result.safety_boundary_s = bridge.near_boundary_s;
+        }
+        break;
+    }
+    return result;
 }
 
 VehicleAction selectRollingSpeedAction(
@@ -87,9 +127,8 @@ SelectedSpeedActionEvaluation evaluateSelectedAction(
 PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const PairInteractionResult& nominal_baseline,
-    double original_ttc_a, double original_ttc_b,
-    const MultiVehicleConfig& config, int preferred_winner_id,
-    bool priority_emergency_eligible) {
+    const PriorityPhysicalTtcEvaluation& priority_physical,
+    const MultiVehicleConfig& config, int preferred_winner_id) {
     PairSpeedCoordinationResult result;
     if (!nominal_baseline.event.valid) {
         result.reason = "baseline_clear";
@@ -108,17 +147,19 @@ PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     result.action_selected = true;
     result.selected_winner_id = preferred_winner_id;
     const bool a_is_priority = preferred_winner_id == vehicle_a.id;
-    result.priority_original_ttc = a_is_priority
-        ? original_ttc_a : original_ttc_b;
     result.yielding_effective_ttc = a_is_priority
         ? nominal_baseline.event.ttc_b : nominal_baseline.event.ttc_a;
-    result.priority_emergency_eligible = priority_emergency_eligible;
-
-    const TtcStopBoundary priority_boundary = evaluateTtcStopBoundary(
-        *result.priority_original_ttc, VehicleAction::NOMINAL, config);
-    result.priority_stop_threshold = priority_boundary.stop_threshold;
-    result.priority_safety_stop =
-        priority_emergency_eligible && priority_boundary.stop_required;
+    if (priority_physical.valid) {
+        result.priority_physical_ttc = priority_physical.safety_ttc;
+        result.priority_physical_bridge = priority_physical.bridge_related;
+        result.priority_physical_collision_s = priority_physical.collision_s;
+        result.priority_physical_boundary_s =
+            priority_physical.safety_boundary_s;
+        const TtcStopBoundary priority_boundary = evaluateTtcStopBoundary(
+            priority_physical.safety_ttc, VehicleAction::NOMINAL, config);
+        result.priority_stop_threshold = priority_boundary.stop_threshold;
+        result.priority_safety_stop = priority_boundary.stop_required;
+    }
 
     result.yielding_band = classifyDynamicInterventionBand(
         *result.yielding_effective_ttc, config);

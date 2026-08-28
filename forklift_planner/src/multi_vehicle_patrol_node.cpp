@@ -212,6 +212,7 @@ private:
         int blocker_id = -1;
         double wait_time = 0.0;
         double action_hold_remaining = 0.0;
+        double ttc_stop_hold_remaining = 0.0;
         double cycle_break_immunity = 0.0;
         bool deadlock_breaker = false;
         double deadlock_breaker_hold = 0.0;
@@ -776,6 +777,8 @@ private:
                     d.blocker_id = v.blocker_id;
                     d.wait_time = v.wait_time;
                     d.action_hold_remaining = v.action_hold_remaining;
+                    d.ttc_stop_hold_remaining =
+                        v.ttc_stop_hold_remaining;
                     d.cycle_break_immunity = v.cycle_break_immunity;
                     d.deadlock_breaker = v.deadlock_breaker;
                     d.deadlock_breaker_hold = v.deadlock_breaker_hold;
@@ -1294,6 +1297,7 @@ private:
             v.blocker_id = d.blocker_id;
             v.wait_time = d.wait_time;
             v.action_hold_remaining = d.action_hold_remaining;
+            v.ttc_stop_hold_remaining = d.ttc_stop_hold_remaining;
             v.cycle_break_immunity = d.cycle_break_immunity;
             v.deadlock_breaker = d.deadlock_breaker;
             v.deadlock_breaker_hold = d.deadlock_breaker_hold;

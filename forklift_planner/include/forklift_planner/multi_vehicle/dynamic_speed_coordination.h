@@ -20,6 +20,20 @@ DynamicInterventionBand classifyDynamicInterventionBand(
 
 const char* dynamicInterventionBandName(DynamicInterventionBand band);
 
+struct PriorityPhysicalTtcEvaluation {
+    bool valid = false;
+    double collision_t = 0.0;
+    double collision_s = 0.0;
+    double safety_ttc = 0.0;
+    double safety_boundary_s = 0.0;
+    bool bridge_related = false;
+};
+
+PriorityPhysicalTtcEvaluation evaluatePriorityPhysicalTtc(
+    const VehicleAgent& priority, const VehicleAgent& other,
+    const std::vector<PredictedKinematicSample>& priority_prediction,
+    const MapParam& map_param, const MultiVehicleConfig& config);
+
 struct SelectedSpeedActionEvaluation {
     VehicleAction action_a = VehicleAction::NOMINAL;
     VehicleAction action_b = VehicleAction::NOMINAL;
@@ -47,9 +61,11 @@ struct PairSpeedCoordinationResult {
     std::optional<double> first_overlap_t;
     std::optional<double> effective_ttc_a;
     std::optional<double> effective_ttc_b;
-    std::optional<double> priority_original_ttc;
+    std::optional<double> priority_physical_ttc;
+    bool priority_physical_bridge = false;
+    std::optional<double> priority_physical_collision_s;
+    std::optional<double> priority_physical_boundary_s;
     std::optional<double> yielding_effective_ttc;
-    bool priority_emergency_eligible = false;
     std::optional<double> priority_stop_threshold;
     std::optional<double> yielding_stop_threshold;
     std::string reason;
@@ -71,15 +87,14 @@ SelectedSpeedActionEvaluation evaluateSelectedAction(
 // Pure two-vehicle rolling TTC response. The caller supplies the single
 // NOMINAL/NOMINAL baseline after synchronized OBB detection and per-vehicle
 // bridge correction. Yielding consumes its effective TTC. Priority defaults
-// to NOMINAL and may use only its original collision TTC after the caller has
-// armed the exceptional emergency gate. This function performs no second
-// prediction, and the priority order is never swapped.
+// to NOMINAL and may STOP only from its future-vs-other-current physical TTC
+// (optionally corrected to its one-sided bridge boundary). This function
+// performs no second pair rollout, and the priority order is never swapped.
 PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const PairInteractionResult& nominal_baseline,
-    double original_ttc_a, double original_ttc_b,
-    const MultiVehicleConfig& config, int preferred_winner_id,
-    bool priority_emergency_eligible = false);
+    const PriorityPhysicalTtcEvaluation& priority_physical,
+    const MultiVehicleConfig& config, int preferred_winner_id);
 
 struct TtcStopBoundary {
     VehicleAction planned_action = VehicleAction::STOP;

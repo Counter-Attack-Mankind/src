@@ -21,6 +21,10 @@ RoughWp wp(double x, double y, double theta) {
     return RoughWp{x, y, theta, WpType::FORWARD};
 }
 
+bool near(double lhs, double rhs, double tolerance = 1e-9) {
+    return std::abs(lhs - rhs) <= tolerance;
+}
+
 VehicleAgent crossingVehicle(int id, double approach, bool vertical,
                              double speed = 0.0) {
     VehicleAgent vehicle;
@@ -236,8 +240,7 @@ int main() {
             }
             const auto candidate_result = evaluatePairSpeedCoordination(
                 candidate_a, candidate_b, candidate_baseline,
-                candidate_baseline.event.ttc_a,
-                candidate_baseline.event.ttc_b, config, 0);
+                PriorityPhysicalTtcEvaluation{}, config, 0);
             const auto raw_yield = evaluateSelectedAction(
                 candidate_a, candidate_b, candidate_zones, map_param, config,
                 15.0, VehicleAction::NOMINAL, VehicleAction::YIELD,
@@ -315,6 +318,38 @@ int main() {
     if (safety[1].requested_action != VehicleAction::STOP ||
         safety_engine.snapshot().reservations.count({0, 1}) == 0) {
         return fail("existing reservation could not override reused NOMINAL");
+    }
+
+    // A TTC safety STOP owns one complete rolling period. Its prediction
+    // decelerates from the current real speed before becoming stationary; the
+    // planning permission returns only after all 20 x 0.1 s frames elapsed.
+    RuleEngine hold_engine(map_param, config);
+    std::vector<VehicleAgent> held{
+        crossingVehicle(30, 2.0, false, config.nominal_speed)};
+    held[0].ttc_stop_hold_remaining = config.rolling_refresh_period;
+    const auto stop_prediction = predictTrajectory(
+        held[0], map_param, config, VehicleAction::STOP, 1.0);
+    if (stop_prediction.size() < 2 ||
+        !near(stop_prediction.front().speed, config.nominal_speed) ||
+        stop_prediction[1].speed <= 0.0 ||
+        stop_prediction[1].speed >= stop_prediction.front().speed ||
+        stop_prediction[1].s <= stop_prediction.front().s) {
+        return fail("held STOP prediction froze a moving vehicle instantly");
+    }
+    for (int frame = 0; frame < 20; ++frame) {
+        hold_engine.decide(held, 0.1, 15.0,
+                           /*reuse_ordinary_coordination=*/true);
+        if (held[0].requested_action != VehicleAction::STOP ||
+            held[0].action != VehicleAction::STOP) {
+            return fail("TTC STOP hold released inside the rolling period");
+        }
+    }
+    if (!near(held[0].ttc_stop_hold_remaining, 0.0, 1e-8)) {
+        return fail("TTC STOP hold did not consume exactly one period");
+    }
+    hold_engine.decide(held, 0.1, 15.0);
+    if (held[0].requested_action != VehicleAction::NOMINAL) {
+        return fail("expired TTC STOP hold did not restore planning permission");
     }
 
     std::cout << "[ROLLING-FAR] start_first_t=" << far_start_t

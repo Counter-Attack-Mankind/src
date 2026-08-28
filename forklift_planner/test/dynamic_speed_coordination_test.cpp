@@ -64,7 +64,7 @@ PairSpeedCoordinationResult evaluate(
     const MapParam& map_param, const MultiVehicleConfig& config) {
     const auto nominal = baseline(a, b, map_param, config, 15.0);
     return evaluatePairSpeedCoordination(
-        a, b, nominal, nominal.event.ttc_a, nominal.event.ttc_b, config, 0);
+        a, b, nominal, PriorityPhysicalTtcEvaluation{}, config, 0);
 }
 
 bool near(double lhs, double rhs, double tolerance = 1e-9) {
@@ -130,7 +130,8 @@ int main() {
     split_baseline.event.ttc_a = 1.0;
     split_baseline.event.ttc_b = 6.0;
     const auto split_result = evaluatePairSpeedCoordination(
-        mid_a, mid_b, split_baseline, 1.0, 6.0, config, mid_a.id);
+        mid_a, mid_b, split_baseline, PriorityPhysicalTtcEvaluation{},
+        config, mid_a.id);
     if (!split_result.effective_ttc_a || !split_result.effective_ttc_b ||
         near(*split_result.effective_ttc_a, *split_result.effective_ttc_b) ||
         !split_result.yielding_effective_ttc ||
@@ -154,14 +155,41 @@ int main() {
     PairInteractionResult emergency_baseline = mid_baseline;
     emergency_baseline.event.ttc_a = 1.0;
     emergency_baseline.event.ttc_b = 1.0;
+    PriorityPhysicalTtcEvaluation safe_priority_physical;
+    safe_priority_physical.valid = true;
+    safe_priority_physical.safety_ttc = 8.0;
     const auto emergency = evaluatePairSpeedCoordination(
-        mid_a, mid_b, emergency_baseline, 8.0, 1.0, config, mid_a.id);
+        mid_a, mid_b, emergency_baseline, safe_priority_physical,
+        config, mid_a.id);
     if (!emergency.emergency_stop ||
         emergency.selected_action_a != VehicleAction::NOMINAL ||
         emergency.selected_action_b != VehicleAction::STOP ||
         emergency.priority_safety_stop ||
         !emergency.yielding_safety_stop) {
         return fail("priority still stopped from effective TTC");
+    }
+
+    // Priority safety observes the other vehicle as one current physical OBB,
+    // not as the other vehicle's NOMINAL future. A held/stationary vehicle
+    // therefore remains visible, and an opposing-path hit reuses the existing
+    // one-sided bridge correction from the physical collision_s seed.
+    VehicleAgent physical_priority = crossingVehicle(20, 2.0, false, 0.0);
+    VehicleAgent physical_other = crossingVehicle(21, 0.0, false, 0.0);
+    physical_other.track.set(RoughPath{
+        wp(2.0, 0.0, 3.14159265358979323846),
+        wp(-2.0, 0.0, 3.14159265358979323846)});
+    physical_other.path_s = 2.0;
+    physical_other.ttc_stop_hold_remaining = config.rolling_refresh_period;
+    const auto physical_prediction = predictTrajectory(
+        physical_priority, map_param, config, VehicleAction::NOMINAL, 15.0);
+    const auto physical = evaluatePriorityPhysicalTtc(
+        physical_priority, physical_other, physical_prediction,
+        map_param, config);
+    if (!physical.valid || !physical.bridge_related ||
+        physical.collision_t <= 0.0 ||
+        physical.safety_ttc > physical.collision_t + 1e-9 ||
+        physical.safety_boundary_s > physical.collision_s + 1e-9) {
+        return fail("future-vs-current bridge physical TTC was not corrected");
     }
 
     // A MID action is a rolling 2 s response, not a full-horizon reservation.
@@ -218,14 +246,14 @@ int main() {
     PairInteractionResult following_label = mid_baseline;
     following_label.type = PairInteractionType::SAME_DIRECTION;
     const auto crossing_result = evaluatePairSpeedCoordination(
-        mid_a, mid_b, crossing_label, crossing_label.event.ttc_a,
-        crossing_label.event.ttc_b, config, mid_a.id);
+        mid_a, mid_b, crossing_label, PriorityPhysicalTtcEvaluation{},
+        config, mid_a.id);
     const auto opposing_result = evaluatePairSpeedCoordination(
-        mid_a, mid_b, opposing_label, opposing_label.event.ttc_a,
-        opposing_label.event.ttc_b, config, mid_a.id);
+        mid_a, mid_b, opposing_label, PriorityPhysicalTtcEvaluation{},
+        config, mid_a.id);
     const auto following_result = evaluatePairSpeedCoordination(
-        mid_a, mid_b, following_label, following_label.event.ttc_a,
-        following_label.event.ttc_b, config, mid_a.id);
+        mid_a, mid_b, following_label, PriorityPhysicalTtcEvaluation{},
+        config, mid_a.id);
     const auto sameControl = [&](const PairSpeedCoordinationResult& result) {
         return result.selected_winner_id == crossing_result.selected_winner_id &&
                result.selected_action_a == crossing_result.selected_action_a &&
@@ -237,8 +265,8 @@ int main() {
     }
 
     const auto fixed_order = evaluatePairSpeedCoordination(
-        mid_a, mid_b, mid_baseline, mid_baseline.event.ttc_a,
-        mid_baseline.event.ttc_b, config, mid_b.id);
+        mid_a, mid_b, mid_baseline, PriorityPhysicalTtcEvaluation{},
+        config, mid_b.id);
     if (fixed_order.selected_winner_id != mid_b.id ||
         fixed_order.selected_action_a != VehicleAction::YIELD ||
         fixed_order.selected_action_b != VehicleAction::NOMINAL) {
@@ -352,22 +380,18 @@ int main() {
     immediate_baseline.event.danger_s_b = 0.0;
     immediate_baseline.event.ttc_a = 0.0;
     immediate_baseline.event.ttc_b = 0.0;
-    const auto unarmed = evaluatePairSpeedCoordination(
-        immediate_a, immediate_b, immediate_baseline, 0.0, 0.0, config,
-        immediate_b.id, false);
-    if (unarmed.selected_action_b != VehicleAction::NOMINAL ||
-        unarmed.priority_safety_stop) {
-        return fail("unarmed priority emergency did not remain nominal");
-    }
+    PriorityPhysicalTtcEvaluation immediate_physical;
+    immediate_physical.valid = true;
+    immediate_physical.safety_ttc = 0.0;
     const auto unresolved = evaluatePairSpeedCoordination(
-        immediate_a, immediate_b, immediate_baseline, 0.0, 0.0, config,
-        immediate_b.id, true);
+        immediate_a, immediate_b, immediate_baseline, immediate_physical,
+        config, immediate_b.id);
     if (unresolved.selected_action_a != VehicleAction::STOP ||
         unresolved.selected_action_b != VehicleAction::STOP ||
         !unresolved.priority_safety_stop ||
-        !unresolved.priority_original_ttc ||
+        !unresolved.priority_physical_ttc ||
         !evaluateTtcStopBoundary(
-             *unresolved.priority_original_ttc,
+             *unresolved.priority_physical_ttc,
              VehicleAction::NOMINAL, config).stop_required ||
         unresolved.selected_winner_id != immediate_b.id ||
         unresolved.reason != "rolling_emergency_stop") {

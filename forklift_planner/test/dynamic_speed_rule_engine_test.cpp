@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <ros/time.h>
+
 using namespace forklift_planner::multi_vehicle;
 
 namespace {
@@ -79,6 +81,7 @@ bool hasDynamicReason(const std::vector<VehicleAgent>& vehicles,
 }  // namespace
 
 int main() {
+    ros::Time::init();
     MapParam map_param;
     MultiVehicleConfig config;
     config.prediction_horizon = 15.0;
@@ -222,6 +225,31 @@ int main() {
         !emergency_state.reservations.empty()) {
         return fail("braking emergency did not remain reservation-free STOP");
     }
+    int held_index = -1;
+    for (size_t index = 0; index < emergency.size(); ++index) {
+        if (emergency[index].ttc_stop_hold_remaining > 1e-9) {
+            held_index = static_cast<int>(index);
+            break;
+        }
+    }
+    if (held_index < 0) {
+        return fail("TTC emergency did not arm the rolling STOP hold");
+    }
+    const auto conflicts_before_hold =
+        emergency_engine.dynamicSpeedMetrics().baseline_conflicts;
+    for (int frame = 1; frame < 20; ++frame) {
+        emergency_engine.decide(emergency, 0.1, 15.0);
+        if (emergency[held_index].requested_action != VehicleAction::STOP) {
+            return fail("TTC STOP replanned before the rolling period ended");
+        }
+    }
+    if (emergency[held_index].ttc_stop_hold_remaining > 1e-8) {
+        return fail("repeated pair checks continuously re-armed TTC STOP");
+    }
+    if (emergency_engine.dynamicSpeedMetrics().baseline_conflicts <=
+        conflicts_before_hold) {
+        return fail("held STOP vehicle disappeared from pair prediction");
+    }
 
     // A real head-on corridor conflict is corrected to each vehicle's local
     // near boundary before the unchanged priority policy selects the yielding
@@ -258,7 +286,7 @@ int main() {
              line.find("original_ttc_b=") != std::string::npos &&
              line.find("effective_ttc_a=") != std::string::npos &&
              line.find("effective_ttc_b=") != std::string::npos &&
-             line.find("priority_original_ttc=") != std::string::npos &&
+             line.find("priority_physical_ttc=") != std::string::npos &&
              line.find("yield_effective_ttc=") != std::string::npos);
     }
     if (bridge_metrics.bridge_checked_pairs != 1 ||
@@ -269,52 +297,6 @@ int main() {
         !hasDynamicReason(bridge_pair, VehicleAction::STOP) ||
         !bridge_engine.snapshot().reservations.empty()) {
         return fail("head-on bridge TTC did not drive reservation-free action");
-    }
-
-    // Priority's exceptional brake is armed only on a later rolling period,
-    // after the yielding vehicle is already executing this pair's dynamic
-    // STOP on the public road and priority is still moving toward the event.
-    if (bridge_pair[0].requested_action != VehicleAction::NOMINAL ||
-        bridge_pair[1].requested_action != VehicleAction::STOP) {
-        return fail("first bridge period did not keep priority nominal");
-    }
-    bridge_pair[0].current_speed = config.nominal_speed;
-    bridge_engine.decide(bridge_pair, 0.1, 15.0);
-    bool saw_armed_priority_gate = false;
-    for (const std::string& line : bridge_logs) {
-        saw_armed_priority_gate = saw_armed_priority_gate ||
-            (line.find("[DYN-SPEED]") != std::string::npos &&
-             line.find("priority_emergency_eligible=true") !=
-                 std::string::npos);
-    }
-    if (!saw_armed_priority_gate) {
-        return fail("persistent public-road conflict did not arm priority gate");
-    }
-
-    RuleEngine slot_wait_engine(map_param, config);
-    std::vector<std::string> slot_wait_logs;
-    slot_wait_engine.setCoordLogSink(
-        [&](const std::string& line) { slot_wait_logs.push_back(line); });
-    std::vector<VehicleAgent> slot_wait_pair{bridge_a, bridge_b};
-    slot_wait_pair[1].slot_departure_clear_s = 0.50;
-    slot_wait_pair[1].path_s = 0.0;
-    slot_wait_engine.decide(slot_wait_pair, 0.1, 15.0);
-    slot_wait_pair[0].current_speed = config.nominal_speed;
-    slot_wait_engine.decide(slot_wait_pair, 0.1, 15.0);
-    bool saw_slot_exclusion = false;
-    for (const std::string& line : slot_wait_logs) {
-        saw_slot_exclusion = saw_slot_exclusion ||
-            (line.find("[DYN-SPEED]") != std::string::npos &&
-             line.find("conflict_periods=2") != std::string::npos &&
-             line.find("yielding_source_slot_clear=false") !=
-                 std::string::npos &&
-             line.find("priority_emergency_eligible=false") !=
-                 std::string::npos);
-    }
-    if (slot_wait_pair[0].requested_action != VehicleAction::NOMINAL ||
-        slot_wait_pair[1].requested_action != VehicleAction::STOP ||
-        !saw_slot_exclusion) {
-        return fail("source-slot yielding STOP armed priority emergency");
     }
 
     // A nominally clear pair does not even enter bridge matching and emits no
