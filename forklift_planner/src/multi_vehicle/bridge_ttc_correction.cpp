@@ -288,11 +288,8 @@ VehicleBridgeTtcCorrection evaluateVehicle(
                      result.opposing_boundary_s + step),
             std::max(0.0025, 0.5 * step));
 
-        const double margin = 0.5 * config.conflict_margin;
-        const double effective_length =
-            map_param.vehicle_length + 2.0 * margin;
-        const double effective_width =
-            map_param.vehicle_width + 2.0 * margin;
+        const double effective_length = map_param.vehicle_length;
+        const double effective_width = map_param.vehicle_width;
         const double body_diagonal = std::hypot(
             effective_length, effective_width);
         double geometric_cursor = result.opposing_boundary_s;
@@ -338,13 +335,13 @@ VehicleBridgeTtcCorrection evaluateVehicle(
                 break;
             }
 
-            const OBB self_body = makeBody(self_pose, map_param, margin);
+            const OBB self_body = makeBody(self_pose, map_param, 0.0);
             bool overlap_found = false;
             double overlap_other_s = nearest.s;
             auto testOther = [&](double other_s) {
                 ++result.geometric_candidate_samples;
                 if (overlaps(self_body, makeBody(
-                        other.track.poseAtS(other_s), map_param, margin))) {
+                        other.track.poseAtS(other_s), map_param, 0.0))) {
                     overlap_found = true;
                     overlap_other_s = other_s;
                     ++result.geometric_overlap_samples;

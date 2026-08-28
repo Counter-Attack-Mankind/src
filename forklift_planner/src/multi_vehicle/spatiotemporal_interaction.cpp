@@ -135,8 +135,6 @@ std::vector<PredictedKinematicSample> predictTrajectory(
     const double prediction_step = std::max(0.02, config.prediction_step);
     const int prediction_count = std::max(
         1, static_cast<int>(std::ceil(horizon / prediction_step)));
-    const double footprint_margin = 0.5 * config.conflict_margin;
-
     std::vector<PredictedKinematicSample> output;
     if (!vehicle.active() || vehicle.track.empty()) return output;
     output.reserve(static_cast<size_t>(prediction_count + 1));
@@ -147,7 +145,7 @@ std::vector<PredictedKinematicSample> predictTrajectory(
 
     output.push_back(PredictedKinematicSample{
         0.0, s, speed,
-        makeBody(vehicle.track.poseAtS(s), map_param, footprint_margin)});
+        makeBody(vehicle.track.poseAtS(s), map_param, 0.0)});
     for (int k = 1; k <= prediction_count; ++k) {
         const double previous_t = (k - 1) * prediction_step;
         const double t = std::min(horizon, k * prediction_step);
@@ -169,8 +167,7 @@ std::vector<PredictedKinematicSample> predictTrajectory(
         }
         output.push_back(PredictedKinematicSample{
             t, s, speed,
-            makeBody(vehicle.track.poseAtS(s), map_param,
-                     footprint_margin)});
+            makeBody(vehicle.track.poseAtS(s), map_param, 0.0)});
     }
     return output;
 }

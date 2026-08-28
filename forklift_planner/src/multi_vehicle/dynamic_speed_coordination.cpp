@@ -45,8 +45,7 @@ PriorityPhysicalTtcEvaluation evaluatePriorityPhysicalTtc(
         other_pose.y = other.real_y;
         other_pose.theta = other.real_yaw;
     }
-    const double margin = 0.5 * config.conflict_margin;
-    const OBB other_current_body = makeBody(other_pose, map_param, margin);
+    const OBB other_current_body = makeBody(other_pose, map_param, 0.0);
     for (const PredictedKinematicSample& sample : priority_prediction) {
         if (!overlaps(sample.body, other_current_body)) continue;
         result.valid = true;

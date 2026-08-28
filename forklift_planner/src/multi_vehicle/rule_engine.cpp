@@ -377,17 +377,16 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
 
     for (double ss = s_self_begin; ss <= s_self_end + 1e-9; ss += kStep) {
         const double ss_clamped = std::min(ss, s_self_end);
-        // 冲突检测加安全余量：每车身各胀 conflict_margin/2，总净距 < conflict_margin
-        // 即判为冲突 → 提前刹住、留出安全距离(真实开车的"别贴太近")。余量须 < 双车道
-        // 会车净间隙(本图 0.059m)，否则会把正常对向会车也误判成冲突。硬护栏仍用 0 余量
-        // 作真碰撞底线。
-        const double cm = cfg_.conflict_margin * 0.5;
-        const OBB obb_s = makeBody(self.track.poseAtS(ss_clamped), mp_, cm);
+        // Static ConflictZone uses the same bare-body geometry as the timed
+        // prediction layer and the simulation hard collision guard.
+        const OBB obb_s = makeBody(
+            self.track.poseAtS(ss_clamped), mp_, 0.0);
         std::vector<OverlapSample> row;
 
         for (double so = s_other_begin; so <= s_other_end + 1e-9; so += kStep) {
             const double so_clamped = std::min(so, s_other_end);
-            const OBB obb_o = makeBody(other.track.poseAtS(so_clamped), mp_, cm);
+            const OBB obb_o = makeBody(
+                other.track.poseAtS(so_clamped), mp_, 0.0);
 
             if (!overlaps(obb_s, obb_o)) continue;
 
@@ -617,8 +616,6 @@ std::vector<ConflictMarker> RuleEngine::conflictResourceMarkers(
 
     constexpr double kDisplayStep = 0.025;
     constexpr size_t kMaxPolygonsPerZone = 256;
-    const double footprint_margin = 0.5 * cfg_.conflict_margin;
-
     auto buildPolygons = [&](const VehicleAgent& self,
                              const VehicleAgent& other,
                              const ConflictZone& zone) {
@@ -633,12 +630,12 @@ std::vector<ConflictMarker> RuleEngine::conflictResourceMarkers(
              ss <= zone.s_self_exit + 1e-9; ss += kDisplayStep) {
             const double self_s = std::min(ss, zone.s_self_exit);
             const OBB self_body = makeBody(
-                self.track.poseAtS(self_s), mp_, footprint_margin);
+                self.track.poseAtS(self_s), mp_, 0.0);
             for (double so = zone.s_other_enter;
                  so <= zone.s_other_exit + 1e-9; so += kDisplayStep) {
                 const double other_s = std::min(so, zone.s_other_exit);
                 const OBB other_body = makeBody(
-                    other.track.poseAtS(other_s), mp_, footprint_margin);
+                    other.track.poseAtS(other_s), mp_, 0.0);
                 if (!overlaps(self_body, other_body)) continue;
                 auto polygon = intersectObbs(self_body, other_body);
                 if (polygon.size() < 3) continue;

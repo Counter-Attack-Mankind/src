@@ -1,0 +1,245 @@
+[FIRST-COLLISION] @tick=477 sim_t=47s 涉及对=[V0-V1 ]
+[FIRST-COLLISION]   V0 距上次脱困=从未 gen=2 slot=42->9
+[FIRST-COLLISION]   V1 距上次脱困=从未 gen=1 slot=50->-1
+
+========== FIRST-COLLISION 前 80 拍历史(看 gen 是否刚跳变=刚被脱困重置) ==========
+tick=398
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.090/2.555 rem=2.465 spd=0.180 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=8.5 gen=1
+tick=399
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.110/2.555 rem=2.445 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=8.6 gen=1
+tick=400
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.130/2.555 rem=2.425 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=8.7 gen=1
+tick=401
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.150/2.555 rem=2.405 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=8.8 gen=1
+tick=402
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.170/2.555 rem=2.385 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=8.9 gen=1
+tick=403
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.190/2.555 rem=2.365 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=9.0 gen=1
+tick=404
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.207/2.555 rem=2.348 spd=0.170 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=9.1 gen=1
+tick=405
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.222/2.555 rem=2.334 spd=0.146 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=9.2 gen=1
+tick=406
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.236/2.555 rem=2.319 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=9.3 gen=1
+tick=407
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.250/2.555 rem=2.305 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=9.4 gen=1
+tick=408
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.264/2.555 rem=2.291 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=9.5 gen=1
+tick=409
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.279/2.555 rem=2.277 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=9.6 gen=1
+tick=410
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.293/2.555 rem=2.262 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=9.7 gen=1
+tick=411
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.307/2.555 rem=2.248 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=9.8 gen=1
+tick=412
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.321/2.555 rem=2.234 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=9.9 gen=1
+tick=413
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.336/2.555 rem=2.220 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=10.0 gen=1
+tick=414
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.350/2.555 rem=2.205 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=10.1 gen=1
+tick=415
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.364/2.555 rem=2.191 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=10.2 gen=1
+tick=416
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.378/2.555 rem=2.177 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=10.3 gen=1
+tick=417
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.393/2.555 rem=2.163 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=10.4 gen=1
+tick=418
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.407/2.555 rem=2.148 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=10.5 gen=1
+tick=419
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.421/2.555 rem=2.134 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=10.6 gen=1
+tick=420
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.435/2.555 rem=2.120 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=10.7 gen=1
+tick=421
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.450/2.555 rem=2.106 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=10.8 gen=1
+tick=422
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.464/2.555 rem=2.091 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=10.9 gen=1
+tick=423
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.478/2.555 rem=2.077 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=11.0 gen=1
+tick=424
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.492/2.555 rem=2.063 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=11.1 gen=1
+tick=425
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.507/2.555 rem=2.049 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=11.2 gen=1
+tick=426
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.521/2.555 rem=2.034 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=11.3 gen=1
+tick=427
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.535/2.555 rem=2.020 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=11.4 gen=1
+tick=428
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.549/2.555 rem=2.006 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=11.5 gen=1
+tick=429
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.564/2.555 rem=1.992 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=11.6 gen=1
+tick=430
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.578/2.555 rem=1.977 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=11.7 gen=1
+tick=431
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.592/2.555 rem=1.963 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=11.8 gen=1
+tick=432
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.606/2.555 rem=1.949 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=11.9 gen=1
+tick=433
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.621/2.555 rem=1.935 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=12.0 gen=1
+tick=434
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.635/2.555 rem=1.920 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=12.1 gen=1
+tick=435
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.649/2.555 rem=1.906 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=12.2 gen=1
+tick=436
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.663/2.555 rem=1.892 spd=0.142 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=12.3 gen=1
+tick=437
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.678/2.555 rem=1.878 spd=0.144 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=12.4 gen=1
+tick=438
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.692/2.555 rem=1.863 spd=0.148 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=12.5 gen=1
+tick=439
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.707/2.555 rem=1.848 spd=0.144 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=12.6 gen=1
+tick=440
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.719/2.555 rem=1.836 spd=0.125 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=12.7 gen=1
+tick=441
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.729/2.555 rem=1.826 spd=0.095 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=12.8 gen=1
+tick=442
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.740/2.555 rem=1.815 spd=0.111 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=12.9 gen=1
+tick=443
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.753/2.555 rem=1.802 spd=0.131 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=13.0 gen=1
+tick=444
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.768/2.555 rem=1.787 spd=0.151 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=13.1 gen=1
+tick=445
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.785/2.555 rem=1.770 spd=0.171 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=13.2 gen=1
+tick=446
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.804/2.555 rem=1.751 spd=0.191 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=13.3 gen=1
+tick=447
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.824/2.555 rem=1.731 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=13.4 gen=1
+tick=448
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.844/2.555 rem=1.711 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=13.5 gen=1
+tick=449
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.864/2.555 rem=1.691 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=13.6 gen=1
+tick=450
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.884/2.555 rem=1.671 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=13.7 gen=1
+tick=451
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.904/2.555 rem=1.651 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=13.8 gen=1
+tick=452
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.924/2.555 rem=1.631 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=13.9 gen=1
+tick=453
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.944/2.555 rem=1.611 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=14.0 gen=1
+tick=454
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.964/2.555 rem=1.591 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=14.1 gen=1
+tick=455
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=0.984/2.555 rem=1.571 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=14.2 gen=1
+tick=456
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.004/2.555 rem=1.551 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=14.3 gen=1
+tick=457
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.024/2.555 rem=1.531 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=14.4 gen=1
+tick=458
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.044/2.555 rem=1.511 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=14.5 gen=1
+tick=459
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.064/2.555 rem=1.491 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=14.6 gen=1
+tick=460
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.084/2.555 rem=1.471 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=14.7 gen=1
+tick=461
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.104/2.555 rem=1.451 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=14.8 gen=1
+tick=462
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.124/2.555 rem=1.431 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=14.9 gen=1
+tick=463
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.144/2.555 rem=1.411 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=15.0 gen=1
+tick=464
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.164/2.555 rem=1.391 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=15.1 gen=1
+tick=465
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.184/2.555 rem=1.371 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=15.2 gen=1
+tick=466
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.204/2.555 rem=1.351 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=15.3 gen=1
+tick=467
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.224/2.555 rem=1.331 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=15.4 gen=1
+tick=468
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.244/2.555 rem=1.311 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=15.5 gen=1
+tick=469
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.264/2.555 rem=1.291 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=15.6 gen=1
+tick=470
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.284/2.555 rem=1.271 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=15.7 gen=1
+tick=471
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.304/2.555 rem=1.251 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=15.8 gen=1
+tick=472
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.324/2.555 rem=1.231 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=15.9 gen=1
+tick=473
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.344/2.555 rem=1.211 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=16.0 gen=1
+tick=474
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.364/2.555 rem=1.191 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=16.1 gen=1
+tick=475
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.384/2.555 rem=1.171 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=16.2 gen=1
+tick=476
+  V0 mode=1 act=3 reason=clear blk=-1 brkr=0 task=0 slot=42->9 s=1.404/2.555 rem=1.151 spd=0.200 wait=0.0 gen=2
+  V1 mode=1 act=0 reason=time_brake_V0 blk=0 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=16.3 gen=1
+tick=477
+  V0 mode=1 act=0 reason=hard_collision_guard blk=-1 brkr=0 task=0 slot=42->9 s=1.404/2.555 rem=1.151 spd=0.000 wait=0.1 gen=2
+  V1 mode=1 act=0 reason=hard_collision_guard blk=-1 brkr=0 task=0 slot=50->-1 s=3.892/5.066 rem=1.174 spd=0.000 wait=16.4 gen=1
