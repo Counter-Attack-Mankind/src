@@ -949,9 +949,7 @@ private:
         }
 
         if (owner->mission_phase == MissionPhase::UNLOAD_DWELL &&
-            owner->path_gen == retained.owner_path_gen &&
-            owner->path_s >=
-                owner->a1_departure_priority_until_s - 1e-9) {
+            owner->path_gen == retained.owner_path_gen) {
             size_t active_clusters = 0;
             const auto rule_state = rule_engine_->snapshot();
             for (const auto& entry : rule_state.departure_clusters) {
@@ -990,14 +988,8 @@ private:
                 ++active_clusters;
             }
         }
-        const bool prefix_clear =
-            owner->path_s >= owner->a1_departure_priority_until_s - 1e-9;
-        if (prefix_clear && active_clusters == 0) {
+        if (active_clusters == 0) {
             retain_reason = "departure_resource_clear";
-            return Commitment{};
-        }
-        if (!owner->a1_departure_committed && !prefix_clear) {
-            retain_reason = "departure_commitment_lost_before_clear";
             return Commitment{};
         }
 
@@ -1006,9 +998,7 @@ private:
         retained.owner_path_gen = owner->path_gen;
         retained.predicted_a1_arrival_time = 0.0;
         retained.predicted_to_b_time = 0.0;
-        retain_reason = active_clusters > 0
-            ? "service_owner_locked_active_cluster"
-            : "service_owner_locked_departure_prefix";
+        retain_reason = "service_owner_locked_active_cluster";
         return retained;
     }
 

@@ -165,16 +165,19 @@ public:
         bool aabb_valid = false;
     };
 
-    // Multi-zone A1 departure handoff. Unlike ConflictReservation, this
-    // protects one transitive conflict cluster rather than one timed event.
-    // A staged entry is produced from Future A1 geometry with the exact
-    // generation that activatePreparedDropoffLeg() will assign; it becomes
-    // active only after that owner actually enters TO_B.
+    // Multi-zone A1 departure transaction. Unlike ConflictReservation, this
+    // freezes one transitive future A1->B conflict cluster as soon as the
+    // locked service owner's prepared dropoff path is known. The frozen fence
+    // remains active through TO_A1, PICKUP_DWELL and the N->N+1 TO_B handoff.
     struct DepartureClusterCommitment {
         int owner_id = -1;
+        // Path generation of the B->A1 service leg that owns this transaction.
+        int transaction_owner_path_gen = -1;
+        // Frozen A1->B generation assigned by activatePreparedDropoffLeg().
         int owner_path_gen = -1;
         int other_id = -1;
         int other_path_gen = -1;
+        PathTrack frozen_owner_track;
         std::vector<size_t> seed_indices;
         std::vector<size_t> cluster_indices;
         std::vector<FutureA1ConflictInterval> intervals;
@@ -186,6 +189,7 @@ public:
         bool handed_off_from_future = false;
         bool handoff_already_inside = false;
         bool hold_logged = false;
+        bool invariant_violation_logged = false;
     };
 
     // 接入资源地图(Phase 2:资源仲裁需要它把路径映射到资源占用)。

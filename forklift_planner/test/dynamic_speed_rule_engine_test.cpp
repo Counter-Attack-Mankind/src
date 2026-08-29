@@ -385,27 +385,6 @@ int main() {
         return fail("Future A1 owner identity still captured an ordinary pair");
     }
 
-    // An inactive staged handoff is retained for TO_B activation, but it is
-    // not current pair authority while the future exit has no real conflict.
-    RuleEngine staged_engine(map_param, config);
-    std::vector<VehicleAgent> staged = identity;
-    RuleEngine::SimSnapshot staged_state;
-    RuleEngine::DepartureClusterCommitment staged_commitment;
-    staged_commitment.owner_id = 0;
-    staged_commitment.owner_path_gen = 2;
-    staged_commitment.other_id = 1;
-    staged_commitment.other_path_gen = 1;
-    staged_commitment.active = false;
-    staged_state.departure_clusters[{0, 1}] = staged_commitment;
-    staged_engine.restore(staged_state);
-    staged_engine.setFutureA1Commitment(identity_owner);
-    staged_engine.decide(staged, 0.1, 15.0);
-    if (!staged_engine.snapshot().reservations.empty() ||
-        staged_engine.dynamicSpeedMetrics().mid_decisions == 0 ||
-        staged_engine.dynamicSpeedMetrics().a1_fallbacks != 0) {
-        return fail("inactive staged handoff still captured an ordinary pair");
-    }
-
     // A valid active departure cluster remains strong pair-level A1
     // authority and retains the legacy A1 reservation chain.
     RuleEngine active_cluster_engine(map_param, config);
@@ -434,8 +413,8 @@ int main() {
         return fail("active departure cluster lost A1 pair authority");
     }
 
-    // PICKUP_DWELL is inactive for pairwise motion, but future admission must
-    // still stage the synthetic TO_B conflict for a TO_A1 vehicle.
+    // PICKUP_DWELL is inactive for pairwise motion, but its already-known
+    // future A1->B geometry must be frozen and active immediately.
     RuleEngine pickup_engine(map_param, config);
     std::vector<VehicleAgent> pickup{
         crossingVehicle(0, 0.30, false),
@@ -454,8 +433,13 @@ int main() {
     pickup_engine.decide(pickup, 0.1, 15.0);
     const auto pickup_state = pickup_engine.snapshot();
     if (pickup_state.departure_clusters.empty() ||
-        pickup_state.departure_clusters.begin()->second.active) {
-        return fail("PICKUP_DWELL future departure protection was not staged");
+        !pickup_state.departure_clusters.begin()->second.active ||
+        pickup_state.departure_clusters.begin()->second.
+                transaction_owner_path_gen != 1 ||
+        pickup_state.departure_clusters.begin()->second.owner_path_gen != 2 ||
+        pickup_state.departure_clusters.begin()->second.
+                frozen_owner_track.empty()) {
+        return fail("PICKUP_DWELL future departure protection was not frozen");
     }
 
     // Three mutually crossing vehicles exercise all three pairwise dynamic

@@ -10,7 +10,8 @@ using forklift_planner::multi_vehicle::FutureA1RankedCandidate;
 using forklift_planner::multi_vehicle::FutureA1ConflictInterval;
 using forklift_planner::multi_vehicle::RuleEngine;
 using forklift_planner::multi_vehicle::departureClusterCleared;
-using forklift_planner::multi_vehicle::departureClusterGenerationsMatch;
+using forklift_planner::multi_vehicle::
+    departureClusterOwnerGenerationMatches;
 using forklift_planner::multi_vehicle::futureA1ArrivalWithinHorizon;
 using forklift_planner::multi_vehicle::futureA1OtherInsideCluster;
 using forklift_planner::multi_vehicle::futureA1StopS;
@@ -117,16 +118,17 @@ int main() {
 
     // Departure B/C. The cluster lifetime is independent of a Future
     // candidate and lasts through the maximum owner-side exit.
-    if (departureClusterCleared(3.125, 3.125, 0.490, 3.050) ||
-        !departureClusterCleared(3.126, 3.125, 0.490, 3.050)) {
+    if (departureClusterCleared(3.125, 3.125) ||
+        !departureClusterCleared(3.126, 3.125)) {
         return fail("departure cluster release boundary is incorrect");
     }
 
-    // Departure D. Either participant changing path invalidates the handoff.
-    if (!departureClusterGenerationsMatch(7, 7, 11, 11) ||
-        departureClusterGenerationsMatch(7, 8, 11, 11) ||
-        departureClusterGenerationsMatch(7, 7, 11, 12)) {
-        return fail("departure cluster generation invalidation is incorrect");
+    // Departure D. Both the service leg N and frozen departure N+1 belong to
+    // one transaction; unrelated generations do not.
+    if (!departureClusterOwnerGenerationMatches(7, 8, 7) ||
+        !departureClusterOwnerGenerationMatches(7, 8, 8) ||
+        departureClusterOwnerGenerationMatches(7, 8, 9)) {
+        return fail("frozen departure generation identity is incorrect");
     }
 
     // Departure E/G. The remote zone remains excluded, while physical entry
@@ -172,7 +174,7 @@ int main() {
               << "Departure-A handoff_stop_s=0.490 PASS\n"
               << "Departure-B future_candidate_independent=PASS\n"
               << "Departure-C owner_release_exit=3.125 PASS\n"
-              << "Departure-D generation_invalidation=PASS\n"
+              << "Departure-D frozen_generation_identity=PASS\n"
               << "Departure-E remote_zone_excluded=PASS\n"
               << "Departure-F snapshot_restore=PASS\n"
               << "Departure-G already_inside_actual_priority=PASS\n"

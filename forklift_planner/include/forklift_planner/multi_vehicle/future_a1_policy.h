@@ -113,18 +113,16 @@ inline bool futureA1OtherInsideCluster(
     return false;
 }
 
-inline bool departureClusterGenerationsMatch(
-    int expected_owner_gen, int actual_owner_gen,
-    int expected_other_gen, int actual_other_gen) {
-    return expected_owner_gen == actual_owner_gen &&
-           expected_other_gen == actual_other_gen;
+inline bool departureClusterOwnerGenerationMatches(
+    int transaction_owner_gen, int frozen_departure_gen,
+    int actual_owner_gen) {
+    return actual_owner_gen == transaction_owner_gen ||
+           actual_owner_gen == frozen_departure_gen;
 }
 
 inline bool departureClusterCleared(
-    double owner_path_s, double owner_release_exit_s,
-    double other_path_s, double other_release_exit_s) {
-    return owner_path_s > owner_release_exit_s + 1e-9 ||
-           other_path_s > other_release_exit_s + 1e-9;
+    double owner_path_s, double max_owner_release_exit_s) {
+    return owner_path_s > max_owner_release_exit_s + 1e-9;
 }
 
 inline bool futureA1ArrivalWithinHorizon(double arrival_time,
