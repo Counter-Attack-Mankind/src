@@ -959,59 +959,16 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
     // these shared samples without changing coordination state.
     const double horizon =
         std::max(cfg_.prediction_step, prediction_horizon);
-    const double prediction_step = std::max(0.02, cfg_.prediction_step);
     std::vector<std::vector<PredictedKinematicSample>> predictions(
         vehicles.size());
     for (size_t i = 0; i < vehicles.size(); ++i) {
         if (vehicles[i].active() && !vehicles[i].track.empty()) {
-            const VehicleAction prediction_action =
-                vehicles[i].ttc_stop_hold_remaining > 1e-9
-                    ? VehicleAction::STOP : VehicleAction::NOMINAL;
             predictions[i] =
                 predictTrajectory(vehicles[i], mp_, cfg_,
-                                  prediction_action, horizon);
+                                  VehicleAction::NOMINAL, horizon);
         }
     }
 
-    auto agentById = [&](int id) -> VehicleAgent* {
-        for (VehicleAgent& v : vehicles) {
-            if (v.id == id) return &v;
-        }
-        return nullptr;
-    };
-    auto terminalDocking = [&](const VehicleAgent& v) {
-        if (!v.active()) return false;
-        const double terminal_distance =
-            std::max(cfg_.target_request_distance, cfg_.target_stop_distance);
-        return v.remainingS() <= terminal_distance;
-    };
-
-    // ConflictZone arc intervals already represent rear-axle reference poses
-    // whose inflated complete-body OBBs overlap. Do not expand them by another
-    // vehicle length when deciding entry, clearance, or the stop line.
-    const double a1_control_stop_margin = cfg_.a1_control_stop_margin;
-    auto insideInterval = [](const VehicleAgent& v, double enter_s,
-                             double exit_s) {
-        return v.path_s > enter_s + 1e-9 &&
-               v.path_s <= exit_s + 1e-9;
-    };
-    auto brakeBefore = [&](VehicleAgent& v, double conflict_enter_s,
-                           int other_id) {
-        if (v.deadlock_breaker) return;
-        const double physical_entry_s = conflict_enter_s;
-        const double control_stop_s = std::max(
-            0.0, physical_entry_s - a1_control_stop_margin);
-        const double distance = control_stop_s - v.path_s;
-        const double speed = std::max(0.0, v.current_speed);
-        const double stopping_distance =
-            speed * speed / (2.0 * std::max(1e-6, cfg_.max_decel)) +
-            speed * dt;
-        if (distance <= stopping_distance + 1e-9) {
-            applyActionRequest(v, VehicleAction::STOP,
-                               "time_brake_V" + std::to_string(other_id),
-                               other_id);
-        }
-    };
     // Every active pair, including pairs in a 3+ vehicle scene, is handled by
     // the same rolling motion coordinator. Pair outputs are merged later by
     // applyActionRequest() using the existing restrictive-action ordering.
@@ -1031,41 +988,16 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         coord_log_sink_(line.str());
     };
 
-    // Stage 3.1 boundary: only A1 service transactions may retain cross-period
-    // pair ownership. Remove any ordinary-road reservation restored from an
-    // older snapshot before it can skip rolling motion coordination.
+    // A1 no longer owns a ConflictReservation. Remove any legacy reservation
+    // before pair evaluation so it cannot suppress synchronized OBB/TTC.
+    // The current production code had no non-A1 creator at this point.
     for (auto it = conflict_reservations_.begin();
          it != conflict_reservations_.end();) {
-        VehicleAgent* lo = agentById(it->first.first);
-        VehicleAgent* hi = agentById(it->first.second);
         const ConflictReservation& r = it->second;
-        if (r.create_reason != "a1_related" ||
-            lo == nullptr || hi == nullptr || !lo->active() || !hi->active() ||
-            lo->path_gen != r.gen_lo || hi->path_gen != r.gen_hi) {
-            logConflictReservation(coord_log_sink_, it->first, "delete", r);
-            ++dynamic_speed_metrics_.reservation_deletes;
-            it = conflict_reservations_.erase(it);
-        } else {
-            ++it;
-        }
+        logConflictReservation(coord_log_sink_, it->first, "delete", r);
+        ++dynamic_speed_metrics_.reservation_deletes;
+        it = conflict_reservations_.erase(it);
     }
-
-    auto reservationZone = [](const ConflictReservation& r, bool a_is_lo) {
-        ConflictZone z;
-        z.s_self_enter = a_is_lo ? r.enter_lo : r.enter_hi;
-        z.s_self_exit = a_is_lo ? r.exit_lo : r.exit_hi;
-        z.s_other_enter = a_is_lo ? r.enter_hi : r.enter_lo;
-        z.s_other_exit = a_is_lo ? r.exit_hi : r.exit_lo;
-        z.x = r.x;
-        z.y = r.y;
-        z.raw_index = r.raw_zone_index;
-        z.aabb_min_x = r.aabb_min_x;
-        z.aabb_min_y = r.aabb_min_y;
-        z.aabb_max_x = r.aabb_max_x;
-        z.aabb_max_y = r.aabb_max_y;
-        z.aabb_valid = r.aabb_valid;
-        return z;
-    };
 
     auto futureA1OwnerForPair = [&](const VehicleAgent& a,
                                     const VehicleAgent& b) {
@@ -1129,147 +1061,171 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
 
     for (size_t i = 0; i < vehicles.size(); ++i) {
         VehicleAgent& a = vehicles[i];
-        if (!a.active() || predictions[i].empty()) continue;
         for (size_t j = i + 1; j < vehicles.size(); ++j) {
             VehicleAgent& b = vehicles[j];
-            if (!b.active() || predictions[j].empty()) continue;
 
             const std::pair<int, int> key{std::min(a.id, b.id),
                                           std::max(a.id, b.id)};
-            const bool a_is_lo = a.id == key.first;
-            std::vector<ConflictZone> zones;
+            const A1DepartureBoundary a1_boundary =
+                a1_.departureBoundaryForPair(a, b);
+            const bool a_predictable = a.active() && !predictions[i].empty();
+            const bool b_predictable = b.active() && !predictions[j].empty();
             // Crossing truth is generated directly from synchronized OBBs.
             // Static path geometry is intentionally absent from this call.
-            const PairInteractionResult direct_interaction =
-                detectPairInteractionFromPredictions(
+            PairInteractionResult direct_interaction;
+            if (a_predictable && b_predictable) {
+                direct_interaction = detectPairInteractionFromPredictions(
                     a, b, {}, predictions[i], predictions[j]);
-
-            // Honor the previously selected local event, not every later
-            // crossing of the same pair of complete paths.
-            auto reservation_it = conflict_reservations_.find(key);
-            if (reservation_it != conflict_reservations_.end()) {
-                if (dynamic_speed_enabled) {
-                    ++dynamic_speed_metrics_.existing_reservation_skips;
-                    if (coord_log_sink_) {
-                        std::ostringstream line;
-                        line << "[DYN-SPEED] pair=V" << key.first << "-V"
-                             << key.second
-                             << " selection=SKIPPED"
-                             << " reason=existing_reservation"
-                             << " reservation_reason="
-                             << (reservation_it->second.create_reason.empty()
-                                     ? "unknown"
-                                     : reservation_it->second.create_reason);
-                        coord_log_sink_(line.str());
-                    }
-                }
-                ConflictReservation& r = reservation_it->second;
-                VehicleAgent& lo = a_is_lo ? a : b;
-                VehicleAgent& hi = a_is_lo ? b : a;
-
-                // A horizon-scoped Future A1 owner may replace only a soft
-                // forecast holder. Keep the reservation itself and never
-                // override a vehicle already physically inside this event.
-                const bool lo_inside =
-                    insideInterval(lo, r.enter_lo, r.exit_lo);
-                const bool hi_inside =
-                    insideInterval(hi, r.enter_hi, r.exit_hi);
-                const int departure_cluster_owner =
-                    departureClusterOwnerForPair(a, b);
-                const int future_owner = futureA1OwnerForPair(a, b);
-                const int protected_owner = departure_cluster_owner >= 0
-                    ? departure_cluster_owner : future_owner;
-                if (!lo_inside && !hi_inside && protected_owner >= 0 &&
-                    r.owner_id != protected_owner) {
-                    r.owner_id = protected_owner;
-                    ++dynamic_speed_metrics_.reservation_updates;
-                    logConflictReservation(coord_log_sink_, key, "update", r);
-                }
-
-                VehicleAgent& owner = r.owner_id == lo.id ? lo : hi;
-                VehicleAgent& waiter = r.owner_id == lo.id ? hi : lo;
-                const double owner_enter = r.owner_id == lo.id
-                    ? r.enter_lo : r.enter_hi;
-                const double owner_exit = r.owner_id == lo.id
-                    ? r.exit_lo : r.exit_hi;
-                const double waiter_enter = r.owner_id == lo.id
-                    ? r.enter_hi : r.enter_lo;
-                const double waiter_exit = r.owner_id == lo.id
-                    ? r.exit_hi : r.exit_lo;
-
-                if (owner.path_s > owner_exit + 1e-9) {
-                    logConflictReservation(coord_log_sink_, key, "delete", r);
-                    ++dynamic_speed_metrics_.reservation_deletes;
-                    conflict_reservations_.erase(reservation_it);
-                } else {
-                    const std::vector<ConflictMarker::TimedOverlap>
-                        reserved_overlaps = decimateTimedOverlaps(
-                            direct_interaction.event.timed_overlaps);
-                    pairwise_managed_pairs_.insert(key);
-                    const bool owner_inside =
-                        insideInterval(owner, owner_enter, owner_exit);
-                    const bool waiter_inside =
-                        insideInterval(waiter, waiter_enter, waiter_exit);
-                    if (waiter_inside && !owner_inside &&
-                        owner.path_s <= owner_enter + 1e-9) {
-                        // Current physical occupancy overrides an old forecast.
-                        r.owner_id = waiter.id;
-                        ++dynamic_speed_metrics_.reservation_updates;
-                        logConflictReservation(coord_log_sink_, key, "update", r);
-                        brakeBefore(owner, owner_enter, waiter.id);
-                        if (owner.reason ==
-                            "time_brake_V" + std::to_string(waiter.id)) {
-                            if (a1_.shouldLogDecision(owner, waiter.id)) {
-                                a1_.logDecision(owner, &waiter, waiter.id);
-                            }
-                        }
-                    } else {
-                        brakeBefore(waiter, waiter_enter, owner.id);
-                        if (waiter.reason ==
-                            "time_brake_V" + std::to_string(owner.id)) {
-                            if (a1_.shouldLogDecision(waiter, owner.id)) {
-                                a1_.logDecision(waiter, &owner, owner.id);
-                            }
-                        }
-                    }
-                    const ConflictZone rz = reservationZone(r, a_is_lo);
-                    recordConflictZones(
-                        a, b, std::vector<ConflictZone>{rz},
-                        ConflictMarkerKind::CROSSING_OR_OPPOSING,
-                        r.first_conflict_t, -1, -1, 0.0,
-                        VehicleAction::NOMINAL, r.owner_id, waiter.id,
-                        reserved_overlaps);
-                    continue;
-                }
             }
 
             int departure_cluster_owner =
                 departureClusterOwnerForPair(a, b);
             int future_owner = futureA1OwnerForPair(a, b);
-            // A1 ownership is pair/resource scoped, not owner-identity scoped.
-            // A staged handoff or a vehicle's departure flag alone does not
-            // remove its current-road interactions from rolling coordination.
-            const bool a1_related =
-                departure_cluster_owner >= 0 || future_owner >= 0;
-            const bool ordinary = !a1_related;
+            const int a1_owner = a1_boundary.valid
+                ? a1_boundary.owner_id
+                : departure_cluster_owner >= 0
+                    ? departure_cluster_owner : future_owner;
 
-            PairInteractionResult interaction;
-            if (a1_related) {
-                // A1 is the only remaining consumer of the legacy fixed-zone
-                // association and reservation lifecycle.
-                zones = findConflictZones(a, b);
-                interaction = detectPairInteractionFromPredictions(
-                    a, b, zones, predictions[i], predictions[j]);
-            } else {
-                // Ordinary ACTIVE-ACTIVE pairs have one physical authority:
-                // synchronized OBB overlap over the rolling horizon.
-                interaction = direct_interaction;
+            // A frozen closure is already effective while its owner is still
+            // approaching or dwelling at A1. In that interval there may be no
+            // synchronized current-track overlap to seed an ordinary event.
+            // Feed the waiter's frozen path boundary through the same rolling
+            // FAR/MID/NEAR/STOP selector; this owns no reservation or hold
+            // state beyond the existing rolling STOP hold.
+            if (a1_boundary.valid && !direct_interaction.event.valid &&
+                !reuse_ordinary_coordination) {
+                const bool waiter_is_a = a1_boundary.waiter_id == a.id;
+                VehicleAgent& waiter = waiter_is_a ? a : b;
+                VehicleAgent& owner = waiter_is_a ? b : a;
+                const auto& waiter_prediction =
+                    waiter_is_a ? predictions[i] : predictions[j];
+                const bool waiter_predictable =
+                    waiter_is_a ? a_predictable : b_predictable;
+                const double waiter_ttc = waiter_predictable
+                    ? predictionTimeAtS(
+                          waiter_prediction, a1_boundary.waiter_enter_s)
+                    : std::numeric_limits<double>::infinity();
+                if (waiter_predictable && std::isfinite(waiter_ttc)) {
+                    PairInteractionResult boundary_event;
+                    boundary_event.vehicle_a = a.id;
+                    boundary_event.vehicle_b = b.id;
+                    boundary_event.path_gen_a = a.path_gen;
+                    boundary_event.path_gen_b = b.path_gen;
+                    boundary_event.type = PairInteractionType::CROSSING;
+                    boundary_event.event.valid = true;
+                    boundary_event.event.first_overlap_t = waiter_ttc;
+                    boundary_event.event.last_t = waiter_ttc;
+                    boundary_event.event.collision_s_a = waiter_is_a
+                        ? a1_boundary.waiter_enter_s : a.path_s;
+                    boundary_event.event.collision_s_b = waiter_is_a
+                        ? b.path_s : a1_boundary.waiter_enter_s;
+                    boundary_event.event.danger_s_a =
+                        boundary_event.event.collision_s_a;
+                    boundary_event.event.danger_s_b =
+                        boundary_event.event.collision_s_b;
+                    boundary_event.event.ttc_a = waiter_is_a
+                        ? waiter_ttc
+                        : std::numeric_limits<double>::infinity();
+                    boundary_event.event.ttc_b = waiter_is_a
+                        ? std::numeric_limits<double>::infinity()
+                        : waiter_ttc;
+                    const PairSpeedCoordinationResult speed_result =
+                        evaluatePairSpeedCoordination(
+                            a, b, boundary_event,
+                            PriorityPhysicalTtcEvaluation{}, cfg_, owner.id);
+                    const VehicleAction waiter_action = waiter_is_a
+                        ? speed_result.selected_action_a
+                        : speed_result.selected_action_b;
+                    if (speed_result.yielding_safety_stop) {
+                        waiter.ttc_stop_hold_remaining = std::max(
+                            waiter.ttc_stop_hold_remaining,
+                            cfg_.rolling_refresh_period);
+                    }
+                    if (waiter_action != VehicleAction::NOMINAL) {
+                        applyActionRequest(
+                            waiter, waiter_action,
+                            "dynamic_speed_" +
+                                std::string(actionName(waiter_action)) +
+                                "_V" + std::to_string(owner.id),
+                            owner.id);
+                    }
+                    pairwise_managed_pairs_.insert(key);
+                    ordinary_dynamic_pairs_.insert(key);
+                    last_rolling_dynamic_decision_.valid = true;
+                    last_rolling_dynamic_decision_.baseline_evaluated = true;
+                    last_rolling_dynamic_decision_.band =
+                        speed_result.yielding_band;
+                    last_rolling_dynamic_decision_.emergency_stop =
+                        speed_result.emergency_stop;
+                    last_rolling_dynamic_decision_.selected_action_a =
+                        speed_result.selected_action_a;
+                    last_rolling_dynamic_decision_.selected_action_b =
+                        speed_result.selected_action_b;
+                    last_rolling_dynamic_decision_.vehicle_ttc_diagnostics.
+                        push_back(
+                            RollingDynamicDecision::VehicleTtcDiagnostic{
+                                waiter.id, waiter.path_gen, waiter_ttc,
+                                "a1_frozen_boundary"});
+                    if (waiter_action != VehicleAction::NOMINAL) {
+                        last_rolling_dynamic_decision_.targets.push_back(
+                            RollingDynamicDecision::Target{
+                                waiter.id, waiter.path_gen, waiter_action,
+                                waiter.action, owner.id, waiter.reason});
+                    }
+                    if (speed_result.yielding_band ==
+                        DynamicInterventionBand::FAR) {
+                        ++dynamic_speed_metrics_.far_decisions;
+                    } else if (speed_result.yielding_band ==
+                               DynamicInterventionBand::MID) {
+                        ++dynamic_speed_metrics_.mid_decisions;
+                    } else {
+                        ++dynamic_speed_metrics_.near_decisions;
+                    }
+                    if (speed_result.emergency_stop) {
+                        ++dynamic_speed_metrics_.emergency_stop_decisions;
+                    }
+                    if (coord_log_sink_) {
+                        std::ostringstream line;
+                        line << std::fixed << std::setprecision(3)
+                             << "[A1-TTC-CORRECTION] owner=V" << owner.id
+                             << " waiter=V" << waiter.id
+                             << " baseline=CLEAR bridge_boundary_s=N/A"
+                             << " bridge_ttc=N/A"
+                             << " a1_boundary_s="
+                             << a1_boundary.waiter_enter_s
+                             << " final_boundary_s="
+                             << a1_boundary.waiter_enter_s
+                             << " final_ttc=" << waiter_ttc
+                             << " band=" << dynamicInterventionBandName(
+                                    speed_result.yielding_band)
+                             << " action=" << actionName(waiter_action)
+                             << " owner_boundary=["
+                             << a1_boundary.owner_enter_s << ","
+                             << a1_boundary.owner_exit_s << "]"
+                             << " waiter_boundary=["
+                             << a1_boundary.waiter_enter_s << ","
+                             << a1_boundary.waiter_exit_s << "]"
+                             << " owner_release_s="
+                             << a1_boundary.owner_exit_s
+                             << " reservation=not_created";
+                        coord_log_sink_(line.str());
+                    }
+                    continue;
+                }
             }
+
+            if (!a_predictable || !b_predictable) continue;
+
+            // Every pair keeps the same synchronized bare-OBB baseline. A1
+            // may correct one vehicle's path-space danger boundary below, but
+            // never replaces or suppresses ordinary dynamic coordination.
+            PairInteractionResult interaction = direct_interaction;
 
             int ordinary_priority_id = -1;
             PriorityPhysicalTtcEvaluation priority_physical;
-            if (ordinary && !reuse_ordinary_coordination) {
-                ordinary_priority_id = priorityWinner(a, b);
+            if (!reuse_ordinary_coordination) {
+                ordinary_priority_id = a1_owner >= 0
+                    ? a1_owner : priorityWinner(a, b);
                 const bool a_is_priority = ordinary_priority_id == a.id;
                 const VehicleAgent& priority_vehicle = a_is_priority ? a : b;
                 const VehicleAgent& other_vehicle = a_is_priority ? b : a;
@@ -1285,7 +1241,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             const TimedConflictEvent& event = interaction.event;
             if (!event.valid) {
                 bool priority_physical_stop = false;
-                if (ordinary && priority_physical.valid) {
+                if (priority_physical.valid) {
                     const TtcStopBoundary boundary = evaluateTtcStopBoundary(
                         priority_physical.safety_ttc,
                         VehicleAction::NOMINAL, cfg_);
@@ -1363,16 +1319,14 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             // ordinary synchronized-OBB conflict. A clear baseline never
             // reaches it, and A1 keeps its existing resource path unchanged.
             PairBridgeTtcCorrection bridge_correction;
-            if (ordinary) {
-                bridge_correction = evaluateBridgeTtcCorrection(
-                    a, b, predictions[i], predictions[j], interaction,
-                    mp_, cfg_);
-                interaction.type =
-                    bridge_correction.a.bridge_related ||
-                            bridge_correction.b.bridge_related
-                        ? PairInteractionType::OPPOSING
-                        : PairInteractionType::CROSSING;
-            }
+            bridge_correction = evaluateBridgeTtcCorrection(
+                a, b, predictions[i], predictions[j], interaction,
+                mp_, cfg_);
+            interaction.type =
+                bridge_correction.a.bridge_related ||
+                        bridge_correction.b.bridge_related
+                    ? PairInteractionType::OPPOSING
+                    : PairInteractionType::CROSSING;
             auto annotateBridgeMarker = [&]() {
                 if (conflicts_.empty()) return;
                 ConflictMarker& marker = conflicts_.back();
@@ -1418,32 +1372,15 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             };
 
             pairwise_managed_pairs_.insert(key);
-            if (ordinary) ordinary_dynamic_pairs_.insert(key);
+            ordinary_dynamic_pairs_.insert(key);
 
-            ConflictZone zone;
-            if (a1_related) {
-                if (event.associated_zone_index < 0 ||
-                    static_cast<size_t>(event.associated_zone_index) >=
-                        zones.size()) {
-                    continue;
-                }
-                zone = zones[static_cast<size_t>(
-                    event.associated_zone_index)];
-            } else {
-                zone = eventZone(interaction, predictions[i], predictions[j]);
-            }
-            const bool a_inside =
-                insideInterval(a, zone.s_self_enter, zone.s_self_exit);
-            const bool b_inside =
-                insideInterval(b, zone.s_other_enter, zone.s_other_exit);
-            const bool a_terminal = terminalDocking(a);
-            const bool b_terminal = terminalDocking(b);
-
+            ConflictZone zone = eventZone(
+                interaction, predictions[i], predictions[j]);
             // The rolling-period target was selected from the true state at
             // frame 0.  Future sandbox states may still run reservation/A1 and
             // safety rules, but must not turn the same period's FAR into MID,
             // re-run priority/candidates, or create a new ordinary reservation.
-            if (ordinary && reuse_ordinary_coordination) {
+            if (reuse_ordinary_coordination) {
                 recordConflictZones(
                     a, b, std::vector<ConflictZone>{zone},
                     ConflictMarkerKind::CROSSING_OR_OPPOSING,
@@ -1458,7 +1395,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
 
             if (dynamic_speed_enabled) {
                 ++dynamic_speed_metrics_.baseline_conflicts;
-                if (ordinary) {
+                {
                     ++dynamic_speed_metrics_.bridge_checked_pairs;
                     dynamic_speed_metrics_.bridge_nearest_evaluations +=
                         bridge_correction.a.nearest_search_evaluations +
@@ -1490,23 +1427,48 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         ++dynamic_speed_metrics_.crossing_conflicts;
                     }
                 }
-                int preferred_winner = -1;
-                if (ordinary) {
-                    preferred_winner = ordinary_priority_id;
-                }
+                int preferred_winner = ordinary_priority_id;
 
                 PairSpeedCoordinationResult speed_result;
-                if (ordinary) {
+                {
                     const bool a_is_priority = preferred_winner == a.id;
-                    const double effective_ttc_a = std::min(
+                    double effective_boundary_a =
+                        bridge_correction.a.near_boundary_s;
+                    double effective_boundary_b =
+                        bridge_correction.b.near_boundary_s;
+                    double effective_ttc_a = std::min(
                         event.ttc_a, bridge_correction.a.corrected_ttc);
-                    const double effective_ttc_b = std::min(
+                    double effective_ttc_b = std::min(
                         event.ttc_b, bridge_correction.b.corrected_ttc);
+                    std::optional<double> a1_boundary_a;
+                    std::optional<double> a1_boundary_b;
+                    std::optional<double> a1_ttc_a;
+                    std::optional<double> a1_ttc_b;
+                    if (a1_boundary.valid &&
+                        a1_boundary.waiter_id == a.id) {
+                        a1_boundary_a = a1_boundary.waiter_enter_s;
+                        a1_ttc_a = predictionTimeAtS(
+                            predictions[i], *a1_boundary_a);
+                        if (*a1_boundary_a < effective_boundary_a - 1e-9) {
+                            effective_boundary_a = *a1_boundary_a;
+                            effective_ttc_a = *a1_ttc_a;
+                        }
+                    }
+                    if (a1_boundary.valid &&
+                        a1_boundary.waiter_id == b.id) {
+                        a1_boundary_b = a1_boundary.waiter_enter_s;
+                        a1_ttc_b = predictionTimeAtS(
+                            predictions[j], *a1_boundary_b);
+                        if (*a1_boundary_b < effective_boundary_b - 1e-9) {
+                            effective_boundary_b = *a1_boundary_b;
+                            effective_ttc_b = *a1_ttc_b;
+                        }
+                    }
                     PairInteractionResult effective_interaction = interaction;
                     effective_interaction.event.danger_s_a =
-                        bridge_correction.a.near_boundary_s;
+                        effective_boundary_a;
                     effective_interaction.event.danger_s_b =
-                        bridge_correction.b.near_boundary_s;
+                        effective_boundary_b;
                     effective_interaction.event.ttc_a =
                         effective_ttc_a;
                     effective_interaction.event.ttc_b =
@@ -1674,12 +1636,37 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                                  << event.first_overlap_t
                                  << " collision_s_a=" << event.collision_s_a
                                  << " collision_s_b=" << event.collision_s_b
-                                 << " danger_s_a="
+                                 << " original_danger_s_a="
+                                 << event.collision_s_a
+                                 << " original_danger_s_b="
+                                 << event.collision_s_b
+                                 << " bridge_boundary_s_a="
                                  << bridge_correction.a.near_boundary_s
-                                 << " danger_s_b="
+                                 << " bridge_boundary_s_b="
                                  << bridge_correction.b.near_boundary_s
+                                 << " a1_boundary_s_a=";
+                        if (a1_boundary_a) ttc_line << *a1_boundary_a;
+                        else ttc_line << "N/A";
+                        ttc_line << " a1_boundary_s_b=";
+                        if (a1_boundary_b) ttc_line << *a1_boundary_b;
+                        else ttc_line << "N/A";
+                        ttc_line << " final_boundary_s_a="
+                                 << effective_boundary_a
+                                 << " final_boundary_s_b="
+                                 << effective_boundary_b
                                  << " original_ttc_a=" << event.ttc_a
                                  << " original_ttc_b=" << event.ttc_b
+                                 << " bridge_ttc_a="
+                                 << bridge_correction.a.corrected_ttc
+                                 << " bridge_ttc_b="
+                                 << bridge_correction.b.corrected_ttc
+                                 << " a1_ttc_a=";
+                        if (a1_ttc_a) ttc_line << *a1_ttc_a;
+                        else ttc_line << "N/A";
+                        ttc_line << " a1_ttc_b=";
+                        if (a1_ttc_b) ttc_line << *a1_ttc_b;
+                        else ttc_line << "N/A";
+                        ttc_line
                                  << " effective_ttc_a="
                                  << effective_ttc_a
                                  << " effective_ttc_b="
@@ -1761,6 +1748,62 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                              << " reason=" << speed_result.reason
                              << " reservation=not_created";
                         coord_log_sink_(line.str());
+
+                        if (a1_boundary.valid) {
+                            const bool waiter_is_a =
+                                a1_boundary.waiter_id == a.id;
+                            std::ostringstream a1_line;
+                            a1_line << std::fixed << std::setprecision(3)
+                                    << "[A1-TTC-CORRECTION] owner=V"
+                                    << a1_boundary.owner_id
+                                    << " waiter=V"
+                                    << a1_boundary.waiter_id
+                                    << " owner_boundary=["
+                                    << a1_boundary.owner_enter_s << ","
+                                    << a1_boundary.owner_exit_s << "]"
+                                    << " waiter_boundary=["
+                                    << a1_boundary.waiter_enter_s << ","
+                                    << a1_boundary.waiter_exit_s << "]"
+                                    << " original_danger_s="
+                                    << (waiter_is_a
+                                            ? event.collision_s_a
+                                            : event.collision_s_b)
+                                    << " original_ttc="
+                                    << (waiter_is_a
+                                            ? event.ttc_a : event.ttc_b)
+                                    << " bridge_boundary_s="
+                                    << (waiter_is_a
+                                            ? bridge_correction.a.
+                                                  near_boundary_s
+                                            : bridge_correction.b.
+                                                  near_boundary_s)
+                                    << " bridge_ttc="
+                                    << (waiter_is_a
+                                            ? bridge_correction.a.
+                                                  corrected_ttc
+                                            : bridge_correction.b.
+                                                  corrected_ttc)
+                                    << " a1_boundary_s="
+                                    << a1_boundary.waiter_enter_s
+                                    << " final_boundary_s="
+                                    << (waiter_is_a
+                                            ? effective_boundary_a
+                                            : effective_boundary_b)
+                                    << " final_ttc="
+                                    << (waiter_is_a
+                                            ? effective_ttc_a
+                                            : effective_ttc_b)
+                                    << " band="
+                                    << dynamicInterventionBandName(
+                                           intervention_band)
+                                    << " action="
+                                    << actionName(waiter_is_a
+                                           ? speed_result.selected_action_a
+                                           : speed_result.selected_action_b)
+                                    << " owner_release_s="
+                                    << a1_boundary.owner_exit_s;
+                            coord_log_sink_(a1_line.str());
+                        }
 
                         std::ostringstream bridge_line;
                         bridge_line << std::fixed << std::setprecision(3)
@@ -1934,138 +1977,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     annotateTimedCollisionStartMarker();
                     annotateBridgeMarker();
                     continue;
-                } else {
-                    if (a1_related) ++dynamic_speed_metrics_.a1_fallbacks;
-                    if (coord_log_sink_) {
-                        std::ostringstream line;
-                        line << std::fixed << std::setprecision(3)
-                             << "[DYN-SPEED] pair=V" << key.first << "-V"
-                             << key.second
-                             << " first_overlap_t=" << event.first_overlap_t
-                             << " selection=SKIPPED reason="
-                             << (a1_related ? "a1_protected"
-                                            : "legacy_special_case")
-                             << " reservation=legacy";
-                        coord_log_sink_(line.str());
-                    }
-                }
-            }
-
-            int holder = -1;
-            if (a_inside != b_inside) {
-                holder = a_inside ? a.id : b.id;
-            } else if (a_inside && b_inside) {
-                // If both are already committed, clear the one that can leave
-                // this local event sooner instead of creating a double stop.
-                const double a_clear = timeToReachS(
-                    a, VehicleAction::NOMINAL, zone.s_self_exit);
-                const double b_clear = timeToReachS(
-                    b, VehicleAction::NOMINAL, zone.s_other_exit);
-                if (std::abs(a_clear - b_clear) > prediction_step) {
-                    holder = a_clear < b_clear ? a.id : b.id;
-                } else {
-                    holder = priorityWinner(a, b);
-                }
-            } else {
-                if (departure_cluster_owner >= 0) {
-                    holder = departure_cluster_owner;
-                } else if (future_owner >= 0) {
-                    holder = future_owner;
-                } else {
-                    if (a_terminal != b_terminal) {
-                        holder = a_terminal ? a.id : b.id;
-                    } else {
-                        holder = priorityWinner(a, b);
-                    }
-                }
-            }
-
-            const std::tuple<int, int, int> conflict_log_key{
-                key.first, key.second, holder};
-            if (coord_log_sink_ &&
-                pairwise_conflict_logs_.insert(conflict_log_key).second) {
-                std::ostringstream line;
-                line << std::fixed << std::setprecision(3)
-                     << "[PAIRWISE_CONFLICT] component=PAIRWISE pair=V"
-                     << key.first << "-V" << key.second
-                     << " holder="
-                     << (holder >= 0 ? "V" + std::to_string(holder) : "none")
-                     << " waiter=";
-                if (holder == a.id) {
-                    line << "V" << b.id;
-                } else if (holder == b.id) {
-                    line << "V" << a.id;
-                } else {
-                    line << "both";
-                }
-                line << " conflict_type=CROSSING/OPPOSING"
-                     << " first_overlap_t=" << event.first_overlap_t;
-                coord_log_sink_(line.str());
-            }
-
-            recordConflictZones(
-                a, b, std::vector<ConflictZone>{zone},
-                ConflictMarkerKind::CROSSING_OR_OPPOSING,
-                event.first_overlap_t,
-                -1, -1, 0.0, VehicleAction::NOMINAL, holder,
-                holder == a.id ? b.id : (holder == b.id ? a.id : -1),
-                decimateTimedOverlaps(event.timed_overlaps));
-            annotateTimedCollisionStartMarker();
-            if (holder < 0) {
-                brakeBefore(a, zone.s_self_enter, b.id);
-                brakeBefore(b, zone.s_other_enter, a.id);
-                if (a.reason == "time_brake_V" + std::to_string(b.id)) {
-                    if (a1_.shouldLogDecision(a, b.id)) {
-                        a1_.logDecision(a, &b, b.id);
-                    }
-                }
-                if (b.reason == "time_brake_V" + std::to_string(a.id)) {
-                    if (a1_.shouldLogDecision(b, a.id)) {
-                        a1_.logDecision(b, &a, a.id);
-                    }
-                }
-                continue;
-            }
-
-            ConflictReservation r;
-            r.owner_id = holder;
-            r.gen_lo = a_is_lo ? a.path_gen : b.path_gen;
-            r.gen_hi = a_is_lo ? b.path_gen : a.path_gen;
-            r.enter_lo = a_is_lo ? zone.s_self_enter : zone.s_other_enter;
-            r.exit_lo = a_is_lo ? zone.s_self_exit : zone.s_other_exit;
-            r.enter_hi = a_is_lo ? zone.s_other_enter : zone.s_self_enter;
-            r.exit_hi = a_is_lo ? zone.s_other_exit : zone.s_self_exit;
-            r.x = zone.x;
-            r.y = zone.y;
-            r.first_conflict_t = event.first_overlap_t;
-            // Reaching the ownership path is now possible only for an A1
-            // service transaction; every non-A1 timed conflict returned from
-            // the rolling motion branch above.
-            r.create_reason = "a1_related";
-            ++dynamic_speed_metrics_.reservation_create_a1;
-            r.raw_zone_index = zone.raw_index;
-            r.aabb_min_x = zone.aabb_min_x;
-            r.aabb_min_y = zone.aabb_min_y;
-            r.aabb_max_x = zone.aabb_max_x;
-            r.aabb_max_y = zone.aabb_max_y;
-            r.aabb_valid = zone.aabb_valid;
-            conflict_reservations_[key] = r;
-            ++dynamic_speed_metrics_.reservation_creates;
-            logConflictReservation(coord_log_sink_, key, "create", r);
-
-            if (holder == a.id) {
-                brakeBefore(b, zone.s_other_enter, a.id);
-                if (b.reason == "time_brake_V" + std::to_string(a.id)) {
-                    if (a1_.shouldLogDecision(b, a.id)) {
-                        a1_.logDecision(b, &a, a.id);
-                    }
-                }
-            } else {
-                brakeBefore(a, zone.s_self_enter, b.id);
-                if (a.reason == "time_brake_V" + std::to_string(b.id)) {
-                    if (a1_.shouldLogDecision(a, b.id)) {
-                        a1_.logDecision(a, &b, b.id);
-                    }
                 }
             }
         }
@@ -2805,9 +2716,11 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
         ? prediction_horizon_override
         : cfg_.prediction_horizon;
     refreshDepartureClusterCommitments(vehicles);
+    // Freeze/query the first A1 departure closure before the ordinary rolling
+    // coordinator so that it can act as a boundary correction in this cycle.
+    enforceFutureA1Admission(vehicles, dt);
     resolvePairwiseConflicts(vehicles, dt, pairwise_horizon,
                              reuse_ordinary_coordination);
-    enforceFutureA1Admission(vehicles, dt);
     enforceDepartureClusterCommitments(vehicles, dt);
     resolveTargetSlotOccupancy(vehicles);  // slot-mouth queueing (spec 6/7)
     // Safety validation runs after all coordination/special-resource outputs

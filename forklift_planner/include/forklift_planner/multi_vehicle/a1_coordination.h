@@ -57,7 +57,6 @@ struct DepartureClusterCommitment {
     double owner_release_exit_s = 0.0;
     bool active = false;
     bool handed_off_from_future = false;
-    bool hold_logged = false;
 };
 
 enum class A1AuthoritySource {
@@ -70,6 +69,18 @@ struct A1PairAuthority {
     bool protected_pair = false;
     int owner_id = -1;
     A1AuthoritySource source = A1AuthoritySource::NONE;
+};
+
+// Frozen path-space output consumed by the ordinary rolling TTC pipeline.
+// ConflictZone indices remain internal geometry diagnostics only.
+struct A1DepartureBoundary {
+    bool valid = false;
+    int owner_id = -1;
+    int waiter_id = -1;
+    double owner_enter_s = 0.0;
+    double owner_exit_s = 0.0;
+    double waiter_enter_s = 0.0;
+    double waiter_exit_s = 0.0;
 };
 
 struct A1ActionRequest {
@@ -125,6 +136,8 @@ public:
         const ComputeZones& compute_full,
         const ComputeZones& canonical_zones);
     A1PairAuthority departureAuthorityForPair(
+        const VehicleAgent& a, const VehicleAgent& b) const;
+    A1DepartureBoundary departureBoundaryForPair(
         const VehicleAgent& a, const VehicleAgent& b) const;
 
     std::vector<A1ActionRequest> refreshDepartureClusters(

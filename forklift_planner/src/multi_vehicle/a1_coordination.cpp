@@ -485,6 +485,38 @@ A1PairAuthority A1Coordinator::departureAuthorityForPair(
     return result;
 }
 
+A1DepartureBoundary A1Coordinator::departureBoundaryForPair(
+    const VehicleAgent& a, const VehicleAgent& b) const {
+    A1DepartureBoundary result;
+    const std::pair<int, int> key{std::min(a.id, b.id),
+                                  std::max(a.id, b.id)};
+    const auto it = departure_clusters_.find(key);
+    if (it == departure_clusters_.end()) return result;
+    const DepartureClusterCommitment& cluster = it->second;
+    const VehicleAgent* waiter = cluster.other_id == a.id ? &a :
+        cluster.other_id == b.id ? &b : nullptr;
+    if (waiter == nullptr || waiter->path_gen != cluster.other_path_gen ||
+        cluster.intervals.empty()) {
+        return result;
+    }
+    result.valid = true;
+    result.owner_id = cluster.owner_id;
+    result.waiter_id = cluster.other_id;
+    result.owner_enter_s = std::numeric_limits<double>::infinity();
+    result.waiter_enter_s = std::numeric_limits<double>::infinity();
+    for (const FutureA1ConflictInterval& interval : cluster.intervals) {
+        result.owner_enter_s = std::min(
+            result.owner_enter_s, interval.owner_enter);
+        result.owner_exit_s = std::max(
+            result.owner_exit_s, interval.owner_exit);
+        result.waiter_enter_s = std::min(
+            result.waiter_enter_s, interval.other_enter);
+        result.waiter_exit_s = std::max(
+            result.waiter_exit_s, interval.other_exit);
+    }
+    return result;
+}
+
 std::vector<A1ActionRequest> A1Coordinator::refreshDepartureClusters(
     std::vector<VehicleAgent>& vehicles,
     const ComputeZones& canonical_zones) {
@@ -514,11 +546,12 @@ std::vector<A1ActionRequest> A1Coordinator::refreshDepartureClusters(
         DepartureClusterCommitment& cluster = it->second;
         VehicleAgent* owner = agentById(cluster.owner_id);
         VehicleAgent* other = agentById(cluster.other_id);
-        const bool owner_pre_service_dwell = owner != nullptr &&
+        const bool owner_service_dwell = owner != nullptr &&
             owner->mode == VehicleMode::DWELL &&
-            owner->mission_phase == MissionPhase::UNLOAD_DWELL;
+            (owner->mission_phase == MissionPhase::UNLOAD_DWELL ||
+             owner->mission_phase == MissionPhase::PICKUP_DWELL);
         if (owner == nullptr || other == nullptr ||
-            (!owner->active() && !owner_pre_service_dwell) ||
+            (!owner->active() && !owner_service_dwell) ||
             !other->active() || owner->track.empty() || other->track.empty()) {
             it = eraseWithEvent(it, "INVALIDATE", "vehicle_or_path_invalid");
             continue;
@@ -723,6 +756,7 @@ std::vector<A1ActionRequest> A1Coordinator::enforceFutureAdmission(
     std::vector<VehicleAgent>& vehicles, double dt,
     const ComputeZones& compute_full,
     const ComputeZones& canonical_zones) {
+    (void)canonical_zones;
     std::vector<A1ActionRequest> requests;
     if (!future_commitment_.valid()) return requests;
     VehicleAgent* owner = nullptr;
@@ -780,46 +814,14 @@ std::vector<A1ActionRequest> A1Coordinator::enforceFutureAdmission(
             future_entry_s = future_selected.s_other_enter;
         }
 
-        bool ordinary_already_inside = false;
-        std::optional<double> ordinary_entry_s;
-        ConflictZone ordinary_selected;
-        const bool owner_is_lo = owner->id < other.id;
-        const VehicleAgent& ordinary_lo = owner_is_lo ? *owner : other;
-        const VehicleAgent& ordinary_hi = owner_is_lo ? other : *owner;
-        const auto ordinary_blocks = canonical_zones(ordinary_lo, ordinary_hi);
-        for (const ConflictZone& canonical : ordinary_blocks) {
-            ConflictZone zone = canonical;
-            if (!owner_is_lo) {
-                std::swap(zone.s_self_enter, zone.s_other_enter);
-                std::swap(zone.s_self_exit, zone.s_other_exit);
-            }
-            if (owner->path_s > zone.s_self_exit + 1e-9 ||
-                other_s > zone.s_other_exit + 1e-9) {
-                continue;
-            }
-            if (other_confirmed && other_s > zone.s_other_enter + 1e-9) {
-                ordinary_already_inside = true;
-                ordinary_entry_s = zone.s_other_enter;
-                ordinary_selected = zone;
-                break;
-            }
-            if (!ordinary_entry_s || zone.s_other_enter < *ordinary_entry_s) {
-                ordinary_entry_s = zone.s_other_enter;
-                ordinary_selected = zone;
-            }
-        }
         if (!future_entry_s) continue;
 
         bool already_inside = other_confirmed &&
-            (future_zones.other_already_inside || ordinary_already_inside);
-        std::optional<double> physical_entry_s = futureA1StopBoundary(
-            future_entry_s, ordinary_entry_s);
+            future_zones.other_already_inside;
+        std::optional<double> physical_entry_s = future_entry_s;
         double control_stop_s = std::max(
             0.0, *physical_entry_s - cfg_.a1_control_stop_margin);
-        const bool ordinary_selected_boundary = ordinary_entry_s &&
-            std::abs(*ordinary_entry_s - *physical_entry_s) <= 1e-9;
-        const ConflictZone& selected = ordinary_selected_boundary
-            ? ordinary_selected : future_selected;
+        const ConflictZone& selected = future_selected;
 
         const std::pair<int, int> cluster_key{
             std::min(owner->id, other.id), std::max(owner->id, other.id)};
@@ -925,32 +927,16 @@ std::vector<A1ActionRequest> A1Coordinator::enforceFutureAdmission(
             }
             continue;
         }
-        const bool braking_required_now =
-            distance <= stopping_distance + 1e-9;
-        if (!braking_required_now) continue;
-        requests.push_back(A1ActionRequest{
-            other.id, VehicleAction::STOP, owner->id,
-            "future_a1_exit_priority"});
-        if (admission_logged_.insert(log_key).second) {
-            std::ostringstream line;
-            line << std::fixed << std::setprecision(3)
-                 << "[FUTURE_A1_ADMISSION] owner=V" << owner->id
-                 << " blocked=V" << other.id
-                 << " reason=future_a1_exit_priority early_stop=true"
-                 << " braking_required_now=true holder=V" << owner->id
-                 << " conflict_zone=(" << selected.x << ","
-                 << selected.y << ")";
-            appendGeometry(line);
-            if (coord_log_sink_) coord_log_sink_(line.str());
-            ROS_WARN("%s %s", debug_log_prefix_.c_str(),
-                     line.str().c_str());
-        }
+        // Nominal control is produced by RuleEngine's single rolling TTC
+        // pipeline. This pass freezes geometry and handles only physical
+        // admission invariant violations.
     }
     return requests;
 }
 
 std::vector<A1ActionRequest> A1Coordinator::enforceDepartureClusters(
     std::vector<VehicleAgent>& vehicles, double dt) {
+    (void)dt;
     std::vector<A1ActionRequest> requests;
     auto agentById = [&](int id) -> VehicleAgent* {
         for (VehicleAgent& vehicle : vehicles) {
@@ -980,24 +966,8 @@ std::vector<A1ActionRequest> A1Coordinator::enforceDepartureClusters(
                 "a1_admission_invariant_violation"});
             continue;
         }
-        const double distance = cluster.waiter_control_stop_s - other_s;
-        const double speed = std::max(0.0, other->current_speed);
-        const double stopping_distance =
-            speed * speed / (2.0 * std::max(1e-6, cfg_.max_decel)) +
-            speed * dt;
-        const bool braking_required_now =
-            distance <= stopping_distance + 1e-9;
-        if (!braking_required_now) continue;
-        requests.push_back(A1ActionRequest{
-            other->id, VehicleAction::STOP, owner->id,
-            "departure_cluster_priority"});
-        if (!cluster.hold_logged) {
-            logDepartureCluster(
-                coord_log_sink_, "HOLD", "cluster_control_stop",
-                cluster, owner->path_s, other_s, speed,
-                cfg_.max_decel, dt);
-            cluster.hold_logged = true;
-        }
+        // All nominal YIELD/CREEP/STOP decisions are emitted by the unified
+        // dynamic TTC pipeline. This pass is a physical hard guard only.
     }
     return requests;
 }

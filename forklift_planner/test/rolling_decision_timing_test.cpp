@@ -183,7 +183,7 @@ int main() {
     RuleEngine mid_engine(map_param, config);
     std::vector<VehicleAgent> mid{
         crossingVehicle(0, 1.50, false),
-        crossingVehicle(1, 1.90, true)};
+        crossingVehicle(1, 1.50, true)};
     mid_engine.decide(mid, 0.1, 15.0);
     const std::vector<PeriodTarget> mid_targets = captureTargets(mid);
     const auto mid_decision = mid_engine.lastRollingDynamicDecision();
@@ -268,8 +268,8 @@ int main() {
     // create an already-inside reservation.
     RuleEngine inside_engine(map_param, config);
     std::vector<VehicleAgent> inside{
-        crossingVehicle(0, 0.30, false),
-        crossingVehicle(1, 0.79, true)};
+        crossingVehicle(0, 0.80, false),
+        crossingVehicle(1, 0.80, true)};
     inside_engine.decide(inside, 0.1, 15.0);
     const auto inside_decision =
         inside_engine.lastRollingDynamicDecision();
@@ -296,8 +296,8 @@ int main() {
                         map_param, config, 0.1);
     }
 
-    // Reuse mode still honors an A1 reservation and may tighten a period
-    // NOMINAL target to STOP.
+    // A restored legacy A1 reservation is retired even in reuse mode; it may
+    // no longer bypass or override the rolling synchronized-TTC target.
     RuleEngine safety_engine(map_param, config);
     std::vector<VehicleAgent> safety{
         crossingVehicle(0, 0.30, false, config.nominal_speed),
@@ -315,9 +315,10 @@ int main() {
     safety_state.reservations[{0, 1}] = reservation;
     safety_engine.restore(safety_state);
     safety_engine.decide(safety, 0.1, 15.0, true);
-    if (safety[1].requested_action != VehicleAction::STOP ||
-        safety_engine.snapshot().reservations.count({0, 1}) == 0) {
-        return fail("existing reservation could not override reused NOMINAL");
+    if (!safety_engine.snapshot().reservations.empty() ||
+        safety_engine.dynamicSpeedMetrics().reservation_deletes == 0 ||
+        safety_engine.dynamicSpeedMetrics().existing_reservation_skips != 0) {
+        return fail("legacy A1 reservation survived rolling reuse");
     }
 
     // A TTC safety STOP owns one complete rolling period. Its prediction
