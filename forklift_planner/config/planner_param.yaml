@@ -51,6 +51,10 @@ forklift_planner:
     lat_accel_max: 0.06
     safety_margin: 0.00
     conflict_margin: 0.04
+    # A1-only control stop target offset from the bare-body ConflictZone entry.
+    # It does not inflate ordinary OBB/ConflictZone geometry and is separate
+    # from the dynamic braking trigger v^2/(2a)+v*dt.
+    a1_control_stop_margin: 0.04
 
     # Stateless correction after a real synchronized-OBB conflict.
     bridge_opposing_threshold: -0.50     # local actual-motion-heading dot threshold

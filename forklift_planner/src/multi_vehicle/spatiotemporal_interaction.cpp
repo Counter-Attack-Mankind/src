@@ -1,3 +1,5 @@
+//该文件主要用于检测双车未来15sOBB冲突，以及确定各车的首次碰撞点以及基础TTC
+
 #include "forklift_planner/multi_vehicle/spatiotemporal_interaction.h"
 
 #include <algorithm>
@@ -11,7 +13,7 @@ namespace multi_vehicle {
 
 namespace {
 
-
+// 该函数用于已知一个 OBB 的中心、朝向、半长、半宽，求它的四个世界坐标角点
 std::array<InteractionPoint, 4> obbCorners(const OBB& body) {
     const double c = std::cos(body.theta);
     const double s = std::sin(body.theta);
@@ -25,6 +27,7 @@ std::array<InteractionPoint, 4> obbCorners(const OBB& body) {
              {body.x + fx - lx, body.y + fy - ly}}};
 }
 
+//该函数用于预测车辆未来轨迹的时候，根据当前路径曲率限制未来速度。
 double curvatureSpeedAt(const VehicleAgent& vehicle,
                         const MultiVehicleConfig& config,
                         double query_s) {
@@ -56,12 +59,14 @@ double curvatureSpeedAt(const VehicleAgent& vehicle,
                     config.nominal_speed * config.creep_ratio);
 }
 
+//已经检测出 OBB collision 以后，看看这次碰撞最接近哪个 PotentialConflictZone
 double intervalDistance(double value, double begin, double end) {
     if (value < begin) return begin - value;
     if (value > end) return value - end;
     return 0.0;
 }
 
+//将给出的挡位转化为实际的速度量
 double targetSpeed(VehicleAction action, const MultiVehicleConfig& config) {
     switch (action) {
         case VehicleAction::STOP:
@@ -83,6 +88,7 @@ double targetSpeed(VehicleAction action, const MultiVehicleConfig& config) {
 
 }  // namespace
 
+//用于计算该碰撞后，区域到底长什么样
 std::vector<InteractionPoint> intersectObbs(const OBB& a, const OBB& b) {
     const auto a_corners = obbCorners(a);
     const auto b_corners = obbCorners(b);
@@ -126,6 +132,8 @@ std::vector<InteractionPoint> intersectObbs(const OBB& a, const OBB& b) {
     return polygon;
 }
 
+//<核心函数>从车辆当前真实运动状态出发，假定目标动作是 NOMINAL/YIELD/CREEP/STOP 等，生成未来 H 秒预测
+//返回的输出output是PredictedKinematicSample类型，存有（t,s,speed,body）
 std::vector<PredictedKinematicSample> predictTrajectory(
     const VehicleAgent& vehicle, const MapParam& map_param,
     const MultiVehicleConfig& config, VehicleAction target_action,
@@ -135,7 +143,9 @@ std::vector<PredictedKinematicSample> predictTrajectory(
     const double prediction_step = std::max(0.02, config.prediction_step);
     const int prediction_count = std::max(
         1, static_cast<int>(std::ceil(horizon / prediction_step)));
+
     std::vector<PredictedKinematicSample> output;
+
     if (!vehicle.active() || vehicle.track.empty()) return output;
     output.reserve(static_cast<size_t>(prediction_count + 1));
     
@@ -172,6 +182,7 @@ std::vector<PredictedKinematicSample> predictTrajectory(
     return output;
 }
 
+//已经有一条预测 s(t)，现在给定路径位置 target_s，反求什么时候到，也就是下文得到碰撞点，如何反求TTC
 double predictionTimeAtS(
     const std::vector<PredictedKinematicSample>& prediction,
     double target_s) {
@@ -190,6 +201,7 @@ double predictionTimeAtS(
     return std::numeric_limits<double>::infinity();
 }
 
+//<核心>真正的双车时空冲突检测
 PairInteractionResult detectPairInteractionFromPredictions(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const std::vector<PotentialConflictZone>& potential_zones,

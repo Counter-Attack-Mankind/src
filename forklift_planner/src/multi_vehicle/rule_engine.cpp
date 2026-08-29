@@ -19,14 +19,7 @@ namespace forklift_planner {
 namespace multi_vehicle {
 
 RuleEngine::RuleEngine(const MapParam& mp, const MultiVehicleConfig& cfg)
-    : mp_(mp), cfg_(cfg) {}
-
-bool RuleEngine::shouldLogA1Decision(const VehicleAgent& vehicle,
-                                     int blocker_id) {
-    return a1_decision_logs_.insert(std::make_tuple(
-        vehicle.id, blocker_id, static_cast<int>(vehicle.mission_phase),
-        static_cast<int>(vehicle.requested_action))).second;
-}
+    : mp_(mp), cfg_(cfg), a1_(mp, cfg) {}
 
 std::string RuleEngine::debugLogPrefix() const {
     std::ostringstream out;
@@ -112,81 +105,10 @@ bool sameReservation(const RuleEngine::ConflictReservation& a,
            a.aabb_valid == b.aabb_valid;
 }
 
-bool sameDepartureCluster(
-    const RuleEngine::DepartureClusterCommitment& a,
-    const RuleEngine::DepartureClusterCommitment& b) {
-    return a.owner_id == b.owner_id &&
-           a.owner_path_gen == b.owner_path_gen &&
-           a.other_id == b.other_id &&
-           a.other_path_gen == b.other_path_gen &&
-           a.seed_indices == b.seed_indices &&
-           a.cluster_indices == b.cluster_indices &&
-           a.waiter_stop_boundary_s == b.waiter_stop_boundary_s &&
-           a.waiter_stop_s == b.waiter_stop_s &&
-           a.owner_release_exit_s == b.owner_release_exit_s &&
-           a.other_release_exit_s == b.other_release_exit_s &&
-           a.active == b.active &&
-           a.handed_off_from_future == b.handed_off_from_future &&
-           a.handoff_already_inside == b.handoff_already_inside;
-}
-
-void logDepartureCluster(
-    const std::function<void(const std::string&)>& sink,
-    const char* event, const char* reason,
-    const RuleEngine::DepartureClusterCommitment& commitment,
-    double owner_s, double other_s) {
-    if (!sink) return;
-    std::ostringstream line;
-    line << std::fixed << std::setprecision(3)
-         << "[DEPARTURE_CLUSTER] event=" << event
-         << " reason=" << reason
-         << " owner=V" << commitment.owner_id
-         << " owner_gen=" << commitment.owner_path_gen
-         << " other=V" << commitment.other_id
-         << " other_gen=" << commitment.other_path_gen
-         << " zones=[";
-    for (size_t i = 0; i < commitment.cluster_indices.size(); ++i) {
-        if (i > 0) line << ",";
-        line << commitment.cluster_indices[i];
-    }
-    line << "] waiter_stop_boundary_s="
-         << commitment.waiter_stop_boundary_s
-         << " stop_s=" << commitment.waiter_stop_s
-         << " owner_release_exit_s=" << commitment.owner_release_exit_s
-         << " owner_s=" << owner_s
-         << " other_s=" << other_s
-         << " future_handoff="
-         << (commitment.handed_off_from_future ? "true" : "false")
-         << " already_inside="
-         << (commitment.handoff_already_inside ? "true" : "false");
-    sink(line.str());
-}
-
-void logA1Decision(const std::function<void(const std::string&)>& sink,
-                   const MultiVehicleConfig& cfg, const VehicleAgent& vehicle,
-                   const VehicleAgent* blocker, int blocker_id) {
-    if (!sink || vehicle.track.empty()) return;
-    const RoughWp pose = vehicle.track.poseAtS(vehicle.path_s);
-    const double dist_to_a1 = std::hypot(
-        pose.x - cfg.a1_pickup_center_x,
-        pose.y - cfg.a1_pickup_center_y);
-    std::ostringstream line;
-    line << std::fixed << std::setprecision(3)
-         << "[A1_DECISION] V" << vehicle.id
-         << " action=" << actionName(vehicle.requested_action)
-         << " reason=" << vehicle.reason
-         << " blocker=V" << blocker_id
-         << " phase=" << missionPhaseName(vehicle.mission_phase)
-         << " dist_to_A1=" << dist_to_a1
-         << " blocker_phase="
-         << (blocker ? missionPhaseName(blocker->mission_phase) : "UNKNOWN");
-    sink(line.str());
-}
-
 }  // namespace
 
 RuleEngine::SimSnapshot RuleEngine::snapshot() const {
-    return SimSnapshot{conflict_reservations_, departure_cluster_commitments_,
+    return SimSnapshot{conflict_reservations_, a1_.snapshot(),
                        following_pairs_, tokens_, conflicts_, now_};
 }
 
@@ -207,30 +129,8 @@ void RuleEngine::restore(const SimSnapshot& s) {
                                    incoming.second);
         }
     }
-    for (const auto& current : departure_cluster_commitments_) {
-        const auto incoming = s.departure_clusters.find(current.first);
-        if (current.second.active &&
-            (incoming == s.departure_clusters.end() ||
-             !incoming->second.active)) {
-            logDepartureCluster(coord_log_sink_, "RELEASE", "snapshot_restore",
-                                current.second, -1.0, -1.0);
-        }
-    }
-    for (const auto& incoming : s.departure_clusters) {
-        const auto current = departure_cluster_commitments_.find(incoming.first);
-        if (incoming.second.active &&
-            (current == departure_cluster_commitments_.end() ||
-             !current->second.active)) {
-            logDepartureCluster(coord_log_sink_, "CREATE", "snapshot_restore",
-                                incoming.second, -1.0, -1.0);
-        } else if (incoming.second.active && current != departure_cluster_commitments_.end() &&
-                   !sameDepartureCluster(current->second, incoming.second)) {
-            logDepartureCluster(coord_log_sink_, "HOLD", "snapshot_restore",
-                                incoming.second, -1.0, -1.0);
-        }
-    }
     conflict_reservations_ = s.reservations;
-    departure_cluster_commitments_ = s.departure_clusters;
+    a1_.restore(s.a1);
     following_pairs_ = s.following_pairs;
     tokens_ = s.tokens;
     conflicts_ = s.conflicts;
@@ -260,20 +160,20 @@ int RuleEngine::priorityWinner(const VehicleAgent& a,
                                const VehicleAgent& b) const {
     if (!cfg_.enable_priority_tiebreak) return -1;
 
-    // §9 破环车临时最高优先级:跨层一致——pairwise 也必须让破环车赢,否则它在资源层
-    // 赢了令牌、却被 pairwise 摁住,环还是破不了。
+    // 搂9 鐮寸幆杞︿复鏃舵渶楂樹紭鍏堢骇:璺ㄥ眰涓€鑷粹€斺€攑airwise 涔熷繀椤昏鐮寸幆杞﹁耽,鍚﹀垯瀹冨湪璧勬簮灞?
+    // 璧簡浠ょ墝銆佸嵈琚?pairwise 鎽佷綇,鐜繕鏄牬涓嶄簡銆?
     if (a.deadlock_breaker != b.deadlock_breaker) return a.deadlock_breaker ? a.id : b.id;
 
-    // 资源前置约束(非任意优先级,§4/§6/§7):若一车要去的目标库位正被另一车占着
-    // (a.target==b.current),占用者必须先清出该位、入库者让行——否则入库者抢先开到
-    // 库位口却进不去(位被占),占用者又被它让停在口内,直接死锁。这是 slot 资源依赖,
-    // 当任务只指向空/即将空的库位时无环;故置于严格全序之上作 override(若与全序冲突成环
-    // =任务分配层的循环占位问题,由第5步环检测断言抓出)。
+    // 璧勬簮鍓嶇疆绾︽潫(闈炰换鎰忎紭鍏堢骇,搂4/搂6/搂7):鑻ヤ竴杞﹁鍘荤殑鐩爣搴撲綅姝ｈ鍙︿竴杞﹀崰鐫€
+    // (a.target==b.current),鍗犵敤鑰呭繀椤诲厛娓呭嚭璇ヤ綅銆佸叆搴撹€呰琛屸€斺€斿惁鍒欏叆搴撹€呮姠鍏堝紑鍒?
+    // 搴撲綅鍙ｅ嵈杩涗笉鍘?浣嶈鍗?,鍗犵敤鑰呭張琚畠璁╁仠鍦ㄥ彛鍐?鐩存帴姝婚攣銆傝繖鏄?slot 璧勬簮渚濊禆,
+    // 褰撲换鍔″彧鎸囧悜绌?鍗冲皢绌虹殑搴撲綅鏃舵棤鐜?鏁呯疆浜庝弗鏍煎叏搴忎箣涓婁綔 override(鑻ヤ笌鍏ㄥ簭鍐茬獊鎴愮幆
+    // =浠诲姟鍒嗛厤灞傜殑寰幆鍗犱綅闂,鐢辩5姝ョ幆妫€娴嬫柇瑷€鎶撳嚭)銆?
     {
         const bool a_wants_b_slot = (a.target_slot == b.current_slot);
         const bool b_wants_a_slot = (b.target_slot == a.current_slot);
-        if (a_wants_b_slot && !b_wants_a_slot) return b.id;  // b 占用者,先清出
-        if (b_wants_a_slot && !a_wants_b_slot) return a.id;  // a 占用者,先清出
+        if (a_wants_b_slot && !b_wants_a_slot) return b.id;  // b 鍗犵敤鑰?鍏堟竻鍑?
+        if (b_wants_a_slot && !a_wants_b_slot) return a.id;  // a 鍗犵敤鑰?鍏堟竻鍑?
     }
 
     // Ordinary-road authority is the existing deterministic total order.
@@ -284,19 +184,10 @@ int RuleEngine::priorityWinner(const VehicleAgent& a,
 
 int RuleEngine::unifiedPriority(const VehicleAgent& a,
                                 const VehicleAgent& b) const {
-    // 协调图第2步:严格全序 ≺。按可证「反对称+传递+完全」的字典序键比较,id 作唯一终裁。
-    // 任意时刻"谁让谁"关系由全序导出 ⇒ 必无环 ⇒ 无死锁(见 草履虫规则_协调图统一架构
-    // 设计 §2.3/§5)。
-    // 普通道路基础键(越小越优先 / 越先走):
-    //   1) 载货优先;2) 已完成任务少者优先(摊平工作量);3) id 最小(确定性终裁)。
-    // wait_time 仍用于日志、统计和死锁/饥饿诊断，但不得让本次
-    // YIELD/CREEP/STOP 自己积累出的等待时间反向翻转下一滚动周期的优先级。
-    // 注:原"占用者先清出"的成对 slot 规则会破坏传递性(成对、非全序),已移出本函数,
-    //     在 priorityWinner 中作显式**资源前置约束** override(见那里)。
-    auto key = [&](const VehicleAgent& v) {
-        return std::make_tuple(v.loaded ? 0 : 1, // 载货优先
-                               v.task_count,     // 任务少优先
-                               v.id);            // 唯一终裁
+    // Deterministic total order: loaded first, fewer completed tasks first,
+    // then vehicle id as the unique final tie-breaker.
+    auto key = [](const VehicleAgent& v) {
+        return std::make_tuple(v.loaded ? 0 : 1, v.task_count, v.id);
     };
     return key(a) < key(b) ? a.id : b.id;
 }
@@ -336,27 +227,27 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
     constexpr double kMergeGap = kStep * 2.25;
     std::vector<ConflictZone> zones;
 
-    // 两条路径都是「完全固定、已知」的;它们之间的冲突集 C_ij 是静态几何量,与时间/
-    // 速度/朝向/当前位置都无关 → 在整段路径 [0,L]×[0,L] 上一次算定即可(由
-    // conflictBlocksCanonical 按 path_gen 缓存)。当前位置相关的裁剪(裁掉已清出的块、
-    // 把入口夹到车尾起点)在 findConflictZones 里按调用时的 path_s 施加。
-    // (历史教训:早先按 current_speed×prediction_horizon 裁剪扫描范围,会在让行车停在
-    // 停止线 speed→0 时让冲突区凭空消失 → 原子门预约被释放 → 让行车蹭过停止线挤进区
-    // → 三车旋转楔死。改扫整段固定路径根治;此处进一步缓存,几何恒定可见且不每拍重算。)
+    // 涓ゆ潯璺緞閮芥槸銆屽畬鍏ㄥ浐瀹氥€佸凡鐭ャ€嶇殑;瀹冧滑涔嬮棿鐨勫啿绐侀泦 C_ij 鏄潤鎬佸嚑浣曢噺,涓庢椂闂?
+    // 閫熷害/鏈濆悜/褰撳墠浣嶇疆閮芥棤鍏?鈫?鍦ㄦ暣娈佃矾寰?[0,L]脳[0,L] 涓婁竴娆＄畻瀹氬嵆鍙?鐢?
+    // conflictBlocksCanonical 鎸?path_gen 缂撳瓨)銆傚綋鍓嶄綅缃浉鍏崇殑瑁佸壀(瑁佹帀宸叉竻鍑虹殑鍧椼€?
+    // 鎶婂叆鍙ｅす鍒拌溅灏捐捣鐐?鍦?findConflictZones 閲屾寜璋冪敤鏃剁殑 path_s 鏂藉姞銆?
+    // (鍘嗗彶鏁欒:鏃╁厛鎸?current_speed脳prediction_horizon 瑁佸壀鎵弿鑼冨洿,浼氬湪璁╄杞﹀仠鍦?
+    // 鍋滄绾?speed鈫? 鏃惰鍐茬獊鍖哄嚟绌烘秷澶?鈫?鍘熷瓙闂ㄩ绾﹁閲婃斁 鈫?璁╄杞﹁弓杩囧仠姝㈢嚎鎸よ繘鍖?
+    // 鈫?涓夎溅鏃嬭浆妤旀銆傛敼鎵暣娈靛浐瀹氳矾寰勬牴娌?姝ゅ杩涗竴姝ョ紦瀛?鍑犱綍鎭掑畾鍙涓斾笉姣忔媿閲嶇畻銆?
     const double s_self_end = self.track.length();
     const double s_other_end = other.track.length();
     const double s_self_begin = 0.0;
     const double s_other_begin = 0.0;
 
-    // 广相剪枝(扫全程后的性能护栏):两车「剩余路径」的轴对齐包围盒各按「车身对角线
-    // 半径 + 冲突余量」外胀;若两盒分离,则任意位姿下车身 OBB 绝无可能重叠 → 直接返回空,
-    // 免去对八竿子打不着的远车做整段精扫。这只省算力,绝不改变任何冲突判定结果。
+    // 骞跨浉鍓灊(鎵叏绋嬪悗鐨勬€ц兘鎶ゆ爮):涓よ溅銆屽墿浣欒矾寰勩€嶇殑杞村榻愬寘鍥寸洅鍚勬寜銆岃溅韬瑙掔嚎
+    // 鍗婂緞 + 鍐茬獊浣欓噺銆嶅鑳€;鑻ヤ袱鐩掑垎绂?鍒欎换鎰忎綅濮夸笅杞﹁韩 OBB 缁濇棤鍙兘閲嶅彔 鈫?鐩存帴杩斿洖绌?
+    // 鍏嶅幓瀵瑰叓绔垮瓙鎵撲笉鐫€鐨勮繙杞﹀仛鏁存绮炬壂銆傝繖鍙渷绠楀姏,缁濅笉鏀瑰彉浠讳綍鍐茬獊鍒ゅ畾缁撴灉銆?
     {
         const double inf = std::numeric_limits<double>::infinity();
         const double infl =
             0.5 * std::hypot(mp_.vehicle_length, mp_.vehicle_width) +
             cfg_.conflict_margin;
-        constexpr double kCoarse = 0.15;  // 粗采样建包围盒
+        constexpr double kCoarse = 0.15;  // 绮楅噰鏍峰缓鍖呭洿鐩?
         double ax0 = inf, ay0 = inf, ax1 = -inf, ay1 = -inf;
         for (double s = s_self_begin; s <= s_self_end + 1e-9; s += kCoarse) {
             const RoughWp p = self.track.poseAtS(std::min(s, s_self_end));
@@ -371,7 +262,7 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
         }
         if (ax1 + infl < bx0 - infl || bx1 + infl < ax0 - infl ||
             ay1 + infl < by0 - infl || by1 + infl < ay0 - infl) {
-            return zones;  // 包围盒分离 → 无冲突
+            return zones;  // 鍖呭洿鐩掑垎绂?鈫?鏃犲啿绐?
         }
     }
 
@@ -500,9 +391,9 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
         }
     }
 
-    // 为每个块算「同向」标志(静态):在块中点测两路径行进朝向(REVERSE 段切线+π),
-    // 同向(dot>0.7)=正对角带=同车道跟车;否则交叉/对向。供 resolveFollowing 与 pairwise
-    // 共用作稳定判据——不再用随当前位姿闪烁的瞬时朝向(交叉/汇入处会瞬时对齐而误判)。
+    // 涓烘瘡涓潡绠椼€屽悓鍚戙€嶆爣蹇?闈欐€?:鍦ㄥ潡涓偣娴嬩袱璺緞琛岃繘鏈濆悜(REVERSE 娈靛垏绾?蟺),
+    // 鍚屽悜(dot>0.7)=姝ｅ瑙掑甫=鍚岃溅閬撹窡杞?鍚﹀垯浜ゅ弶/瀵瑰悜銆備緵 resolveFollowing 涓?pairwise
+    // 鍏辩敤浣滅ǔ瀹氬垽鎹€斺€斾笉鍐嶇敤闅忓綋鍓嶄綅濮块棯鐑佺殑鐬椂鏈濆悜(浜ゅ弶/姹囧叆澶勪細鐬椂瀵归綈鑰岃鍒?銆?
     constexpr double kPi = 3.14159265358979323846;
     auto pathHeadingAtS = [&](const VehicleAgent& v, double s) {
         double h = v.track.poseAtS(s).theta;
@@ -523,47 +414,9 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::computeConflictZonesFull(
     return zones;
 }
 
-RuleEngine::FutureA1ZoneSelection RuleEngine::selectFutureA1ProtectedZones(
-    const std::vector<ConflictZone>& canonical_zones,
-    bool preview_is_lo, double protected_until,
-    double other_path_s) const {
-    FutureA1ZoneSelection selection;
-    selection.normalized_zones.reserve(canonical_zones.size());
-    std::vector<FutureA1ConflictInterval> intervals;
-    intervals.reserve(canonical_zones.size());
-    for (const ConflictZone& canonical : canonical_zones) {
-        ConflictZone normalized = canonical;
-        if (!preview_is_lo) {
-            std::swap(normalized.s_self_enter, normalized.s_other_enter);
-            std::swap(normalized.s_self_exit, normalized.s_other_exit);
-        }
-        selection.normalized_zones.push_back(normalized);
-        intervals.push_back(FutureA1ConflictInterval{
-            normalized.s_self_enter, normalized.s_self_exit,
-            normalized.s_other_enter, normalized.s_other_exit});
-    }
-
-    const FutureA1ProtectedCluster cluster =
-        selectFutureA1ProtectedCluster(intervals, protected_until,
-                                       other_path_s);
-    selection.seed_indices = cluster.seed_indices;
-    selection.protected_indices = cluster.protected_indices;
-    selection.other_already_inside = cluster.other_already_inside;
-    if (cluster.upstream_other_enter) {
-        for (size_t index : selection.protected_indices) {
-            if (std::abs(selection.normalized_zones[index].s_other_enter -
-                         *cluster.upstream_other_enter) <= 1e-9) {
-                selection.upstream_index = static_cast<int>(index);
-                break;
-            }
-        }
-    }
-    return selection;
-}
-
 const std::vector<RuleEngine::ConflictZone>& RuleEngine::conflictBlocksCanonical(
     const VehicleAgent& lo, const VehicleAgent& hi) const {
-    // lo.id < hi.id(调用方保证)。按 path_gen 缓存:任一方换了固定路径才重算。
+    // lo.id < hi.id(璋冪敤鏂逛繚璇?銆傛寜 path_gen 缂撳瓨:浠讳竴鏂规崲浜嗗浐瀹氳矾寰勬墠閲嶇畻銆?
     const std::pair<int, int> key{lo.id, hi.id};
     ConflictCacheEntry& e = conflict_cache_[key];
     if (e.gen_lo != lo.path_gen || e.gen_hi != hi.path_gen) {
@@ -577,19 +430,19 @@ const std::vector<RuleEngine::ConflictZone>& RuleEngine::conflictBlocksCanonical
 
 std::vector<RuleEngine::ConflictZone> RuleEngine::findConflictZones(
     const VehicleAgent& self, const VehicleAgent& other) const {
-    // 取静态 C_ij(缓存),按 self/other 朝向取用,再按当前位置裁剪——产物与历史
-    // 「逐拍沿剩余路径全程精扫」在同一离散精度下等价(窗口只截低端、不会拆分连通块)。
+    // 鍙栭潤鎬?C_ij(缂撳瓨),鎸?self/other 鏈濆悜鍙栫敤,鍐嶆寜褰撳墠浣嶇疆瑁佸壀鈥斺€斾骇鐗╀笌鍘嗗彶
+    // 銆岄€愭媿娌垮墿浣欒矾寰勫叏绋嬬簿鎵€嶅湪鍚屼竴绂绘暎绮惧害涓嬬瓑浠?绐楀彛鍙埅浣庣銆佷笉浼氭媶鍒嗚繛閫氬潡)銆?
     const bool self_is_lo = self.id < other.id;
     const VehicleAgent& lo = self_is_lo ? self : other;
     const VehicleAgent& hi = self_is_lo ? other : self;
     const std::vector<ConflictZone>& canon = conflictBlocksCanonical(lo, hi);
 
-    // 车尾参考:车身向后伸 rear_ext。某车「已完全清出某块」= 车尾(s-rear_ext)越过该块
-    // 在其路径上的出口 → 该块对它不再是冲突,丢弃。
-    // 注:块的入口/出口保持「静态」(不再夹到 path_s-rear_ext)——夹紧会让上报的 se 随车
-    // 前移,导致让行方的停止线(se-front)随它一起漂、永远追不上、最终蹭进区(实测 V1↔V5
-    // 蹭撞的一半根因)。停止线必须是固定弧长,让行方才能稳稳停在区外。committed/cleared 仍按
-    // 静态 se/sx 与当前 path_s 比较,语义不变。
+    // 杞﹀熬鍙傝€?杞﹁韩鍚戝悗浼?rear_ext銆傛煇杞︺€屽凡瀹屽叏娓呭嚭鏌愬潡銆? 杞﹀熬(s-rear_ext)瓒婅繃璇ュ潡
+    // 鍦ㄥ叾璺緞涓婄殑鍑哄彛 鈫?璇ュ潡瀵瑰畠涓嶅啀鏄啿绐?涓㈠純銆?
+    // 娉?鍧楃殑鍏ュ彛/鍑哄彛淇濇寔銆岄潤鎬併€?涓嶅啀澶瑰埌 path_s-rear_ext)鈥斺€斿す绱т細璁╀笂鎶ョ殑 se 闅忚溅
+    // 鍓嶇Щ,瀵艰嚧璁╄鏂圭殑鍋滄绾?se-front)闅忓畠涓€璧锋紓銆佹案杩滆拷涓嶄笂銆佹渶缁堣弓杩涘尯(瀹炴祴 V1鈫擵5
+    // 韫挒鐨勪竴鍗婃牴鍥?銆傚仠姝㈢嚎蹇呴』鏄浐瀹氬姬闀?璁╄鏂规墠鑳界ǔ绋冲仠鍦ㄥ尯澶栥€俢ommitted/cleared 浠嶆寜
+    // 闈欐€?se/sx 涓庡綋鍓?path_s 姣旇緝,璇箟涓嶅彉銆?
     const double rear_ext = mp_.body_rear_ext();
     const double self_begin = std::max(0.0, self.path_s - rear_ext);
     const double other_begin = std::max(0.0, other.path_s - rear_ext);
@@ -598,11 +451,11 @@ std::vector<RuleEngine::ConflictZone> RuleEngine::findConflictZones(
     out.reserve(canon.size());
     for (const ConflictZone& cz : canon) {
         ConflictZone z = cz;
-        if (!self_is_lo) {  // 朝向反转:canonical 以 lo 为 self,这里 self 是 hi
+        if (!self_is_lo) {  // 鏈濆悜鍙嶈浆:canonical 浠?lo 涓?self,杩欓噷 self 鏄?hi
             std::swap(z.s_self_enter, z.s_other_enter);
             std::swap(z.s_self_exit, z.s_other_exit);
         }
-        // 任一方已完全清出该块 → 不再冲突,丢弃。(入口不夹紧,保持静态)
+        // 浠讳竴鏂瑰凡瀹屽叏娓呭嚭璇ュ潡 鈫?涓嶅啀鍐茬獊,涓㈠純銆?鍏ュ彛涓嶅す绱?淇濇寔闈欐€?
         if (z.s_self_exit < self_begin || z.s_other_exit < other_begin) continue;
         out.push_back(z);
     }
@@ -940,244 +793,30 @@ void RuleEngine::applyActionRequest(VehicleAgent& v, VehicleAction action,
 
 void RuleEngine::refreshDepartureClusterCommitments(
     std::vector<VehicleAgent>& vehicles) {
-    auto agentById = [&](int id) -> VehicleAgent* {
-        for (VehicleAgent& v : vehicles) {
-            if (v.id == id) return &v;
-        }
-        return nullptr;
-    };
-    auto eraseWithEvent = [&](auto it, const char* event,
-                              const char* reason) {
-        VehicleAgent* owner = agentById(it->second.owner_id);
-        VehicleAgent* other = agentById(it->second.other_id);
-        logDepartureCluster(coord_log_sink_, event, reason, it->second,
-                            owner ? owner->path_s : -1.0,
-                            other ? other->path_s : -1.0);
-        return departure_cluster_commitments_.erase(it);
-    };
-
-    for (auto it = departure_cluster_commitments_.begin();
-         it != departure_cluster_commitments_.end();) {
-        DepartureClusterCommitment& c = it->second;
-        VehicleAgent* owner = agentById(c.owner_id);
-        VehicleAgent* other = agentById(c.other_id);
-        if (owner == nullptr || other == nullptr || !owner->active() ||
-            !other->active() || owner->track.empty() || other->track.empty()) {
-            it = eraseWithEvent(it, c.active ? "INVALIDATE" : "INVALIDATE",
-                                "vehicle_or_path_invalid");
-            continue;
-        }
-
-        if (!c.active) {
-            if (owner->mission_phase == MissionPhase::TO_B &&
-                owner->path_gen == c.owner_path_gen &&
-                other->path_gen == c.other_path_gen &&
-                other->mission_phase == MissionPhase::TO_A1) {
-                c.active = true;
-                c.handoff_already_inside = false;
-                for (const auto& z : c.intervals) {
-                    if (other->path_s > z.other_enter + 1e-9 &&
-                        other->path_s <= z.other_exit + 1e-9) {
-                        c.handoff_already_inside = true;
-                        break;
-                    }
-                }
-                logDepartureCluster(
-                    coord_log_sink_, "CREATE",
-                    c.handoff_already_inside ? "handoff_already_inside"
-                                             : "future_handoff",
-                    c, owner->path_s, other->path_s);
-                ++it;
-                continue;
-            }
-            const bool preview_still_matches =
-                (owner->mission_phase == MissionPhase::TO_A1 ||
-                 owner->mission_phase == MissionPhase::PICKUP_DWELL) &&
-                owner->pending_dropoff_valid &&
-                !owner->pending_dropoff_track.empty() &&
-                owner->path_gen + 1 == c.owner_path_gen &&
-                other->path_gen == c.other_path_gen &&
-                other->mission_phase == MissionPhase::TO_A1 &&
-                (owner->mission_phase == MissionPhase::PICKUP_DWELL ||
-                 (future_a1_commitment_.valid() &&
-                  future_a1_commitment_.owner_id == owner->id &&
-                  future_a1_commitment_.owner_path_gen == owner->path_gen));
-            if (!preview_still_matches) {
-                it = eraseWithEvent(it, "INVALIDATE", "staged_handoff_invalid");
-            } else {
-                ++it;
-            }
-            continue;
-        }
-
-        if (!departureClusterGenerationsMatch(
-                c.owner_path_gen, owner->path_gen,
-                c.other_path_gen, other->path_gen)) {
-            it = eraseWithEvent(it, "INVALIDATE", "path_gen_changed");
-        } else if (owner->mission_phase != MissionPhase::TO_B ||
-                   other->mission_phase != MissionPhase::TO_A1) {
-            it = eraseWithEvent(it, "INVALIDATE", "mission_phase_changed");
-        } else if (departureClusterCleared(
-                       owner->path_s, c.owner_release_exit_s,
-                       other->path_s, c.other_release_exit_s)) {
-            const char* reason = owner->path_s > c.owner_release_exit_s + 1e-9
-                ? "owner_cleared_cluster" : "other_cleared_cluster";
-            it = eraseWithEvent(it, "RELEASE", reason);
-        } else {
-            ++it;
-        }
-    }
-
-    // Fallback for a TO_B activation that was not represented in the current
-    // Future snapshot. It deterministically rebuilds the same protected
-    // closure from the actual prepared track and the existing full-zone cache.
-    constexpr double kStopBuffer = 0.01;
-    for (VehicleAgent& owner : vehicles) {
-        if (!owner.active() || owner.track.empty() ||
-            owner.mission_phase != MissionPhase::TO_B ||
-            !owner.a1_departure_committed ||
-            owner.a1_departure_priority_until_s <= 1e-9) {
-            continue;
-        }
-        for (VehicleAgent& other : vehicles) {
-            if (other.id == owner.id || !other.active() || other.track.empty() ||
-                other.mission_phase != MissionPhase::TO_A1) {
-                continue;
-            }
-            const std::pair<int, int> key{std::min(owner.id, other.id),
-                                          std::max(owner.id, other.id)};
-            if (departure_cluster_commitments_.count(key) != 0) continue;
-            const bool owner_is_lo = owner.id < other.id;
-            const VehicleAgent& lo = owner_is_lo ? owner : other;
-            const VehicleAgent& hi = owner_is_lo ? other : owner;
-            const auto& blocks = conflictBlocksCanonical(lo, hi);
-            const FutureA1ZoneSelection selected =
-                selectFutureA1ProtectedZones(
-                    blocks, owner_is_lo,
-                    owner.a1_departure_priority_until_s, other.path_s);
-            if (selected.protected_indices.empty() ||
-                selected.upstream_index < 0) {
-                continue;
-            }
-            DepartureClusterCommitment c;
-            c.owner_id = owner.id;
-            c.owner_path_gen = owner.path_gen;
-            c.other_id = other.id;
-            c.other_path_gen = other.path_gen;
-            c.seed_indices = selected.seed_indices;
-            c.cluster_indices = selected.protected_indices;
-            c.waiter_stop_boundary_s =
-                selected.normalized_zones[static_cast<size_t>(
-                    selected.upstream_index)].s_other_enter;
-            c.waiter_stop_s =
-                std::max(0.0, c.waiter_stop_boundary_s - kStopBuffer);
-            c.active = true;
-            c.handoff_already_inside = selected.other_already_inside;
-            for (size_t index : selected.protected_indices) {
-                const ConflictZone& z = selected.normalized_zones[index];
-                c.intervals.push_back(FutureA1ConflictInterval{
-                    z.s_self_enter, z.s_self_exit,
-                    z.s_other_enter, z.s_other_exit});
-                c.owner_release_exit_s =
-                    std::max(c.owner_release_exit_s, z.s_self_exit);
-                c.other_release_exit_s =
-                    std::max(c.other_release_exit_s, z.s_other_exit);
-            }
-            departure_cluster_commitments_[key] = c;
-            logDepartureCluster(
-                coord_log_sink_, "CREATE",
-                c.handoff_already_inside ? "handoff_already_inside"
-                                         : "deterministic_rebuild",
-                c, owner.path_s, other.path_s);
-        }
-    }
+    a1_.refreshDepartureClusters(
+        vehicles, [this](const VehicleAgent& first,
+                         const VehicleAgent& second) {
+            const VehicleAgent& lo = first.id < second.id ? first : second;
+            const VehicleAgent& hi = first.id < second.id ? second : first;
+            const auto& cached = conflictBlocksCanonical(lo, hi);
+            return std::vector<ConflictZone>(cached.begin(), cached.end());
+        });
+    return;
 }
 
 int RuleEngine::departureClusterOwnerForPair(const VehicleAgent& a,
                                              const VehicleAgent& b) const {
-    const std::pair<int, int> key{std::min(a.id, b.id), std::max(a.id, b.id)};
-    const auto it = departure_cluster_commitments_.find(key);
-    if (it == departure_cluster_commitments_.end() || !it->second.active) {
-        return -1;
-    }
-    const DepartureClusterCommitment& c = it->second;
-    const VehicleAgent* owner = a.id == c.owner_id ? &a :
-                                b.id == c.owner_id ? &b : nullptr;
-    const VehicleAgent* other = a.id == c.other_id ? &a :
-                                b.id == c.other_id ? &b : nullptr;
-    if (owner == nullptr || other == nullptr ||
-        owner->path_gen != c.owner_path_gen ||
-        other->path_gen != c.other_path_gen) {
-        return -1;
-    }
-    if (futureA1OtherInsideCluster(c.intervals, other->path_s)) {
-        return other->id;  // Actual occupancy is stronger than handoff.
-    }
-    return owner->id;
+    return a1_.departureAuthorityForPair(a, b).owner_id;
 }
 
 RuleEngine::A1LaunchAdmission RuleEngine::checkA1LaunchAdmission(
     const VehicleAgent& service_owner,
     const VehicleAgent& launch_candidate) const {
-    A1LaunchAdmission result;
-    if (!launch_candidate.active() || launch_candidate.track.empty() ||
-        launch_candidate.mission_phase != MissionPhase::TO_A1 ||
-        service_owner.id == launch_candidate.id ||
-        service_owner.a1_departure_priority_until_s <= 1e-9) {
-        return result;
-    }
-
-    VehicleAgent exit = service_owner;
-    if ((service_owner.mission_phase == MissionPhase::TO_A1 ||
-         service_owner.mission_phase == MissionPhase::PICKUP_DWELL) &&
-        service_owner.pending_dropoff_valid &&
-        !service_owner.pending_dropoff_track.empty()) {
-        exit.track = service_owner.pending_dropoff_track;
-        exit.path_s = 0.0;
-        exit.path_gen = service_owner.path_gen + 1;
-        exit.mode = VehicleMode::ACTIVE;
-        exit.mission_phase = MissionPhase::TO_B;
-        result.owner_uses_pending_preview = true;
-    } else if (service_owner.active() &&
-               service_owner.mission_phase == MissionPhase::TO_B &&
-               service_owner.a1_departure_committed &&
-               !service_owner.track.empty() &&
-               service_owner.path_s <
-                   service_owner.a1_departure_priority_until_s - 1e-9) {
-        // Use the actual TO_B path and current progress while its protected
-        // prefix is still occupied.
-    } else {
-        return result;
-    }
-
-    const bool exit_is_lo = exit.id < launch_candidate.id;
-    const VehicleAgent& lo = exit_is_lo ? exit : launch_candidate;
-    const VehicleAgent& hi = exit_is_lo ? launch_candidate : exit;
-    const std::vector<ConflictZone> blocks = computeConflictZonesFull(lo, hi);
-    const FutureA1ZoneSelection selected = selectFutureA1ProtectedZones(
-        blocks, exit_is_lo, service_owner.a1_departure_priority_until_s,
-        launch_candidate.path_s);
-    const bool candidate_has_cleared_slot =
-        launch_candidate.path_s + 1e-9 >=
-        launch_candidate.slot_departure_clear_s;
-    result.actual_occupancy_priority =
-        selected.other_already_inside && candidate_has_cleared_slot;
-    if (result.actual_occupancy_priority) return result;
-
-    for (size_t index : selected.protected_indices) {
-        const ConflictZone& zone = selected.normalized_zones[index];
-        if (zone.s_other_enter >
-            launch_candidate.slot_departure_clear_s + 1e-9) {
-            continue;
-        }
-        if (!result.owner_uses_pending_preview &&
-            service_owner.path_s > zone.s_self_exit + 1e-9) {
-            continue;
-        }
-        ++result.protected_zone_count;
-    }
-    result.departure_resource_conflict = result.protected_zone_count > 0;
-    return result;
+    return a1_.checkLaunchAdmission(
+        service_owner, launch_candidate,
+        [this](const VehicleAgent& first, const VehicleAgent& second) {
+            return computeConflictZonesFull(first, second);
+        });
 }
 
 RuleEngine::SlotDepartureAdmission RuleEngine::checkSlotDepartureAdmission(
@@ -1269,37 +908,17 @@ RuleEngine::SlotDepartureAdmission RuleEngine::checkSlotDepartureAdmission(
 
 void RuleEngine::enforceDepartureClusterCommitments(
     std::vector<VehicleAgent>& vehicles, double dt) {
-    auto agentById = [&](int id) -> VehicleAgent* {
-        for (VehicleAgent& v : vehicles) {
-            if (v.id == id) return &v;
-        }
-        return nullptr;
-    };
-    for (auto& entry : departure_cluster_commitments_) {
-        DepartureClusterCommitment& c = entry.second;
-        if (!c.active) continue;
-        VehicleAgent* owner = agentById(c.owner_id);
-        VehicleAgent* other = agentById(c.other_id);
-        if (owner == nullptr || other == nullptr) continue;
-        const bool already_inside =
-            futureA1OtherInsideCluster(c.intervals, other->path_s);
-        if (already_inside) continue;
-
-        const double distance = c.waiter_stop_s - other->path_s;
-        const double speed = std::max(0.0, other->current_speed);
-        const double stopping_distance =
-            speed * speed / (2.0 * std::max(1e-6, cfg_.max_decel)) +
-            speed * dt;
-        if (distance > stopping_distance + 1e-9) continue;
-        applyActionRequest(*other, VehicleAction::STOP,
-                           "departure_cluster_priority", owner->id);
-        if (!c.hold_logged) {
-            logDepartureCluster(coord_log_sink_, "HOLD",
-                                "cluster_stop_boundary", c,
-                                owner->path_s, other->path_s);
-            c.hold_logged = true;
+    const auto requests = a1_.enforceDepartureClusters(vehicles, dt);
+    for (const A1ActionRequest& request : requests) {
+        for (VehicleAgent& vehicle : vehicles) {
+            if (vehicle.id == request.vehicle_id) {
+                applyActionRequest(vehicle, request.action, request.reason,
+                                   request.blocker_id);
+                break;
+            }
         }
     }
+    return;
 }
 
 
@@ -1362,7 +981,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
     // ConflictZone arc intervals already represent rear-axle reference poses
     // whose inflated complete-body OBBs overlap. Do not expand them by another
     // vehicle length when deciding entry, clearance, or the stop line.
-    constexpr double kStopBuffer = 0.01;
+    const double a1_control_stop_margin = cfg_.a1_control_stop_margin;
     auto insideInterval = [](const VehicleAgent& v, double enter_s,
                              double exit_s) {
         return v.path_s > enter_s + 1e-9 &&
@@ -1371,8 +990,10 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
     auto brakeBefore = [&](VehicleAgent& v, double conflict_enter_s,
                            int other_id) {
         if (v.deadlock_breaker) return;
-        const double stop_s = std::max(0.0, conflict_enter_s - kStopBuffer);
-        const double distance = stop_s - v.path_s;
+        const double physical_entry_s = conflict_enter_s;
+        const double control_stop_s = std::max(
+            0.0, physical_entry_s - a1_control_stop_margin);
+        const double distance = control_stop_s - v.path_s;
         const double speed = std::max(0.0, v.current_speed);
         const double stopping_distance =
             speed * speed / (2.0 * std::max(1e-6, cfg_.max_decel)) +
@@ -1440,80 +1061,19 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
 
     auto futureA1OwnerForPair = [&](const VehicleAgent& a,
                                     const VehicleAgent& b) {
-        if (!future_a1_commitment_.valid() ||
-            a.mission_phase != MissionPhase::TO_A1 ||
-            b.mission_phase != MissionPhase::TO_A1) {
-            return -1;
-        }
-        const VehicleAgent* owner = nullptr;
-        const VehicleAgent* other = nullptr;
-        if (a.id == future_a1_commitment_.owner_id &&
-            a.path_gen == future_a1_commitment_.owner_path_gen) {
-            owner = &a;
-            other = &b;
-        } else if (b.id == future_a1_commitment_.owner_id &&
-                   b.path_gen == future_a1_commitment_.owner_path_gen) {
-            owner = &b;
-            other = &a;
-        }
-        if (owner == nullptr || !owner->pending_dropoff_valid ||
-            owner->pending_dropoff_track.empty() ||
-            owner->a1_departure_priority_until_s <= 1e-9) {
-            return -1;
-        }
-
-        VehicleAgent exit_preview = *owner;
-        exit_preview.track = owner->pending_dropoff_track;
-        exit_preview.path_s = 0.0;
-        exit_preview.path_gen = owner->path_gen + 1;
-        exit_preview.mode = VehicleMode::ACTIVE;
-        exit_preview.mission_phase = MissionPhase::TO_B;
-
-        const bool preview_is_lo = exit_preview.id < other->id;
-        const VehicleAgent& lo = preview_is_lo ? exit_preview : *other;
-        const VehicleAgent& hi = preview_is_lo ? *other : exit_preview;
-        const std::pair<int, int> cache_key{lo.id, hi.id};
-        ConflictCacheEntry& cache = future_a1_conflict_cache_[cache_key];
-        if (cache.gen_lo != lo.path_gen || cache.gen_hi != hi.path_gen) {
-            cache.blocks = computeConflictZonesFull(lo, hi);
-            cache.gen_lo = lo.path_gen;
-            cache.gen_hi = hi.path_gen;
-        }
-
-        const FutureA1ZoneSelection future_zones =
-            selectFutureA1ProtectedZones(
-                cache.blocks, preview_is_lo,
-                owner->a1_departure_priority_until_s, other->path_s);
-        if (future_zones.protected_indices.empty() ||
-            future_zones.other_already_inside) {
-            return -1;  // Actual occupancy remains stronger.
-        }
-
-        // The other vehicle may be outside the prepared exit conflict but
-        // already physically committed to a conflict on the owner's current
-        // TO_A1 leg. Actual occupancy must remain stronger than the future
-        // commitment in that case as well.
-        const bool owner_is_lo = owner->id < other->id;
-        const VehicleAgent& ordinary_lo = owner_is_lo ? *owner : *other;
-        const VehicleAgent& ordinary_hi = owner_is_lo ? *other : *owner;
-        const auto& ordinary_blocks =
-            conflictBlocksCanonical(ordinary_lo, ordinary_hi);
-        for (const ConflictZone& canonical : ordinary_blocks) {
-            const double owner_exit = owner_is_lo
-                ? canonical.s_self_exit : canonical.s_other_exit;
-            const double other_enter = owner_is_lo
-                ? canonical.s_other_enter : canonical.s_self_enter;
-            const double other_exit = owner_is_lo
-                ? canonical.s_other_exit : canonical.s_self_exit;
-            if (owner->path_s > owner_exit + 1e-9 ||
-                other->path_s > other_exit + 1e-9) {
-                continue;
-            }
-            if (other->path_s > other_enter + 1e-9) {
-                return -1;
-            }
-        }
-        return owner->id;
+        const auto compute_full =
+            [this](const VehicleAgent& first, const VehicleAgent& second) {
+                return computeConflictZonesFull(first, second);
+            };
+        const auto canonical =
+            [this](const VehicleAgent& first, const VehicleAgent& second) {
+                const VehicleAgent& lo = first.id < second.id ? first : second;
+                const VehicleAgent& hi = first.id < second.id ? second : first;
+                const auto& cached = conflictBlocksCanonical(lo, hi);
+                return std::vector<ConflictZone>(cached.begin(), cached.end());
+            };
+        return a1_.futureAuthorityForPair(
+            a, b, compute_full, canonical).owner_id;
     };
 
     auto eventZone = [&](const PairInteractionResult& interaction,
@@ -1651,18 +1211,16 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         brakeBefore(owner, owner_enter, waiter.id);
                         if (owner.reason ==
                             "time_brake_V" + std::to_string(waiter.id)) {
-                            if (shouldLogA1Decision(owner, waiter.id)) {
-                                logA1Decision(coord_log_sink_, cfg_, owner,
-                                              &waiter, waiter.id);
+                            if (a1_.shouldLogDecision(owner, waiter.id)) {
+                                a1_.logDecision(owner, &waiter, waiter.id);
                             }
                         }
                     } else {
                         brakeBefore(waiter, waiter_enter, owner.id);
                         if (waiter.reason ==
                             "time_brake_V" + std::to_string(owner.id)) {
-                            if (shouldLogA1Decision(waiter, owner.id)) {
-                                logA1Decision(coord_log_sink_, cfg_, waiter,
-                                              &owner, owner.id);
+                            if (a1_.shouldLogDecision(waiter, owner.id)) {
+                                a1_.logDecision(waiter, &owner, owner.id);
                             }
                         }
                     }
@@ -2449,13 +2007,13 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 brakeBefore(a, zone.s_self_enter, b.id);
                 brakeBefore(b, zone.s_other_enter, a.id);
                 if (a.reason == "time_brake_V" + std::to_string(b.id)) {
-                    if (shouldLogA1Decision(a, b.id)) {
-                        logA1Decision(coord_log_sink_, cfg_, a, &b, b.id);
+                    if (a1_.shouldLogDecision(a, b.id)) {
+                        a1_.logDecision(a, &b, b.id);
                     }
                 }
                 if (b.reason == "time_brake_V" + std::to_string(a.id)) {
-                    if (shouldLogA1Decision(b, a.id)) {
-                        logA1Decision(coord_log_sink_, cfg_, b, &a, a.id);
+                    if (a1_.shouldLogDecision(b, a.id)) {
+                        a1_.logDecision(b, &a, a.id);
                     }
                 }
                 continue;
@@ -2490,15 +2048,15 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             if (holder == a.id) {
                 brakeBefore(b, zone.s_other_enter, a.id);
                 if (b.reason == "time_brake_V" + std::to_string(a.id)) {
-                    if (shouldLogA1Decision(b, a.id)) {
-                        logA1Decision(coord_log_sink_, cfg_, b, &a, a.id);
+                    if (a1_.shouldLogDecision(b, a.id)) {
+                        a1_.logDecision(b, &a, a.id);
                     }
                 }
             } else {
                 brakeBefore(a, zone.s_self_enter, b.id);
                 if (a.reason == "time_brake_V" + std::to_string(b.id)) {
-                    if (shouldLogA1Decision(a, b.id)) {
-                        logA1Decision(coord_log_sink_, cfg_, a, &b, b.id);
+                    if (a1_.shouldLogDecision(a, b.id)) {
+                        a1_.logDecision(a, &b, b.id);
                     }
                 }
             }
@@ -2508,234 +2066,34 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
 
 void RuleEngine::enforceFutureA1Admission(
     std::vector<VehicleAgent>& vehicles, double dt) {
-    if (!future_a1_commitment_.valid()) return;
-
-    VehicleAgent* owner = nullptr;
-    for (VehicleAgent& v : vehicles) {
-        if (v.id == future_a1_commitment_.owner_id) {
-            owner = &v;
-            break;
-        }
-    }
-    if (owner == nullptr || owner->path_gen !=
-                                future_a1_commitment_.owner_path_gen ||
-        !owner->pending_dropoff_valid ||
-        owner->pending_dropoff_track.empty() ||
-        (owner->mission_phase != MissionPhase::TO_A1 &&
-         owner->mission_phase != MissionPhase::PICKUP_DWELL)) {
-        return;
-    }
-
-    // Compare the already-prepared A1->B exit against each other vehicle's
-    // current TO_A1 path. The synthetic generation is exactly the generation
-    // activatePreparedDropoffLeg() will assign to this frozen exit track.
-    VehicleAgent exit_preview = *owner;
-    exit_preview.track = owner->pending_dropoff_track;
-    exit_preview.path_s = 0.0;
-    exit_preview.path_gen = owner->path_gen + 1;
-    exit_preview.mode = VehicleMode::ACTIVE;
-    exit_preview.mission_phase = MissionPhase::TO_B;
-
-    const double protected_until = owner->a1_departure_priority_until_s;
-    if (protected_until <= 1e-9) return;
-    constexpr double kStopBuffer = 0.01;
-
-    for (VehicleAgent& other : vehicles) {
-        if (other.id == owner->id || !other.active() ||
-            other.mission_phase != MissionPhase::TO_A1 ||
-            other.track.empty()) {
-            continue;
-        }
-
-        const bool preview_is_lo = exit_preview.id < other.id;
-        const VehicleAgent& lo = preview_is_lo ? exit_preview : other;
-        const VehicleAgent& hi = preview_is_lo ? other : exit_preview;
-        const std::pair<int, int> key{lo.id, hi.id};
-        ConflictCacheEntry& cache = future_a1_conflict_cache_[key];
-        if (cache.gen_lo != lo.path_gen || cache.gen_hi != hi.path_gen) {
-            cache.blocks = computeConflictZonesFull(lo, hi);
-            cache.gen_lo = lo.path_gen;
-            cache.gen_hi = hi.path_gen;
-        }
-
-        const FutureA1ZoneSelection future_zones =
-            selectFutureA1ProtectedZones(cache.blocks, preview_is_lo,
-                                         protected_until, other.path_s);
-        std::optional<double> future_exit_enter_s;
-        ConflictZone future_selected;
-        if (future_zones.upstream_index >= 0) {
-            future_selected = future_zones.normalized_zones[
-                static_cast<size_t>(future_zones.upstream_index)];
-            future_exit_enter_s = future_selected.s_other_enter;
-        }
-
-        // Admission must also keep the non-owner upstream of any still-relevant
-        // conflict on the owner's current TO_A1 leg. These are the same static
-        // OBB conflict intervals used by ordinary pairwise arbitration.
-        bool ordinary_already_inside = false;
-        std::optional<double> ordinary_enter_s;
-        ConflictZone ordinary_selected;
-        const bool owner_is_lo = owner->id < other.id;
-        const VehicleAgent& ordinary_lo = owner_is_lo ? *owner : other;
-        const VehicleAgent& ordinary_hi = owner_is_lo ? other : *owner;
-        const auto& ordinary_blocks =
-            conflictBlocksCanonical(ordinary_lo, ordinary_hi);
-        for (const ConflictZone& canonical : ordinary_blocks) {
-            ConflictZone zone = canonical;
-            if (!owner_is_lo) {
-                std::swap(zone.s_self_enter, zone.s_other_enter);
-                std::swap(zone.s_self_exit, zone.s_other_exit);
-            }
-            // Ignore conflict blocks already cleared by either participant.
-            if (owner->path_s > zone.s_self_exit + 1e-9 ||
-                other.path_s > zone.s_other_exit + 1e-9) {
-                continue;
-            }
-            if (other.path_s > zone.s_other_enter + 1e-9) {
-                ordinary_already_inside = true;
-                ordinary_enter_s = zone.s_other_enter;
-                ordinary_selected = zone;
+    const auto compute_full =
+        [this](const VehicleAgent& first, const VehicleAgent& second) {
+            return computeConflictZonesFull(first, second);
+        };
+    const auto canonical =
+        [this](const VehicleAgent& first, const VehicleAgent& second) {
+            const VehicleAgent& lo = first.id < second.id ? first : second;
+            const VehicleAgent& hi = first.id < second.id ? second : first;
+            const auto& cached = conflictBlocksCanonical(lo, hi);
+            return std::vector<ConflictZone>(cached.begin(), cached.end());
+        };
+    const auto requests = a1_.enforceFutureAdmission(
+        vehicles, dt, compute_full, canonical);
+    for (const A1ActionRequest& request : requests) {
+        for (VehicleAgent& vehicle : vehicles) {
+            if (vehicle.id == request.vehicle_id) {
+                applyActionRequest(vehicle, request.action, request.reason,
+                                   request.blocker_id);
                 break;
             }
-            if (!ordinary_enter_s ||
-                zone.s_other_enter < *ordinary_enter_s) {
-                ordinary_enter_s = zone.s_other_enter;
-                ordinary_selected = zone;
-            }
-        }
-
-        // A future exit conflict is what makes this pair subject to Future A1
-        // admission. Ordinary geometry only moves its stop line upstream.
-        if (!future_exit_enter_s) continue;
-
-        const bool already_inside =
-            future_zones.other_already_inside || ordinary_already_inside;
-        const std::optional<double> selected_stop_boundary_s =
-            futureA1StopBoundary(future_exit_enter_s, ordinary_enter_s);
-        const std::optional<double> selected_stop_s =
-            futureA1StopS(future_exit_enter_s, ordinary_enter_s, kStopBuffer);
-        const bool ordinary_selected_boundary =
-            ordinary_enter_s && selected_stop_boundary_s &&
-            std::abs(*ordinary_enter_s - *selected_stop_boundary_s) <= 1e-9;
-        const ConflictZone& selected = ordinary_selected_boundary
-            ? ordinary_selected : future_selected;
-
-        // Stage the exact admission boundary and transitive exit cluster for
-        // the generation activatePreparedDropoffLeg() will assign. The entry
-        // remains inert until refreshDepartureClusterCommitments() observes
-        // the actual TO_B transition, so it cannot act as a second Future
-        // owner during TO_A1/PICKUP_DWELL.
-        const std::pair<int, int> cluster_key{
-            std::min(owner->id, other.id), std::max(owner->id, other.id)};
-        auto existing_cluster =
-            departure_cluster_commitments_.find(cluster_key);
-        if (existing_cluster == departure_cluster_commitments_.end() ||
-            !existing_cluster->second.active) {
-            DepartureClusterCommitment staged;
-            staged.owner_id = owner->id;
-            staged.owner_path_gen = exit_preview.path_gen;
-            staged.other_id = other.id;
-            staged.other_path_gen = other.path_gen;
-            staged.seed_indices = future_zones.seed_indices;
-            staged.cluster_indices = future_zones.protected_indices;
-            staged.waiter_stop_boundary_s = *selected_stop_boundary_s;
-            staged.waiter_stop_s = *selected_stop_s;
-            staged.handed_off_from_future = true;
-            staged.handoff_already_inside = already_inside;
-            for (size_t index : future_zones.protected_indices) {
-                const ConflictZone& z = future_zones.normalized_zones[index];
-                staged.intervals.push_back(FutureA1ConflictInterval{
-                    z.s_self_enter, z.s_self_exit,
-                    z.s_other_enter, z.s_other_exit});
-                staged.owner_release_exit_s =
-                    std::max(staged.owner_release_exit_s, z.s_self_exit);
-                staged.other_release_exit_s =
-                    std::max(staged.other_release_exit_s, z.s_other_exit);
-            }
-            departure_cluster_commitments_[cluster_key] = std::move(staged);
-        }
-
-        auto appendAdmissionGeometry = [&](std::ostringstream& line) {
-            line << " future_exit_enter_s=" << *future_exit_enter_s
-                 << " ordinary_enter_s=";
-            if (ordinary_enter_s) line << *ordinary_enter_s;
-            else line << "none";
-            line << " selected_stop_boundary_s="
-                 << *selected_stop_boundary_s
-                 << " stop_s=" << *selected_stop_s
-                 << " other_s=" << other.path_s
-                 << " already_inside="
-                 << (already_inside ? "true" : "false")
-                 << " seed_zones=[";
-            for (size_t i = 0; i < future_zones.seed_indices.size(); ++i) {
-                if (i > 0) line << ",";
-                line << future_zones.seed_indices[i];
-            }
-            line << "] closure_zones=[";
-            for (size_t i = 0;
-                 i < future_zones.protected_indices.size(); ++i) {
-                if (i > 0) line << ",";
-                line << future_zones.protected_indices[i];
-            }
-            line << "] selected_zone_count="
-                 << future_zones.protected_indices.size()
-                 << " inclusion_reason="
-                 << (future_zones.protected_indices.size() >
-                             future_zones.seed_indices.size()
-                         ? "protected_seed+other_interval_overlap"
-                         : "protected_seed");
-        };
-
-        const std::pair<int, int> log_key{owner->id, other.id};
-        if (already_inside) {
-            if (future_a1_admission_logged_.insert(log_key).second) {
-                std::ostringstream line;
-                line << std::fixed << std::setprecision(3)
-                     << "[FUTURE_A1_ADMISSION] owner=V" << owner->id
-                     << " blocked=V" << other.id
-                     << " reason=actual_occupied_priority"
-                     << " early_stop=false"
-                     << " holder=V" << other.id
-                     << " conflict_zone=(" << selected.x << ","
-                     << selected.y << ")";
-                appendAdmissionGeometry(line);
-                if (coord_log_sink_) coord_log_sink_(line.str());
-                ROS_WARN("%s %s", debugLogPrefix().c_str(),
-                         line.str().c_str());
-            }
-            continue;
-        }
-        const double stop_s = *selected_stop_s;
-        const double distance = stop_s - other.path_s;
-        const double speed = std::max(0.0, other.current_speed);
-        const double stopping_distance =
-            speed * speed / (2.0 * std::max(1e-6, cfg_.max_decel)) +
-            speed * dt;
-        if (distance > stopping_distance + 1e-9) continue;
-
-        applyActionRequest(other, VehicleAction::STOP,
-                           "future_a1_exit_priority", owner->id);
-        if (future_a1_admission_logged_.insert(log_key).second) {
-            std::ostringstream line;
-            line << std::fixed << std::setprecision(3)
-                 << "[FUTURE_A1_ADMISSION] owner=V" << owner->id
-                 << " blocked=V" << other.id
-                 << " reason=future_a1_exit_priority"
-                 << " early_stop=true"
-                 << " holder=V" << owner->id
-                 << " conflict_zone=(" << selected.x << "," << selected.y
-                 << ")";
-            appendAdmissionGeometry(line);
-            if (coord_log_sink_) coord_log_sink_(line.str());
-            ROS_WARN("%s %s", debugLogPrefix().c_str(),
-                     line.str().c_str());
         }
     }
+    return;
 }
 
 void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
-    // 跟车只识别唯一的纵向 leader/follower 并产生低优先级建议。
-    // 它不再跳过 timed OBB、不删除 reservation、不参与 holder 选择。
+    // 璺熻溅鍙瘑鍒敮涓€鐨勭旱鍚?leader/follower 骞朵骇鐢熶綆浼樺厛绾у缓璁€?
+    // 瀹冧笉鍐嶈烦杩?timed OBB銆佷笉鍒犻櫎 reservation銆佷笉鍙備笌 holder 閫夋嫨銆?
     following_pairs_.clear();
     following_suggestions_.clear();
     std::set<std::pair<int, int>> ambiguous_following_pairs;
@@ -2773,8 +2131,8 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
             // Require the current physical motion directions (REVERSE already
             // converted by motionHeading) to agree as well.
             if (current_dir_dot <= 0.70) continue;
-            // 静态冲突块方向仅作为附加几何条件；当前真实运动方向已在上方
-            // 独立校验，避免块中点方向与当前局部方向不一致。
+            // 闈欐€佸啿绐佸潡鏂瑰悜浠呬綔涓洪檮鍔犲嚑浣曟潯浠讹紱褰撳墠鐪熷疄杩愬姩鏂瑰悜宸插湪涓婃柟
+            // 鐙珛鏍￠獙锛岄伩鍏嶅潡涓偣鏂瑰悜涓庡綋鍓嶅眬閮ㄦ柟鍚戜笉涓€鑷淬€?
             const std::vector<ConflictZone> fzones = findConflictZones(v, other);
             if (fzones.empty()) continue;
             bool all_same_dir = true;
@@ -2793,8 +2151,8 @@ void RuleEngine::resolveFollowing(std::vector<VehicleAgent>& vehicles) {
                                          dy * std::cos(heading_v));
             if (lat > mp_.vehicle_width) continue;
 
-            // 确认 v 在同向局部车道上跟随 other。此集合只用于诊断，
-            // resolvePairwiseConflicts 仍会完整执行。
+            // 纭 v 鍦ㄥ悓鍚戝眬閮ㄨ溅閬撲笂璺熼殢 other銆傛闆嗗悎鍙敤浜庤瘖鏂紝
+            // resolvePairwiseConflicts 浠嶄細瀹屾暣鎵ц銆?
             const std::pair<int, int> key{std::min(v.id, other.id),
                                           std::max(v.id, other.id)};
             if (ambiguous_following_pairs.count(key) != 0) continue;
@@ -2868,13 +2226,13 @@ void RuleEngine::applyFollowingSuggestions(
 
 void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles,
                                          double dt) {
-    // 普适前向净空护栏(§11.13.1 出口检查精神 + 补 following/crossing 分类接缝漏洞)。
-    // 接缝 bug:近乎同向、向不同库位汇聚的两车,被 pairwise 当跟车跳过、又不满足
-    // resolveFollowing 的横向/间距条件 → 两套都没刹 → 后车 NOMINAL 直撞停在路口的前车
-    // → 形成谁前进都撞对方的十字楔死(canStepForward 双 false、破环无效、硬护栏反复)。
-    // 兜底:任何车沿自身固定路径在「自己刹车距离 + 车头前伸」内会压上另一辆车的当前
-    // 车身,就提前 STOP。不论被哪套逻辑处理这道都在。比硬护栏(0 余量、贴死才停)早刹、
-    // 留余量 → 两车干净对停而非重叠 → 破环车 canStepForward 能判出谁可走 → 解开。
+    // 鏅€傚墠鍚戝噣绌烘姢鏍?搂11.13.1 鍑哄彛妫€鏌ョ簿绁?+ 琛?following/crossing 鍒嗙被鎺ョ紳婕忔礊)銆?
+    // 鎺ョ紳 bug:杩戜箮鍚屽悜銆佸悜涓嶅悓搴撲綅姹囪仛鐨勪袱杞?琚?pairwise 褰撹窡杞﹁烦杩囥€佸張涓嶆弧瓒?
+    // resolveFollowing 鐨勬í鍚?闂磋窛鏉′欢 鈫?涓ゅ閮芥病鍒?鈫?鍚庤溅 NOMINAL 鐩存挒鍋滃湪璺彛鐨勫墠杞?
+    // 鈫?褰㈡垚璋佸墠杩涢兘鎾炲鏂圭殑鍗佸瓧妤旀(canStepForward 鍙?false銆佺牬鐜棤鏁堛€佺‖鎶ゆ爮鍙嶅)銆?
+    // 鍏滃簳:浠讳綍杞︽部鑷韩鍥哄畾璺緞鍦ㄣ€岃嚜宸卞埞杞﹁窛绂?+ 杞﹀ご鍓嶄几銆嶅唴浼氬帇涓婂彟涓€杈嗚溅鐨勫綋鍓?
+    // 杞﹁韩,灏辨彁鍓?STOP銆備笉璁鸿鍝閫昏緫澶勭悊杩欓亾閮藉湪銆傛瘮纭姢鏍?0 浣欓噺銆佽创姝绘墠鍋?鏃╁埞銆?
+    // 鐣欎綑閲?鈫?涓よ溅骞插噣瀵瑰仠鑰岄潪閲嶅彔 鈫?鐮寸幆杞?canStepForward 鑳藉垽鍑鸿皝鍙蛋 鈫?瑙ｅ紑銆?
     auto bodyAt = [&](const VehicleAgent& v, double s) {
         return makeBody(v.track.poseAtS(s), mp_, 0.0);
     };
@@ -2896,13 +2254,13 @@ void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles,
     };
     for (VehicleAgent& v : vehicles) {
         if (!v.active()) continue;
-        if (v.deadlock_breaker) continue;  // 破环车豁免:它正被授权冲出环
+        if (v.deadlock_breaker) continue;  // 鐮寸幆杞﹁眮鍏?瀹冩琚巿鏉冨啿鍑虹幆
         if (v.requested_action == VehicleAction::STOP) continue;
-        // 前探距离必须足够远,让车「早早停在冲突区外、留出间隙」,而不是冲到贴上才刹
-        // (低速时 brake_dist 极小,只算它会一直蹭到接触才停=楔死)。故在刹车距离之外
-        // 再加:车头前伸 + 一个固定安全间隙 kStandoff。kStandoff 同时是「干净对停」后
-        // 两车之间留出的余量,使破环车 canStepForward 有空间判别谁能动。另设最小前探
-        // kMinLook,保证即便停着(brake_dist≈0)也能看到近处已挡在交叉口的车。
+        // 鍓嶆帰璺濈蹇呴』瓒冲杩?璁╄溅銆屾棭鏃╁仠鍦ㄥ啿绐佸尯澶栥€佺暀鍑洪棿闅欍€?鑰屼笉鏄啿鍒拌创涓婃墠鍒?
+        // (浣庨€熸椂 brake_dist 鏋佸皬,鍙畻瀹冧細涓€鐩磋弓鍒版帴瑙︽墠鍋?妤旀)銆傛晠鍦ㄥ埞杞﹁窛绂讳箣澶?
+        // 鍐嶅姞:杞﹀ご鍓嶄几 + 涓€涓浐瀹氬畨鍏ㄩ棿闅?kStandoff銆俴Standoff 鍚屾椂鏄€屽共鍑€瀵瑰仠銆嶅悗
+        // 涓よ溅涔嬮棿鐣欏嚭鐨勪綑閲?浣跨牬鐜溅 canStepForward 鏈夌┖闂村垽鍒皝鑳藉姩銆傚彟璁炬渶灏忓墠鎺?
+        // kMinLook,淇濊瘉鍗充究鍋滅潃(brake_dist鈮?)涔熻兘鐪嬪埌杩戝宸叉尅鍦ㄤ氦鍙夊彛鐨勮溅銆?
         const double s_end = nextS(v);
         int block_id = -1;
         const OBB body = bodyAt(v, s_end);
@@ -2976,7 +2334,7 @@ void RuleEngine::applyRequestedActions(std::vector<VehicleAgent>& vehicles,
             continue;
         }
 
-        // 死锁打破豁免倒计时：豁免期内不允许规则层将车辆降为 STOP
+        // 姝婚攣鎵撶牬璞佸厤鍊掕鏃讹細璞佸厤鏈熷唴涓嶅厑璁歌鍒欏眰灏嗚溅杈嗛檷涓?STOP
         if (v.cycle_break_immunity > 0.0) {
             v.cycle_break_immunity = std::max(0.0, v.cycle_break_immunity - dt);
         }
@@ -2992,9 +2350,9 @@ void RuleEngine::applyRequestedActions(std::vector<VehicleAgent>& vehicles,
             if (v.reason == "clear") v.reason = "ttc_stop_hold";
         }
 
-        // 死锁豁免：仅当 blocker 确实是死锁环成员（等待链最终指回 v）
-        // 时才降为 CREEP；若 blocker 只是恰好停着等第三方（非死锁），
-        // 安全第一，保持 STOP，不能朝停着的车 CREEP 过去。
+        // 姝婚攣璞佸厤锛氫粎褰?blocker 纭疄鏄閿佺幆鎴愬憳锛堢瓑寰呴摼鏈€缁堟寚鍥?v锛?
+        // 鏃舵墠闄嶄负 CREEP锛涜嫢 blocker 鍙槸鎭板ソ鍋滅潃绛夌涓夋柟锛堥潪姝婚攣锛夛紝
+        // 瀹夊叏绗竴锛屼繚鎸?STOP锛屼笉鑳芥湞鍋滅潃鐨勮溅 CREEP 杩囧幓銆?
         if (v.ttc_stop_hold_remaining <= 1e-9 &&
             v.cycle_break_immunity > 0.0 && req == VehicleAction::STOP) {
             bool blocker_in_cycle = false;
@@ -3015,15 +2373,15 @@ void RuleEngine::applyRequestedActions(std::vector<VehicleAgent>& vehicles,
                 }
             }
             if (blocker_in_cycle) {
-                req = VehicleAction::CREEP;  // 验证为死锁环，缓行打破
+                req = VehicleAction::CREEP;  // 楠岃瘉涓烘閿佺幆锛岀紦琛屾墦鐮?
             } else {
-                // blocker 不是死锁环成员，安全第一
+                // blocker 涓嶆槸姝婚攣鐜垚鍛橈紝瀹夊叏绗竴
                 v.cycle_break_immunity = 0.0;
             }
         }
 
-        // §9 破环车保底:即便某层仍要它 STOP,也强制至少 CREEP 冲出环(它已在资源/
-        // 优先级层拿到最高优先级,这里保证动作落地)。硬护栏仍兜底防真碰撞。
+        // 搂9 鐮寸幆杞︿繚搴?鍗充究鏌愬眰浠嶈瀹?STOP,涔熷己鍒惰嚦灏?CREEP 鍐插嚭鐜?瀹冨凡鍦ㄨ祫婧?
+        // 浼樺厛绾у眰鎷垮埌鏈€楂樹紭鍏堢骇,杩欓噷淇濊瘉鍔ㄤ綔钀藉湴)銆傜‖鎶ゆ爮浠嶅厹搴曢槻鐪熺鎾炪€?
         if (v.ttc_stop_hold_remaining <= 1e-9 &&
             v.deadlock_breaker && req == VehicleAction::STOP) {
             req = VehicleAction::CREEP;
@@ -3097,7 +2455,7 @@ void RuleEngine::breakDeadlockCycles(std::vector<VehicleAgent>& vehicles) {
                 r.action = VehicleAction::YIELD;
                 r.requested_action = VehicleAction::YIELD;
                 r.action_hold_remaining = 0.0;
-                r.cycle_break_immunity = 0.6;  // 0.6s 内规则层不得将该车重新降为 STOP
+                r.cycle_break_immunity = 0.6;  // 0.6s 鍐呰鍒欏眰涓嶅緱灏嗚杞﹂噸鏂伴檷涓?STOP
                 r.wait_time = 0.0;
                 r.reason = "cycle_break";
             }
@@ -3114,15 +2472,15 @@ void RuleEngine::arbitrateResources(std::vector<VehicleAgent>& vehicles,
     const double decel = std::max(1e-6, cfg_.max_decel);
     const double nominal = speedForAction(VehicleAction::NOMINAL);
 
-    // 资源申请窗口(§15 第二类:不要提前老远占用资源)。只有当车已逼近资源到
-    // 「必须开始决策能否在停止线前停住」的预警点时才请求/预约;离得远的资源不预约,
-    // 以免一辆还在老远的高优先级车把资源锁死、让近处车无谓干等("明明没啥事就不走")。
-    // 窗口 = 标称速刹停距离 + 2 个车身(决策缓冲),纯几何派生,非拍脑袋常数。
+    // 璧勬簮鐢宠绐楀彛(搂15 绗簩绫?涓嶈鎻愬墠鑰佽繙鍗犵敤璧勬簮)銆傚彧鏈夊綋杞﹀凡閫艰繎璧勬簮鍒?
+    // 銆屽繀椤诲紑濮嬪喅绛栬兘鍚﹀湪鍋滄绾垮墠鍋滀綇銆嶇殑棰勮鐐规椂鎵嶈姹?棰勭害;绂诲緱杩滅殑璧勬簮涓嶉绾?
+    // 浠ュ厤涓€杈嗚繕鍦ㄨ€佽繙鐨勯珮浼樺厛绾ц溅鎶婅祫婧愰攣姝汇€佽杩戝杞︽棤璋撳共绛?"鏄庢槑娌″暐浜嬪氨涓嶈蛋")銆?
+    // 绐楀彛 = 鏍囩О閫熷埞鍋滆窛绂?+ 2 涓溅韬?鍐崇瓥缂撳啿),绾嚑浣曟淳鐢?闈炴媿鑴戣甯告暟銆?
     const double request_window =
         nominal * nominal / (2.0 * decel) + 2.0 * mp_.vehicle_length;
 
-    // 1) 按资源聚合请求者:active 车的固定路径会用到该 capacity=1 互斥资源
-    //    (窄道/路口/货位口)、车尾还没整车驶出、且已进入申请窗口。
+    // 1) 鎸夎祫婧愯仛鍚堣姹傝€?active 杞︾殑鍥哄畾璺緞浼氱敤鍒拌 capacity=1 浜掓枼璧勬簮
+    //    (绐勯亾/璺彛/璐т綅鍙?銆佽溅灏捐繕娌℃暣杞﹂┒鍑恒€佷笖宸茶繘鍏ョ敵璇风獥鍙ｃ€?
     struct Req { size_t idx; double s_enter; double s_exit; };
     std::map<int, std::vector<Req>> by_res;
     for (size_t i = 0; i < vehicles.size(); ++i) {
@@ -3136,8 +2494,8 @@ void RuleEngine::arbitrateResources(std::vector<VehicleAgent>& vehicles,
                 r->type != ResourceType::SLOT_DOCK) {
                 continue;
             }
-            if (v.path_s - rear > sp.s_exit + 1e-6) continue;  // 已整车驶出
-            if (sp.s_enter - v.path_s > request_window) continue;  // 尚远,不预约
+            if (v.path_s - rear > sp.s_exit + 1e-6) continue;  // 宸叉暣杞﹂┒鍑?
+            if (sp.s_enter - v.path_s > request_window) continue;  // 灏氳繙,涓嶉绾?
             by_res[sp.resource_id].push_back(Req{i, sp.s_enter, sp.s_exit});
         }
     }
@@ -3147,15 +2505,15 @@ void RuleEngine::arbitrateResources(std::vector<VehicleAgent>& vehicles,
                v.path_s - rear <= q.s_exit + 1e-6;
     };
 
-    // 某车当前车身(后轴还原车身中心)。DWELL 用终点位姿,空轨迹跳过。
+    // 鏌愯溅褰撳墠杞﹁韩(鍚庤酱杩樺師杞﹁韩涓績)銆侱WELL 鐢ㄧ粓鐐逛綅濮?绌鸿建杩硅烦杩囥€?
     auto poseOf = [&](const VehicleAgent& o) {
         const double s = (o.mode == VehicleMode::DWELL) ? o.track.length()
                                                         : o.path_s;
         return o.track.poseAtS(std::min(s, o.track.length()));
     };
-    // 出口检查(§11.4/§11.13.1):候选车驶出资源后的落脚处(s_exit + 半车长)
-    // 是否被别的车身占住。被占 → 进去就会卡在资源里 → 不发令牌(除非它已在区内
-    // 必须驶完)。这杜绝"令牌发给进得去出不来的车、它攥着令牌却动不了挡死所有人"。
+    // 鍑哄彛妫€鏌?搂11.4/搂11.13.1):鍊欓€夎溅椹跺嚭璧勬簮鍚庣殑钀借剼澶?s_exit + 鍗婅溅闀?
+    // 鏄惁琚埆鐨勮溅韬崰浣忋€傝鍗?鈫?杩涘幓灏变細鍗″湪璧勬簮閲?鈫?涓嶅彂浠ょ墝(闄ら潪瀹冨凡鍦ㄥ尯鍐?
+    // 蹇呴』椹跺畬)銆傝繖鏉滅粷"浠ょ墝鍙戠粰杩涘緱鍘诲嚭涓嶆潵鐨勮溅銆佸畠鏀ョ潃浠ょ墝鍗村姩涓嶄簡鎸℃鎵€鏈変汉"銆?
     auto canExit = [&](size_t vi, const Req& q) {
         const VehicleAgent& v = vehicles[vi];
         const double len = v.track.length();
@@ -3171,28 +2529,28 @@ void RuleEngine::arbitrateResources(std::vector<VehicleAgent>& vehicles,
         }
         return true;
     };
-    // 可授予 = 已在区内(必须驶完)或 出口畅通。
+    // 鍙巿浜?= 宸插湪鍖哄唴(蹇呴』椹跺畬)鎴?鍑哄彛鐣呴€氥€?
     auto grantableK = [&](const std::vector<Req>& rs, size_t k) {
         return bodyInside(vehicles[rs[k].idx], rs[k]) || canExit(rs[k].idx, rs[k]);
     };
 
-    // 2) 逐资源仲裁:已持令牌且仍在请求 → 保持(持权到整车驶出,防翻转,§11);
-    //    否则按统一优先级 PriorityKey 选 winner 并发令牌(§11.2)。
+    // 2) 閫愯祫婧愪徊瑁?宸叉寔浠ょ墝涓斾粛鍦ㄨ姹?鈫?淇濇寔(鎸佹潈鍒版暣杞﹂┒鍑?闃茬炕杞?搂11);
+    //    鍚﹀垯鎸夌粺涓€浼樺厛绾?PriorityKey 閫?winner 骞跺彂浠ょ墝(搂11.2)銆?
     for (auto& kv : by_res) {
         const int rid = kv.first;
         std::vector<Req>& reqs = kv.second;
 
-        // 持有者保持令牌的前提:它仍在请求 且 仍可授予(能驶出/已在区内)。
-        // 在「可授予」候选里按统一 PriorityKey 选 winner(§11.2)。持令牌者带
-        // already_has_token 加成(防翻转,§11),破环车带 emergency 加成(临时最高,§9)
-        // —— 于是 破环车 > 持令牌者 > 其他,一套优先级统一裁决,不再用 holder 捷径。
+        // 鎸佹湁鑰呬繚鎸佷护鐗岀殑鍓嶆彁:瀹冧粛鍦ㄨ姹?涓?浠嶅彲鎺堜簣(鑳介┒鍑?宸插湪鍖哄唴)銆?
+        // 鍦ㄣ€屽彲鎺堜簣銆嶅€欓€夐噷鎸夌粺涓€ PriorityKey 閫?winner(搂11.2)銆傛寔浠ょ墝鑰呭甫
+        // already_has_token 鍔犳垚(闃茬炕杞?搂11),鐮寸幆杞﹀甫 emergency 鍔犳垚(涓存椂鏈€楂?搂9)
+        // 鈥斺€?浜庢槸 鐮寸幆杞?> 鎸佷护鐗岃€?> 鍏朵粬,涓€濂椾紭鍏堢骇缁熶竴瑁佸喅,涓嶅啀鐢?holder 鎹峰緞銆?
         const int holder = tokens_.holder(rid);
         int winner_k = -1;
         {
             ResourceRequest best;
             bool has_best = false;
             for (size_t k = 0; k < reqs.size(); ++k) {
-                if (!grantableK(reqs, k)) continue;  // 出口被堵的不参与(进去会卡死)
+                if (!grantableK(reqs, k)) continue;  // 鍑哄彛琚牭鐨勪笉鍙備笌(杩涘幓浼氬崱姝?
                 const VehicleAgent& v = vehicles[reqs[k].idx];
                 ResourceRequest rq;
                 rq.vehicle_id = v.id;
@@ -3201,7 +2559,7 @@ void RuleEngine::arbitrateResources(std::vector<VehicleAgent>& vehicles,
                 rq.task_count = v.task_count;
                 rq.already_inside = bodyInside(v, reqs[k]);
                 rq.already_has_token = (v.id == holder);
-                rq.emergency_or_clear = v.deadlock_breaker;  // §9 破环车临时最高
+                rq.emergency_or_clear = v.deadlock_breaker;  // 搂9 鐮寸幆杞︿复鏃舵渶楂?
                 rq.starving = v.wait_time > cfg_.starvation_wait_time;
                 rq.eta = rq.already_inside
                              ? 0.0
@@ -3214,17 +2572,17 @@ void RuleEngine::arbitrateResources(std::vector<VehicleAgent>& vehicles,
                 }
             }
         }
-        // 无人可授予(都出不去)→ 释放令牌,且下面让所有逼近者停在上游(谁都别进)。
+        // 鏃犱汉鍙巿浜?閮藉嚭涓嶅幓)鈫?閲婃斁浠ょ墝,涓斾笅闈㈣鎵€鏈夐€艰繎鑰呭仠鍦ㄤ笂娓?璋侀兘鍒繘)銆?
         const int winner_id = (winner_k >= 0) ? vehicles[reqs[winner_k].idx].id : -1;
         if (winner_id >= 0) {
-            tokens_.grant(rid, winner_id, now_);  // 授予/刷新(防超时)
+            tokens_.grant(rid, winner_id, now_);  // 鎺堜簣/鍒锋柊(闃茶秴鏃?
         } else {
             tokens_.release(rid);
         }
 
-        // 3) 非 winner(及无人可授予时的全部逼近者):在上游停止线让行。只在「按当前
-        //    速度+max_decel 即将刹不住」时才发 STOP(§10 停止线;§15 不过早等——离得
-        //    远就继续接近,不原地干等)。
+        // 3) 闈?winner(鍙婃棤浜哄彲鎺堜簣鏃剁殑鍏ㄩ儴閫艰繎鑰?:鍦ㄤ笂娓稿仠姝㈢嚎璁╄銆傚彧鍦ㄣ€屾寜褰撳墠
+        //    閫熷害+max_decel 鍗冲皢鍒逛笉浣忋€嶆椂鎵嶅彂 STOP(搂10 鍋滄绾?搂15 涓嶈繃鏃╃瓑鈥斺€旂寰?
+        //    杩滃氨缁х画鎺ヨ繎,涓嶅師鍦板共绛?銆?
         for (size_t k = 0; k < reqs.size(); ++k) {
             if (winner_k >= 0 && static_cast<int>(k) == winner_k) continue;
             VehicleAgent& v = vehicles[reqs[k].idx];
@@ -3252,7 +2610,7 @@ void RuleEngine::refreshResourceSpans(std::vector<VehicleAgent>& vehicles) {
             v.spans_track_len = -1.0;
             continue;
         }
-        // track 长度变化即视为换了新路径(新任务),重算资源占用区间。
+        // track 闀垮害鍙樺寲鍗宠涓烘崲浜嗘柊璺緞(鏂颁换鍔?,閲嶇畻璧勬簮鍗犵敤鍖洪棿銆?
         if (std::abs(v.track.length() - v.spans_track_len) > 1e-6) {
             v.resource_spans = resmap_->spansForPath(v.track);
             v.spans_track_len = v.track.length();
@@ -3261,13 +2619,13 @@ void RuleEngine::refreshResourceSpans(std::vector<VehicleAgent>& vehicles) {
 }
 
 void RuleEngine::resolveDeadlock(std::vector<VehicleAgent>& vehicles, double dt) {
-    // §9/§11.11:用上一周期残留的等待边(blocker_id,本周期 reset 前仍有效)建等待图,
-    // 检测环,选破环车给临时最高优先级(deadlock_breaker)。等待图是功能图(每车至多
-    // 一条出边=它在等的 blocker),跟指针即可找环。
-    constexpr double kBreakerHold = 2.0;  // 破环身份迟滞保持秒数(防闪烁蹭行)
+    // 搂9/搂11.11:鐢ㄤ笂涓€鍛ㄦ湡娈嬬暀鐨勭瓑寰呰竟(blocker_id,鏈懆鏈?reset 鍓嶄粛鏈夋晥)寤虹瓑寰呭浘,
+    // 妫€娴嬬幆,閫夌牬鐜溅缁欎复鏃舵渶楂樹紭鍏堢骇(deadlock_breaker)銆傜瓑寰呭浘鏄姛鑳藉浘(姣忚溅鑷冲
+    // 涓€鏉″嚭杈?瀹冨湪绛夌殑 blocker),璺熸寚閽堝嵆鍙壘鐜€?
+    constexpr double kBreakerHold = 2.0;  // 鐮寸幆韬唤杩熸粸淇濇寔绉掓暟(闃查棯鐑佽弓琛?
     const size_t n = vehicles.size();
-    // 迟滞:保持期未到的破环车继续是破环车(它一动起来就不再 STOP 等待、环检测会消失,
-    // 若不保持就会标志闪烁→被旧层反复摁停→蹭行)。保持期到了才清。
+    // 杩熸粸:淇濇寔鏈熸湭鍒扮殑鐮寸幆杞︾户缁槸鐮寸幆杞?瀹冧竴鍔ㄨ捣鏉ュ氨涓嶅啀 STOP 绛夊緟銆佺幆妫€娴嬩細娑堝け,
+    // 鑻ヤ笉淇濇寔灏变細鏍囧織闂儊鈫掕鏃у眰鍙嶅鎽佸仠鈫掕弓琛?銆備繚鎸佹湡鍒颁簡鎵嶆竻銆?
     for (VehicleAgent& v : vehicles) {
         v.deadlock_breaker_hold = std::max(0.0, v.deadlock_breaker_hold - dt);
         v.deadlock_breaker = (v.deadlock_breaker_hold > 0.0);
@@ -3278,10 +2636,10 @@ void RuleEngine::resolveDeadlock(std::vector<VehicleAgent>& vehicles, double dt)
             if (vehicles[i].id == id) return static_cast<int>(i);
         return -1;
     };
-    // 破环车必须选「真正能往前走的那辆」(§16):用车身几何实测——车 i 沿固定路径
-    // 前进一小步(probe),车身是否仍与任何其它车的当前车身不重叠。能=它前进可脱困、
-    // 抖开环;不能(前方就是对冲车)=放它也是被硬护栏摁死、环永远破不了。这修正了
-    // 旧的 min-id 盲选:楔死时常把「动不了的那辆」选成破环车而徒劳。
+    // 鐮寸幆杞﹀繀椤婚€夈€岀湡姝ｈ兘寰€鍓嶈蛋鐨勯偅杈嗐€?搂16):鐢ㄨ溅韬嚑浣曞疄娴嬧€斺€旇溅 i 娌垮浐瀹氳矾寰?
+    // 鍓嶈繘涓€灏忔(probe),杞﹁韩鏄惁浠嶄笌浠讳綍鍏跺畠杞︾殑褰撳墠杞﹁韩涓嶉噸鍙犮€傝兘=瀹冨墠杩涘彲鑴卞洶銆?
+    // 鎶栧紑鐜?涓嶈兘(鍓嶆柟灏辨槸瀵瑰啿杞?=鏀惧畠涔熸槸琚‖鎶ゆ爮鎽佹銆佺幆姘歌繙鐮翠笉浜嗐€傝繖淇浜?
+    // 鏃х殑 min-id 鐩查€?妤旀鏃跺父鎶娿€屽姩涓嶄簡鐨勯偅杈嗐€嶉€夋垚鐮寸幆杞﹁€屽緬鍔炽€?
     auto bodyAtCurrent = [&](const VehicleAgent& v) {
         const double s =
             (v.mode == VehicleMode::DWELL) ? v.track.length() : v.path_s;
@@ -3290,7 +2648,7 @@ void RuleEngine::resolveDeadlock(std::vector<VehicleAgent>& vehicles, double dt)
     auto canStepForward = [&](int i) -> bool {
         const VehicleAgent& v = vehicles[i];
         if (v.track.empty()) return false;
-        constexpr double kProbe = 0.10;  // 前探约半身,足以判别前方是否被对冲车堵死
+        constexpr double kProbe = 0.10;  // 鍓嶆帰绾﹀崐韬?瓒充互鍒ゅ埆鍓嶆柟鏄惁琚鍐茶溅鍫垫
         const double s_next = std::min(v.track.length(), v.path_s + kProbe);
         const OBB body_next = makeBody(v.track.poseAtS(s_next), mp_, 0.0);
         for (size_t j = 0; j < n; ++j) {
@@ -3304,12 +2662,12 @@ void RuleEngine::resolveDeadlock(std::vector<VehicleAgent>& vehicles, double dt)
     auto waitEdge = [&](int i) -> int {
         const VehicleAgent& v = vehicles[i];
         if (v.mode != VehicleMode::ACTIVE) return -1;
-        if (v.action != VehicleAction::STOP) return -1;  // 只看完全停住的等待
+        if (v.action != VehicleAction::STOP) return -1;  // 鍙湅瀹屽叏鍋滀綇鐨勭瓑寰?
         if (v.blocker_id < 0) return -1;
         return indexOfId(v.blocker_id);
     };
 
-    std::vector<int> state(n, 0);  // 0 未访 1 在栈 2 完成
+    std::vector<int> state(n, 0);  // 0 鏈 1 鍦ㄦ爤 2 瀹屾垚
     for (size_t s = 0; s < n; ++s) {
         if (state[s] != 0) continue;
         std::vector<int> path;
@@ -3319,12 +2677,12 @@ void RuleEngine::resolveDeadlock(std::vector<VehicleAgent>& vehicles, double dt)
             path.push_back(cur);
             cur = waitEdge(cur);
         }
-        if (cur >= 0 && state[cur] == 1) {  // 找到环:从 cur 首次出现到末尾
+        if (cur >= 0 && state[cur] == 1) {  // 鎵惧埌鐜?浠?cur 棣栨鍑虹幇鍒版湯灏?
             const auto begin = std::find(path.begin(), path.end(), cur);
-            // 协调图第5步:严格全序(unifiedPriority)使"谁让谁"关系本应无环 ⇒ 这里检测到
-            // 环=无环保证被破坏的 bug 信号(通常是 priorityWinner 里的 slot 资源前置约束
-            // 成环,即任务分配出现循环占位)。降为断言:**告警**把它暴露出来。破环逃生暂留
-            // 作安全网(确认长跑不再告警后可移除)。
+            // 鍗忚皟鍥剧5姝?涓ユ牸鍏ㄥ簭(unifiedPriority)浣?璋佽璋?鍏崇郴鏈簲鏃犵幆 鈬?杩欓噷妫€娴嬪埌
+            // 鐜?鏃犵幆淇濊瘉琚牬鍧忕殑 bug 淇″彿(閫氬父鏄?priorityWinner 閲岀殑 slot 璧勬簮鍓嶇疆绾︽潫
+            // 鎴愮幆,鍗充换鍔″垎閰嶅嚭鐜板惊鐜崰浣?銆傞檷涓烘柇瑷€:**鍛婅**鎶婂畠鏆撮湶鍑烘潵銆傜牬鐜€冪敓鏆傜暀
+            // 浣滃畨鍏ㄧ綉(纭闀胯窇涓嶅啀鍛婅鍚庡彲绉婚櫎)銆?
             {
                 std::string ring;
                 for (auto p = begin; p != path.end(); ++p) {
@@ -3332,14 +2690,14 @@ void RuleEngine::resolveDeadlock(std::vector<VehicleAgent>& vehicles, double dt)
                     ring += "V" + std::to_string(vehicles[*p].id);
                 }
                 ROS_WARN_THROTTLE(
-                    5.0,
-                    "[DIAG cycle] 等待图检测到环 %s —— 严格全序下本不该出现,"
-                    "疑为 slot 资源前置约束成环(循环占位)。暂由破环逃生兜底。",
+                    1.0,
+                    "[DIAG cycle] wait graph cycle=%s; using the existing "
+                    "deadlock escape fallback.",
                     ring.c_str());
             }
-            // 选破环车:优先「前进一步能脱困」的车(canStepForward),同类里取 id 最小
-            // (确定性,§19)。若环内无人能前进(真·楔死,需倒车的罕见情形),退回 id
-            // 最小。只放一辆:其余正常让行停住——绝不会两辆对冲车一起被放而相撞。
+            // 閫夌牬鐜溅:浼樺厛銆屽墠杩涗竴姝ヨ兘鑴卞洶銆嶇殑杞?canStepForward),鍚岀被閲屽彇 id 鏈€灏?
+            // (纭畾鎬?搂19)銆傝嫢鐜唴鏃犱汉鑳藉墠杩?鐪熉锋姝?闇€鍊掕溅鐨勭綍瑙佹儏褰?,閫€鍥?id
+            // 鏈€灏忋€傚彧鏀句竴杈?鍏朵綑姝ｅ父璁╄鍋滀綇鈥斺€旂粷涓嶄細涓よ締瀵瑰啿杞︿竴璧疯鏀捐€岀浉鎾炪€?
             int breaker = -1, best_id = std::numeric_limits<int>::max();
             int breaker_any = -1, best_any = std::numeric_limits<int>::max();
             for (auto p = begin; p != path.end(); ++p) {
@@ -3350,14 +2708,14 @@ void RuleEngine::resolveDeadlock(std::vector<VehicleAgent>& vehicles, double dt)
                     breaker = *p;
                 }
             }
-            if (breaker < 0) breaker = breaker_any;  // 无人能前进→退回 min-id
-            // 破环逃生已停用(降为纯检测+告警):在「禁止倒车」前提下,前向破环本身是碰撞源
-            // ——它豁免让行方刹车、强推它前冲脱困,而前方就是环里别的车 → 直接顶上去(实测
-            // V2 brkr=1 被强推顶进卡死的 V7,此后两车贴死、硬护栏每拍触发=那 16857 次"碰撞")。
-            // 既然不能倒车,环就应是「静止对峙(楔死)」而非「对撞」:安全优先,先把碰撞降级。
-            // 真正出路是从源头不让环形成(出库口/出口检查),见 草履虫规则_协调图统一架构设计。
+            if (breaker < 0) breaker = breaker_any;  // 鏃犱汉鑳藉墠杩涒啋閫€鍥?min-id
+            // 鐮寸幆閫冪敓宸插仠鐢?闄嶄负绾娴?鍛婅):鍦ㄣ€岀姝㈠€掕溅銆嶅墠鎻愪笅,鍓嶅悜鐮寸幆鏈韩鏄鎾炴簮
+            // 鈥斺€斿畠璞佸厤璁╄鏂瑰埞杞︺€佸己鎺ㄥ畠鍓嶅啿鑴卞洶,鑰屽墠鏂瑰氨鏄幆閲屽埆鐨勮溅 鈫?鐩存帴椤朵笂鍘?瀹炴祴
+            // V2 brkr=1 琚己鎺ㄩ《杩涘崱姝荤殑 V7,姝ゅ悗涓よ溅璐存銆佺‖鎶ゆ爮姣忔媿瑙﹀彂=閭?16857 娆?纰版挒")銆?
+            // 鏃㈢劧涓嶈兘鍊掕溅,鐜氨搴旀槸銆岄潤姝㈠宄?妤旀)銆嶈€岄潪銆屽鎾炪€?瀹夊叏浼樺厛,鍏堟妸纰版挒闄嶇骇銆?
+            // 鐪熸鍑鸿矾鏄粠婧愬ご涓嶈鐜舰鎴?鍑哄簱鍙?鍑哄彛妫€鏌?,瑙?鑽夊饱铏鍒檁鍗忚皟鍥剧粺涓€鏋舵瀯璁捐銆?
             (void)breaker; (void)kBreakerHold;
-            // vehicles[breaker].deadlock_breaker = true;          // 已停用
+            // vehicles[breaker].deadlock_breaker = true;          // 宸插仠鐢?
             // vehicles[breaker].deadlock_breaker_hold = kBreakerHold;
         }
         for (int p : path) state[p] = 2;
@@ -3371,9 +2729,9 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
                             period_ordinary_decision) {
     conflicts_.clear();
     last_rolling_dynamic_decision_ = RollingDynamicDecision{};
-    now_ += dt;                      // 内部仿真时钟(令牌防抖/超时)
-    resolveDeadlock(vehicles, dt);   // Phase4:用上周期等待边检测环、选破环车(reset 前)
-    refreshResourceSpans(vehicles);  // Phase 2:刷新每车路径的资源占用缓存
+    now_ += dt;                      // 鍐呴儴浠跨湡鏃堕挓(浠ょ墝闃叉姈/瓒呮椂)
+    resolveDeadlock(vehicles, dt);   // Phase4:鐢ㄤ笂鍛ㄦ湡绛夊緟杈规娴嬬幆銆侀€夌牬鐜溅(reset 鍓?
+    refreshResourceSpans(vehicles);  // Phase 2:鍒锋柊姣忚溅璺緞鐨勮祫婧愬崰鐢ㄧ紦瀛?
 
     previous_following_followers_.clear();
     previous_dynamic_actions_.clear();
@@ -3430,11 +2788,11 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
         }
     }
 
-    // 深层根治(用户洞察:路径固定→只信精确几何):停用粗粒度资源盒仲裁(路口/车道
-    // 令牌),它把"共用一个路口盒"当冲突造成幻象冲突→打架→死锁。改由精确的 pairwise
-    // 几何冲突(findConflictZones:沿固定路径采样车身OBB,只标真实重叠弧段)作唯一交叉
-    // 协调权威。八竿子打不着的两车它根本不报冲突→各自全速。
-    // arbitrateResources(vehicles, dt);   // 已停用(资源盒=幻象冲突源)
+    // 娣卞眰鏍规不(鐢ㄦ埛娲炲療:璺緞鍥哄畾鈫掑彧淇＄簿纭嚑浣?:鍋滅敤绮楃矑搴﹁祫婧愮洅浠茶(璺彛/杞﹂亾
+    // 浠ょ墝),瀹冩妸"鍏辩敤涓€涓矾鍙ｇ洅"褰撳啿绐侀€犳垚骞昏薄鍐茬獊鈫掓墦鏋垛啋姝婚攣銆傛敼鐢辩簿纭殑 pairwise
+    // 鍑犱綍鍐茬獊(findConflictZones:娌垮浐瀹氳矾寰勯噰鏍疯溅韬玂BB,鍙爣鐪熷疄閲嶅彔寮ф)浣滃敮涓€浜ゅ弶
+    // 鍗忚皟鏉冨▉銆傚叓绔垮瓙鎵撲笉鐫€鐨勪袱杞﹀畠鏍规湰涓嶆姤鍐茬獊鈫掑悇鑷叏閫熴€?
+    // arbitrateResources(vehicles, dt);   // 宸插仠鐢?璧勬簮鐩?骞昏薄鍐茬獊婧?
     const double pairwise_horizon = prediction_horizon_override >= 0.0
         ? prediction_horizon_override
         : cfg_.prediction_horizon;

@@ -1213,6 +1213,8 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle, bool emit_log) {
     vehicle.pending_dropoff_track = PathTrack{};
     vehicle.pending_dropoff_valid = false;
     vehicle.a1_departure_committed = false;
+    vehicle.a1_departure_plan_active = false;
+    vehicle.a1_physical_departure_started = false;
     vehicle.a1_departure_priority_until_s = 0.0;
     vehicle.leg_target = LegTargetKind::A1;
     vehicle.mission_phase = MissionPhase::TO_A1;
@@ -1384,6 +1386,11 @@ bool TaskAllocator::activatePreparedDropoffLeg(VehicleAgent& vehicle,
     vehicle.action = VehicleAction::NOMINAL;
     vehicle.requested_action = VehicleAction::NOMINAL;
     vehicle.reason = "new_prepared_dropoff_leg";
+    // Track activation is a planning fact. Physical departure is confirmed
+    // independently by A1Coordinator from fresh real pose in real mode (and
+    // from path progress in simulation).
+    vehicle.a1_departure_plan_active = true;
+    vehicle.a1_physical_departure_started = false;
     vehicle.a1_departure_committed = !cfg_.real_mode;
     vehicle.pending_dropoff_slot = -1;
     vehicle.pending_dropoff_track = PathTrack{};

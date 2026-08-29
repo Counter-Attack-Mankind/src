@@ -21,6 +21,10 @@ struct MultiVehicleConfig {
     double max_decel = 0.30;
     double safety_margin = 0.0;
     double conflict_margin = 0.12;
+    // Fixed upstream distance between a bare-body A1 ConflictZone entry and
+    // the control target at which an A1 waiter must be fully stopped.  This is
+    // deliberately independent of conflict_margin and braking distance.
+    double a1_control_stop_margin = 0.04;
 
     // Stateless bridge-aware TTC correction. The first threshold preserves
     // the existing local opposing definition. Traversal changes update actual

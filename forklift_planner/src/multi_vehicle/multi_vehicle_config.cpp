@@ -43,6 +43,8 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     nh.param(ns + "max_decel", c.max_decel, c.max_decel);
     nh.param(ns + "safety_margin", c.safety_margin, c.safety_margin);
     nh.param(ns + "conflict_margin", c.conflict_margin, c.conflict_margin);
+    nh.param(ns + "a1_control_stop_margin", c.a1_control_stop_margin,
+             c.a1_control_stop_margin);
     nh.param(ns + "bridge_opposing_threshold",
              c.bridge_opposing_threshold,
              c.bridge_opposing_threshold);
@@ -165,6 +167,7 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     c.nominal_speed = std::max(0.01, c.nominal_speed);
     c.max_speed = std::max(c.nominal_speed, c.max_speed);
     c.conflict_margin = std::max(0.0, c.conflict_margin);
+    c.a1_control_stop_margin = std::max(0.0, c.a1_control_stop_margin);
     c.bridge_opposing_threshold = std::max(
         -1.0, std::min(0.0, c.bridge_opposing_threshold));
     c.bridge_backtrack_step = std::max(0.005, c.bridge_backtrack_step);

@@ -54,6 +54,7 @@ target_link_libraries(two_vehicle_sim_node
 
 add_executable(multi_vehicle_patrol_node
   ${PATH_GENERATOR_SOURCES}
+  src/multi_vehicle/a1_coordination.cpp
   src/multi_vehicle/footprint.cpp
   src/multi_vehicle/bridge_ttc_correction.cpp
   src/multi_vehicle/dynamic_speed_coordination.cpp
@@ -128,6 +129,7 @@ if(CATKIN_ENABLE_TESTING)
 
   add_executable(spatiotemporal_interaction_test
     test/spatiotemporal_interaction_test.cpp
+    src/multi_vehicle/a1_coordination.cpp
     src/multi_vehicle/bridge_ttc_correction.cpp
     src/multi_vehicle/dynamic_speed_coordination.cpp
     src/multi_vehicle/footprint.cpp
@@ -158,6 +160,7 @@ if(CATKIN_ENABLE_TESTING)
 
   add_executable(dynamic_speed_rule_engine_test
     test/dynamic_speed_rule_engine_test.cpp
+    src/multi_vehicle/a1_coordination.cpp
     src/multi_vehicle/bridge_ttc_correction.cpp
     src/multi_vehicle/dynamic_speed_coordination.cpp
     src/multi_vehicle/footprint.cpp
@@ -188,6 +191,7 @@ if(CATKIN_ENABLE_TESTING)
 
   add_executable(rolling_decision_timing_test
     test/rolling_decision_timing_test.cpp
+    src/multi_vehicle/a1_coordination.cpp
     src/multi_vehicle/bridge_ttc_correction.cpp
     src/multi_vehicle/dynamic_speed_coordination.cpp
     src/multi_vehicle/footprint.cpp

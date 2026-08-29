@@ -97,11 +97,19 @@ struct VehicleAgent {
     // cleared after the complete body has passed the first REVERSE->FORWARD
     // cusp; it must never turn the whole A1->B route into a privileged path.
     bool a1_departure_committed = false;
+    // The A1->B plan has been activated. In real mode this does not imply that
+    // the physical vehicle has started to leave A1.
+    bool a1_departure_plan_active = false;
+    // Set only after a fresh real pose projects forward on the active TO_B
+    // track with a compatible body heading. Simulation sets it from path
+    // progress through the same A1 coordination lifecycle.
+    bool a1_physical_departure_started = false;
     double a1_departure_priority_until_s = 0.0;
 
     // 实车显示用真实位姿:real_mode 下由 /object 填(后轴中心)。RViz 据此显示车的【实际位置】
     // 而非投影到路径上的位置——这样跟踪误差(车偏离路径多少)一眼可见。sim 下不置位,行为不变。
     bool real_pose_valid = false;
+    bool real_pose_fresh = false;
     double real_x = 0.0, real_y = 0.0, real_yaw = 0.0;
 
     // 轨迹版本号:每次 track 被重设(分配新任务)即自增(见 task_allocator tryPlan)。

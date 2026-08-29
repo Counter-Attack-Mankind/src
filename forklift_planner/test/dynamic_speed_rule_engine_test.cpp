@@ -396,7 +396,7 @@ int main() {
     staged_commitment.other_id = 1;
     staged_commitment.other_path_gen = 1;
     staged_commitment.active = false;
-    staged_state.departure_clusters[{0, 1}] = staged_commitment;
+    staged_state.a1.departure_clusters[{0, 1}] = staged_commitment;
     staged_engine.restore(staged_state);
     staged_engine.setFutureA1Commitment(identity_owner);
     staged_engine.decide(staged, 0.1, 15.0);
@@ -424,7 +424,7 @@ int main() {
     active_commitment.owner_release_exit_s = 1.50;
     active_commitment.other_release_exit_s = 1.60;
     active_commitment.active = true;
-    active_state.departure_clusters[{0, 1}] = active_commitment;
+    active_state.a1.departure_clusters[{0, 1}] = active_commitment;
     active_cluster_engine.restore(active_state);
     active_cluster_engine.decide(active_cluster, 0.1, 15.0);
     if (active_cluster_engine.snapshot().reservations.empty() ||
@@ -453,8 +453,8 @@ int main() {
     pickup_engine.setFutureA1Commitment(pickup_owner);
     pickup_engine.decide(pickup, 0.1, 15.0);
     const auto pickup_state = pickup_engine.snapshot();
-    if (pickup_state.departure_clusters.empty() ||
-        pickup_state.departure_clusters.begin()->second.active) {
+    if (pickup_state.a1.departure_clusters.empty() ||
+        pickup_state.a1.departure_clusters.begin()->second.active) {
         return fail("PICKUP_DWELL future departure protection was not staged");
     }
 

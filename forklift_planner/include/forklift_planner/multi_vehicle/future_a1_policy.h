@@ -18,8 +18,8 @@ struct FutureA1RankedCandidate {
 
 // Arc-length projection of one future A1-exit conflict zone, normalized so
 // owner_* always belongs to the prepared A1->B exit and other_* to the
-// competing TO_A1 vehicle.  computeConflictZonesFull() already incorporates
-// the configured OBB conflict margin when it builds these intervals.
+// competing TO_A1 vehicle. The interval is a bare-body physical resource;
+// A1 control stopping clearance is applied separately upstream.
 struct FutureA1ConflictInterval {
     double owner_enter = 0.0;
     double owner_exit = 0.0;

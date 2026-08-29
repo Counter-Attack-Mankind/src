@@ -1,3 +1,5 @@
+//该文件用于拿已经得到的15sOBB冲突和每辆车的有效TTC，决定谁保持 NOMINAL、谁 YIELD/CREEP/STOP
+
 #include "forklift_planner/multi_vehicle/dynamic_speed_coordination.h"
 
 #include <algorithm>
@@ -9,6 +11,7 @@
 namespace forklift_planner {
 namespace multi_vehicle {
 
+//对于TTC时间进行分档，分别为FAR,MID,NEAR
 DynamicInterventionBand classifyDynamicInterventionBand(
     double vehicle_ttc, const MultiVehicleConfig& config) {
     if (vehicle_ttc >= config.dynamic_speed_far_threshold) {
@@ -20,6 +23,7 @@ DynamicInterventionBand classifyDynamicInterventionBand(
     return DynamicInterventionBand::NEAR;
 }
 
+//将枚举转化为字符串，方便日志信息打印
 const char* dynamicInterventionBandName(DynamicInterventionBand band) {
     switch (band) {
         case DynamicInterventionBand::NEAR: return "NEAR";
@@ -29,15 +33,20 @@ const char* dynamicInterventionBandName(DynamicInterventionBand band) {
     return "UNKNOWN";
 }
 
+//<重点>对于高优先级车辆，以NOMINAL行驶，是否会碰撞到另一辆车当前真实的占据车身
 PriorityPhysicalTtcEvaluation evaluatePriorityPhysicalTtc(
     const VehicleAgent& priority, const VehicleAgent& other,
     const std::vector<PredictedKinematicSample>& priority_prediction,
     const MapParam& map_param, const MultiVehicleConfig& config) {
+       
+    //检查是否能算，若有一条件不满足就证明没有physcial_ttc
     PriorityPhysicalTtcEvaluation result;
     if (!priority.active() || !other.active() || priority.track.empty() ||
         other.track.empty() || priority_prediction.empty()) {
         return result;
     }
+
+    //获取另一辆车当前物理姿态，若实车有真实位姿，则优先使用动捕位姿
     RoughWp other_pose = other.track.poseAtS(std::max(
         0.0, std::min(other.path_s, other.track.length())));
     if (other.real_pose_valid) {
@@ -45,6 +54,7 @@ PriorityPhysicalTtcEvaluation evaluatePriorityPhysicalTtc(
         other_pose.y = other.real_y;
         other_pose.theta = other.real_yaw;
     }
+    //建立其他车辆裸车身OBB并开始回溯，若有桥式冲突段则继续修正
     const OBB other_current_body = makeBody(other_pose, map_param, 0.0);
     for (const PredictedKinematicSample& sample : priority_prediction) {
         if (!overlaps(sample.body, other_current_body)) continue;
@@ -67,6 +77,7 @@ PriorityPhysicalTtcEvaluation evaluatePriorityPhysicalTtc(
     return result;
 }
 
+//把 FAR / MID / NEAR 转成具体速度动作
 VehicleAction selectRollingSpeedAction(
     DynamicInterventionBand band, bool emergency_stop) {
     if (emergency_stop) return VehicleAction::STOP;
@@ -81,6 +92,8 @@ VehicleAction selectRollingSpeedAction(
     return VehicleAction::STOP;
 }
 
+//评估函数：假设 A 执行动作 action_a、B 执行动作 action_b，再重新预测一次，看看这组动作未来是否还撞。
+//但目前没有接入，只做调试预测处理
 SelectedSpeedActionEvaluation evaluateSelectedAction(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const std::vector<PotentialConflictZone>& potential_zones,
@@ -95,9 +108,6 @@ SelectedSpeedActionEvaluation evaluateSelectedAction(
         vehicle_a, map_param, config, action_a, prediction_horizon);
     const auto prediction_b = predictTrajectory(
         vehicle_b, map_param, config, action_b, prediction_horizon);
-    // Candidate validation deliberately uses the same synchronized physical
-    // OBB detector as the nominal baseline. Interaction labels are not a
-    // separate control authority.
     const PairInteractionResult interaction =
         detectPairInteractionFromPredictions(
             vehicle_a, vehicle_b, potential_zones,
@@ -123,12 +133,16 @@ SelectedSpeedActionEvaluation evaluateSelectedAction(
     return evaluation;
 }
 
+//<核心函数>baseline 冲突已经存在，并且 preferred winner 已经确定之后
+//计算 priority 和 yielding 两辆车分别应该执行什么动作
 PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     const VehicleAgent& vehicle_a, const VehicleAgent& vehicle_b,
     const PairInteractionResult& nominal_baseline,
     const PriorityPhysicalTtcEvaluation& priority_physical,
     const MultiVehicleConfig& config, int preferred_winner_id) {
     PairSpeedCoordinationResult result;
+
+    //baseline 没冲突，直接退出
     if (!nominal_baseline.event.valid) {
         result.reason = "baseline_clear";
         return result;
@@ -194,6 +208,7 @@ PairSpeedCoordinationResult evaluatePairSpeedCoordination(
     return result;
 }
 
+//判断当前 TTC 是否已经小到必须 STOP
 TtcStopBoundary evaluateTtcStopBoundary(
     double vehicle_ttc, VehicleAction planned_action,
     const MultiVehicleConfig& config) {
