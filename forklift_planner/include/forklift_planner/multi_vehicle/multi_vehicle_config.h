@@ -40,6 +40,8 @@ struct MultiVehicleConfig {
     double a1_pickup_theta = 1.5707963267948966;
     double a1_pre_dock_x = 1.250;
     double a1_pre_dock_y = 4.100;
+    // Upstream control margin from the bare-body A1 conflict boundary. Unit: m.
+    double a1_stop_margin = 0.10;
     double rolling_horizon = 10.0;          // future planner time 
     double rolling_refresh_period = 2.0;        //  refresh period
 

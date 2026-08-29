@@ -1031,7 +1031,6 @@ void RuleEngine::refreshDepartureClusterCommitments(
     // Fallback for a TO_B activation that was not represented in the current
     // Future snapshot. It deterministically rebuilds the same protected
     // closure from the actual prepared track and the existing full-zone cache.
-    constexpr double kStopBuffer = 0.01;
     for (VehicleAgent& owner : vehicles) {
         if (!owner.active() || owner.track.empty() ||
             owner.mission_phase != MissionPhase::TO_B ||
@@ -1070,7 +1069,8 @@ void RuleEngine::refreshDepartureClusterCommitments(
                 selected.normalized_zones[static_cast<size_t>(
                     selected.upstream_index)].s_other_enter;
             c.waiter_stop_s =
-                std::max(0.0, c.waiter_stop_boundary_s - kStopBuffer);
+                std::max(0.0,
+                         c.waiter_stop_boundary_s - cfg_.a1_stop_margin);
             c.active = true;
             c.handoff_already_inside = selected.other_already_inside;
             for (size_t index : selected.protected_indices) {
@@ -2538,8 +2538,6 @@ void RuleEngine::enforceFutureA1Admission(
 
     const double protected_until = owner->a1_departure_priority_until_s;
     if (protected_until <= 1e-9) return;
-    constexpr double kStopBuffer = 0.01;
-
     for (VehicleAgent& other : vehicles) {
         if (other.id == owner->id || !other.active() ||
             other.mission_phase != MissionPhase::TO_A1 ||
@@ -2613,7 +2611,8 @@ void RuleEngine::enforceFutureA1Admission(
         const std::optional<double> selected_stop_boundary_s =
             futureA1StopBoundary(future_exit_enter_s, ordinary_enter_s);
         const std::optional<double> selected_stop_s =
-            futureA1StopS(future_exit_enter_s, ordinary_enter_s, kStopBuffer);
+            futureA1StopS(future_exit_enter_s, ordinary_enter_s,
+                          cfg_.a1_stop_margin);
         const bool ordinary_selected_boundary =
             ordinary_enter_s && selected_stop_boundary_s &&
             std::abs(*ordinary_enter_s - *selected_stop_boundary_s) <= 1e-9;
