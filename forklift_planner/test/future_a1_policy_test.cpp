@@ -53,25 +53,39 @@ int main() {
         return fail("ordinary conflict entry did not bound stop_s");
     }
 
-    // D. A protected seed pulls in an overlapping downstream-owner zone.
+    // D. A zone separated on the owner's departure path is not part of the
+    // first closure even when its other-path interval overlaps.
     const std::vector<FutureA1ConflictInterval> double_zone{
         {0.000, 0.650, 4.800, 5.425},
         {0.800, 1.900, 4.125, 5.125}};
     const auto cluster =
         selectFutureA1ProtectedCluster(double_zone, 0.756, 0.0);
     if (cluster.seed_indices != std::vector<size_t>{0} ||
-        cluster.protected_indices != std::vector<size_t>({0, 1}) ||
+        cluster.protected_indices != std::vector<size_t>({0}) ||
         !cluster.upstream_other_enter ||
-        !near(*cluster.upstream_other_enter, 4.125)) {
-        return fail("overlapping second future-exit zone was not protected");
+        !near(*cluster.upstream_other_enter, 4.800)) {
+        return fail("remote owner-path zone leaked into first closure");
     }
     const auto clustered_stop =
         futureA1StopS(cluster.upstream_other_enter, std::nullopt, 0.01);
-    if (!clustered_stop || !near(*clustered_stop, 4.115)) {
+    if (!clustered_stop || !near(*clustered_stop, 4.790)) {
         return fail("clustered future-exit stop line was not upstream");
     }
 
-    // E. Closure is transitive even when the seed does not touch zone2.
+    // E. Closure may include multiple zones only when both path-arc
+    // relations remain connected.
+    const std::vector<FutureA1ConflictInterval> connected_multi_zone{
+        {0.0, 0.5, 5.0, 5.5},
+        {0.4, 0.9, 5.4, 5.9},
+        {0.8, 1.2, 5.8, 6.2}};
+    const auto connected_cluster = selectFutureA1ProtectedCluster(
+        connected_multi_zone, 0.6, 0.0);
+    if (connected_cluster.protected_indices !=
+        std::vector<size_t>({0, 1, 2})) {
+        return fail("two-arc connected first closure was truncated");
+    }
+
+    // F. Other-path-only transitivity must not pull remote crossings.
     const std::vector<FutureA1ConflictInterval> transitive{
         {0.0, 0.5, 5.0, 6.0},
         {0.8, 1.2, 4.0, 5.2},
@@ -79,11 +93,11 @@ int main() {
     const auto transitive_cluster =
         selectFutureA1ProtectedCluster(transitive, 0.6, 0.0);
     if (transitive_cluster.protected_indices !=
-        std::vector<size_t>({0, 1, 2})) {
-        return fail("future-exit conflict closure was not transitive");
+        std::vector<size_t>({0})) {
+        return fail("other-path transitivity expanded first closure");
     }
 
-    // F. A disconnected remote zone must not become protected.
+    // G. A disconnected remote zone must not become protected.
     const std::vector<FutureA1ConflictInterval> remote{
         {0.0, 0.5, 2.0, 2.5},
         {2.0, 2.5, 8.0, 8.5}};
@@ -93,7 +107,7 @@ int main() {
         return fail("disconnected remote future-exit zone was protected");
     }
 
-    // G. A fully passed zone cannot affect or bridge the current cluster.
+    // H. A fully passed zone cannot affect or bridge the current cluster.
     const auto passed_cluster =
         selectFutureA1ProtectedCluster(double_zone, 0.756, 5.5);
     if (!passed_cluster.protected_indices.empty() ||
@@ -101,9 +115,9 @@ int main() {
         return fail("fully passed future-exit zone still affected admission");
     }
 
-    // H. Entering any member of the closure preserves actual occupancy.
+    // I. Entering any member of the closure preserves actual occupancy.
     const auto inside_cluster =
-        selectFutureA1ProtectedCluster(double_zone, 0.756, 4.7);
+        selectFutureA1ProtectedCluster(double_zone, 0.756, 4.9);
     if (!inside_cluster.other_already_inside) {
         return fail("actual occupancy inside protected closure was missed");
     }
@@ -117,8 +131,8 @@ int main() {
 
     // Departure B/C. The cluster lifetime is independent of a Future
     // candidate and lasts through the maximum owner-side exit.
-    if (departureClusterCleared(3.125, 3.125, 0.490, 3.050) ||
-        !departureClusterCleared(3.126, 3.125, 0.490, 3.050)) {
+    if (departureClusterCleared(3.125, 3.125) ||
+        !departureClusterCleared(3.126, 3.125)) {
         return fail("departure cluster release boundary is incorrect");
     }
 
@@ -135,7 +149,8 @@ int main() {
     for (size_t index : transitive_cluster.protected_indices) {
         handoff_intervals.push_back(transitive[index]);
     }
-    if (!futureA1OtherInsideCluster(handoff_intervals, 4.050) ||
+    if (!futureA1OtherInsideCluster(handoff_intervals, 5.050) ||
+        futureA1OtherInsideCluster(handoff_intervals, 4.050) ||
         futureA1OtherInsideCluster(handoff_intervals, 8.100)) {
         return fail("departure cluster actual occupancy classification failed");
     }
@@ -164,19 +179,20 @@ int main() {
     std::cout << "A no_owner_when_all_eta_exceed_horizon=PASS\n"
               << "C future_exit_enter=3.075 ordinary_enter=2.175 "
                  "stop_s=2.165 PASS\n"
-              << "D closure_zones=[0,1] future_exit_enter=4.125 "
-                 "stop_s=4.115 PASS\n"
-              << "E transitive_closure=PASS\n"
-              << "F disconnected_remote_zone=PASS\n"
-              << "G passed_zone_excluded=PASS\n"
-              << "H actual_occupancy_preserved=PASS\n"
+              << "D first_closure_zones=[0] future_exit_enter=4.800 "
+                 "stop_s=4.790 PASS\n"
+              << "E connected_multi_zone_closure=PASS\n"
+              << "F remote_other_path_overlap_excluded=PASS\n"
+              << "G disconnected_remote_zone=PASS\n"
+              << "H passed_zone_excluded=PASS\n"
+              << "I physical_intrusion_detected=PASS\n"
               << "Departure-A handoff_stop_s=0.490 PASS\n"
               << "Departure-B future_candidate_independent=PASS\n"
               << "Departure-C owner_release_exit=3.125 PASS\n"
               << "Departure-D generation_invalidation=PASS\n"
               << "Departure-E remote_zone_excluded=PASS\n"
               << "Departure-F snapshot_restore=PASS\n"
-              << "Departure-G already_inside_actual_priority=PASS\n"
+              << "Departure-G intrusion_geometry_detected=PASS\n"
               << "future_a1_policy_test: PASS\n";
     return 0;
 }

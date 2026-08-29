@@ -793,7 +793,7 @@ void RuleEngine::applyActionRequest(VehicleAgent& v, VehicleAction action,
 
 void RuleEngine::refreshDepartureClusterCommitments(
     std::vector<VehicleAgent>& vehicles) {
-    a1_.refreshDepartureClusters(
+    const auto requests = a1_.refreshDepartureClusters(
         vehicles, [this](const VehicleAgent& first,
                          const VehicleAgent& second) {
             const VehicleAgent& lo = first.id < second.id ? first : second;
@@ -801,6 +801,14 @@ void RuleEngine::refreshDepartureClusterCommitments(
             const auto& cached = conflictBlocksCanonical(lo, hi);
             return std::vector<ConflictZone>(cached.begin(), cached.end());
         });
+    for (const A1ActionRequest& request : requests) {
+        for (VehicleAgent& vehicle : vehicles) {
+            if (vehicle.id != request.vehicle_id) continue;
+            applyActionRequest(vehicle, request.action, request.reason,
+                               request.blocker_id);
+            break;
+        }
+    }
     return;
 }
 

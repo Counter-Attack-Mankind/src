@@ -55,10 +55,8 @@ struct DepartureClusterCommitment {
     double waiter_physical_entry_s = 0.0;
     double waiter_control_stop_s = 0.0;
     double owner_release_exit_s = 0.0;
-    double other_release_exit_s = 0.0;
     bool active = false;
     bool handed_off_from_future = false;
-    bool handoff_already_inside = false;
     bool hold_logged = false;
 };
 
@@ -66,7 +64,6 @@ enum class A1AuthoritySource {
     NONE,
     FUTURE_COMMITMENT,
     DEPARTURE_CLUSTER,
-    ACTUAL_OCCUPANCY,
 };
 
 struct A1PairAuthority {
@@ -84,12 +81,13 @@ struct A1ActionRequest {
 
 struct A1LaunchAdmission {
     bool departure_resource_conflict = false;
-    bool actual_occupancy_priority = false;
+    bool invariant_violation = false;
     bool owner_uses_pending_preview = false;
     size_t protected_zone_count = 0;
 };
 
 struct A1CoordinationSnapshot {
+    FutureA1Commitment future_commitment;
     std::map<std::pair<int, int>, DepartureClusterCommitment>
         departure_clusters;
 };
@@ -129,8 +127,9 @@ public:
     A1PairAuthority departureAuthorityForPair(
         const VehicleAgent& a, const VehicleAgent& b) const;
 
-    void refreshDepartureClusters(std::vector<VehicleAgent>& vehicles,
-                                  const ComputeZones& canonical_zones);
+    std::vector<A1ActionRequest> refreshDepartureClusters(
+        std::vector<VehicleAgent>& vehicles,
+        const ComputeZones& canonical_zones);
     std::vector<A1ActionRequest> enforceFutureAdmission(
         std::vector<VehicleAgent>& vehicles, double dt,
         const ComputeZones& compute_full,
@@ -143,7 +142,7 @@ public:
         const VehicleAgent& launch_candidate,
         const ComputeZones& compute_full) const;
 
-    size_t activeDepartureClusterCount(int owner_id) const;
+    size_t departureClusterCount(int owner_id) const;
     const std::map<std::pair<int, int>, DepartureClusterCommitment>&
     departureClusters() const {
         return departure_clusters_;

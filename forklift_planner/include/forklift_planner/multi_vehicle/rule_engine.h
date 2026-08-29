@@ -124,8 +124,7 @@ public:
                 };
                 const VehicleAgent* va = find(a);
                 const VehicleAgent* vb = find(b);
-                return va && vb ? unifiedPriority(*va, *vb)
-                                : std::min(a, b);
+                return va && vb ? unifiedPriority(*va, *vb) : b;
             });
     }
 

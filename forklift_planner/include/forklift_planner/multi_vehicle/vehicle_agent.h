@@ -96,7 +96,6 @@ struct VehicleAgent {
     // A narrowly-scoped priority for the first A1 departure maneuver. It is
     // cleared after the complete body has passed the first REVERSE->FORWARD
     // cusp; it must never turn the whole A1->B route into a privileged path.
-    bool a1_departure_committed = false;
     // The A1->B plan has been activated. In real mode this does not imply that
     // the physical vehicle has started to leave A1.
     bool a1_departure_plan_active = false;

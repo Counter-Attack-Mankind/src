@@ -353,7 +353,7 @@ int main() {
         crossingVehicle(1, 0.70, true)};
     departure_flag[0].mission_phase = MissionPhase::TO_B;
     departure_flag[1].mission_phase = MissionPhase::TO_B;
-    departure_flag[0].a1_departure_committed = true;
+    departure_flag[0].a1_departure_plan_active = true;
     departure_flag[0].a1_departure_priority_until_s = 1.0;
     departure_flag_engine.decide(departure_flag, 0.1, 15.0);
     if (!departure_flag_engine.snapshot().reservations.empty() ||
@@ -422,7 +422,6 @@ int main() {
     active_commitment.intervals.push_back(
         FutureA1ConflictInterval{0.10, 1.50, 0.40, 1.60});
     active_commitment.owner_release_exit_s = 1.50;
-    active_commitment.other_release_exit_s = 1.60;
     active_commitment.active = true;
     active_state.a1.departure_clusters[{0, 1}] = active_commitment;
     active_cluster_engine.restore(active_state);

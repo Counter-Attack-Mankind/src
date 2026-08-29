@@ -260,6 +260,8 @@ private:
         int path_gen = -1;
         double arrival_time = -1.0;
         double to_b_time = -1.0;
+        bool from_unload_dwell = false;
+        double dwell_time = 0.0;
     };
 
     struct A1ArrivalSummary {
@@ -818,19 +820,38 @@ private:
             0, static_cast<int>(std::ceil(std::max(0.0, horizon) / dt)));
 
         for (const VehicleAgent& v : agents_) {
-            if (!targetEnabled(v.id) || !v.active() ||
-                v.mission_phase != MissionPhase::TO_A1 ||
-                v.leg_target != LegTargetKind::A1 || v.track.empty()) {
+            if (!targetEnabled(v.id)) continue;
+
+            VehicleAgent preview = v;
+            double stationary_time = 0.0;
+            bool from_unload_dwell = false;
+            if (v.active() && v.mission_phase == MissionPhase::TO_A1 &&
+                v.leg_target == LegTargetKind::A1 && !v.track.empty()) {
+                // Continue below from the observed path progress and speed.
+            } else if (!one_shot_ && v.mode == VehicleMode::DWELL &&
+                       v.mission_phase == MissionPhase::UNLOAD_DWELL) {
+                from_unload_dwell = true;
+                stationary_time = std::max(0.0, v.dwell_remaining);
+                if (stationary_time > horizon + 1e-9 ||
+                    !allocator_->assignPickupLeg(preview,
+                                                 /*emit_log=*/false)) {
+                    summary.excluded[v.id] = "dwell_or_pickup_unavailable";
+                    continue;
+                }
+                preview.current_speed = 0.0;
+            } else {
                 continue;
             }
 
-            VehicleAgent preview = v;
             double arrival_time = -1.0;
             if (preview.path_s >= preview.track.length() - 1e-9) {
-                arrival_time = 0.0;
+                arrival_time = stationary_time;
             } else {
+                const int motion_steps = std::max(
+                    0, static_cast<int>(std::ceil(
+                        std::max(0.0, horizon - stationary_time) / dt)));
                 for (int step = 1;
-                     step <= max_steps &&
+                     step <= std::min(max_steps, motion_steps) &&
                      preview.path_s < preview.track.length() - 1e-9;
                      ++step) {
                     const double desired = std::min(
@@ -845,7 +866,8 @@ private:
                         preview.path_s + preview.current_speed * dt);
                     if (preview.path_s <= old_s + 1e-12) break;
                     if (preview.path_s >= preview.track.length() - 1e-9) {
-                        arrival_time = static_cast<double>(step) * dt;
+                        arrival_time = stationary_time +
+                            static_cast<double>(step) * dt;
                     }
                 }
             }
@@ -860,9 +882,35 @@ private:
             prediction.path_gen = v.path_gen;
             prediction.arrival_time = arrival_time;
             prediction.to_b_time = arrival_time + cfg_.pickup_dwell_time;
+            prediction.from_unload_dwell = from_unload_dwell;
+            prediction.dwell_time = stationary_time;
             summary.candidates[v.id] = prediction;
         }
         return summary;
+    }
+
+    bool prepareFutureA1OwnerDeparture() {
+        const auto& commitment = rule_engine_->futureA1Commitment();
+        if (!commitment.valid()) return true;
+        VehicleAgent* owner = agentById(commitment.owner_id);
+        if (owner == nullptr) return false;
+        if (owner->pending_dropoff_valid &&
+            !owner->pending_dropoff_track.empty()) {
+            return true;
+        }
+        if (owner->mission_phase != MissionPhase::TO_A1 &&
+            owner->mission_phase != MissionPhase::UNLOAD_DWELL) {
+            return false;
+        }
+        if (allocator_->prepareDropoffLeg(*owner, agents_)) {
+            force_horizon_refresh_ = true;
+            return true;
+        }
+        ROS_ERROR("[A1_OWNER_PREPARE_FAILED] owner=V%d phase=%s path_gen=%d",
+                  owner->id, missionPhaseName(owner->mission_phase),
+                  owner->path_gen);
+        rule_engine_->clearFutureA1Commitment();
+        return false;
     }
 
     void logFutureA1Transition(
@@ -896,6 +944,10 @@ private:
             candidates << "V" << item.first << ":" << std::fixed
                        << std::setprecision(2) << item.second.arrival_time
                        << "s";
+            if (item.second.from_unload_dwell) {
+                candidates << "(UNLOAD_DWELL+"
+                           << item.second.dwell_time << "s)";
+            }
         }
         candidates << "]";
         std::ostringstream excluded;
@@ -1016,6 +1068,7 @@ private:
         }
         const auto update = rule_engine_->updateFutureA1Owner(
             candidates, agents_, std::max(0.02, cfg_.prediction_step));
+        prepareFutureA1OwnerDeparture();
         const auto commitment = update.current;
         std::vector<SimPlanFrame> frames;
         rollWorldModel(rb_horizon_, trajs, hold, &frames,
@@ -1294,6 +1347,7 @@ private:
             const auto update = rule_engine_->updateFutureA1Owner(
                 candidates, agents_,
                 std::max(0.02, cfg_.prediction_step));
+            prepareFutureA1OwnerDeparture();
             logFutureA1Transition(previous, update.current, arrivals,
                                   update.reason);
             rollWorldModel(rb_horizon_, trajs, hold);
@@ -1534,8 +1588,8 @@ private:
                          ? "pending_preview" : "actual_to_b")
                  << " protected_zones="
                  << admission.a1.protected_zone_count
-                 << " actual_occupancy_priority="
-                 << (admission.a1.actual_occupancy_priority ? 1 : 0);
+                 << " invariant_violation="
+                 << (admission.a1.invariant_violation ? 1 : 0);
         }
         ROS_WARN("%s", line.str().c_str());
         coordLogWithContext(line.str(), "REAL", sim_plan_id_, -1, -1);
@@ -1560,9 +1614,11 @@ private:
         const auto admission = rule_engine_->checkSlotDepartureAdmission(
             owner, candidate, agents_, rb_horizon_);
         const bool hold = !admission.clear;
-        const std::string hold_reason = admission.ordinary_road_conflict
-            ? "ordinary_immediate_conflict"
-            : "a1_departure_prefix_conflict";
+        const std::string hold_reason = admission.a1.invariant_violation
+            ? "a1_admission_invariant_violation"
+            : admission.ordinary_road_conflict
+                ? "ordinary_immediate_conflict"
+                : "a1_departure_prefix_conflict";
         auto held = a1_launch_holds_.find(vehicle.id);
         if (hold) {
             const bool changed = held == a1_launch_holds_.end() ||
@@ -1605,9 +1661,7 @@ private:
 
         std::string allow_reason = "no_service_owner";
         if (owner != nullptr) {
-            allow_reason = admission.a1.actual_occupancy_priority
-                ? "actual_occupancy_priority"
-                : "slot_departure_clear";
+            allow_reason = "slot_departure_clear";
         }
         if (held != a1_launch_holds_.end()) {
             const double duration = sim_time_ - held->second.since;
@@ -2198,17 +2252,6 @@ private:
             v.current_speed = next_speed[i];
             v.path_s = next_s[i];
 
-            if (v.a1_departure_committed &&
-                v.path_s >= v.a1_departure_priority_until_s - 1e-9) {
-                v.a1_departure_committed = false;
-                if (!sim_mode_) {
-                    ROS_INFO("[multi_patrol][A1 EXIT PRIORITY RELEASE] V%d "
-                             "s=%.3f threshold=%.3f",
-                             v.id, v.path_s,
-                             v.a1_departure_priority_until_s);
-                }
-            }
-
             if (v.path_s >= v.track.length() - 1e-9) {
                 handleLegArrival(v);
                 // 批处理(长测)里关掉每次到位的 INFO——24h×8车×数千任务=2万+条,会把
@@ -2347,8 +2390,9 @@ private:
                 owner.mission_phase == MissionPhase::PICKUP_DWELL &&
                 owner.pending_dropoff_valid &&
                 !owner.pending_dropoff_track.empty();
-            const bool active_owner =
-                owner.active() && owner.a1_departure_committed;
+            const bool active_owner = owner.active() &&
+                owner.mission_phase == MissionPhase::TO_B &&
+                owner.a1_departure_plan_active;
             if (!pending_owner && !active_owner) {
                 continue;
             }
@@ -3496,8 +3540,7 @@ public:
                 << " intervals=" << c.intervals.size()
                 << " physical_entry_s=" << c.waiter_physical_entry_s
                 << " control_stop_s=" << c.waiter_control_stop_s
-                << " release=" << c.owner_release_exit_s << "/"
-                << c.other_release_exit_s;
+                << " owner_release_exit_s=" << c.owner_release_exit_s;
         }
         const auto& future = rule_engine_->futureA1Commitment();
         out << "\n  future_a1=";

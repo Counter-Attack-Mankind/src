@@ -1178,6 +1178,13 @@ double TaskAllocator::slotDepartureClearS(const PathTrack& track,
 
 bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle, bool emit_log) {
     if (!cfg_.use_a1_cycle) return false;
+    // A future A1 owner may reserve its next A1->B intent while it is still
+    // finishing UNLOAD_DWELL. Preserve that frozen intent when the intervening
+    // B->A1 leg is activated.
+    const bool keep_prepared_departure = vehicle.pending_dropoff_valid;
+    const int prepared_slot = vehicle.pending_dropoff_slot;
+    const PathTrack prepared_track = vehicle.pending_dropoff_track;
+    const double prepared_until = vehicle.a1_departure_priority_until_s;
     if (vehicle.current_slot < 0 ||
         vehicle.current_slot >= static_cast<int>(map_.slots().size())) {
         return false;
@@ -1209,13 +1216,14 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle, bool emit_log) {
     vehicle.dwell_remaining = 0.0;
     vehicle.target_slot = -1;  // A1 is not an element of map_.slots().
     vehicle.loaded = false;
-    vehicle.pending_dropoff_slot = -1;
-    vehicle.pending_dropoff_track = PathTrack{};
-    vehicle.pending_dropoff_valid = false;
-    vehicle.a1_departure_committed = false;
+    vehicle.pending_dropoff_slot = keep_prepared_departure ? prepared_slot : -1;
+    vehicle.pending_dropoff_track = keep_prepared_departure
+        ? prepared_track : PathTrack{};
+    vehicle.pending_dropoff_valid = keep_prepared_departure;
     vehicle.a1_departure_plan_active = false;
     vehicle.a1_physical_departure_started = false;
-    vehicle.a1_departure_priority_until_s = 0.0;
+    vehicle.a1_departure_priority_until_s = keep_prepared_departure
+        ? prepared_until : 0.0;
     vehicle.leg_target = LegTargetKind::A1;
     vehicle.mission_phase = MissionPhase::TO_A1;
     vehicle.mode = VehicleMode::ACTIVE;
@@ -1306,9 +1314,9 @@ bool TaskAllocator::prepareDropoffLeg(
                (!require_no_arc || !leg.info.used_arc_fallback);
     };
 
-    // At this point the B->A1 leg has already been completed. Select using
-    // only the still-future A1->B leg; otherwise an arc/failure on the past
-    // approach could incorrectly reject an otherwise valid departure.
+    // Select using only the future A1->B leg. A locked owner may reserve this
+    // intent during UNLOAD_DWELL, before its intervening B->A1 leg starts;
+    // the B->A1 feasibility is handled independently by assignPickupLeg().
     const auto chooseExitTarget = [&](bool require_no_arc) {
         std::vector<int> candidates;
         for (int candidate = 0;
@@ -1391,7 +1399,6 @@ bool TaskAllocator::activatePreparedDropoffLeg(VehicleAgent& vehicle,
     // from path progress in simulation).
     vehicle.a1_departure_plan_active = true;
     vehicle.a1_physical_departure_started = false;
-    vehicle.a1_departure_committed = !cfg_.real_mode;
     vehicle.pending_dropoff_slot = -1;
     vehicle.pending_dropoff_track = PathTrack{};
     vehicle.pending_dropoff_valid = false;

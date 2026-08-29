@@ -36,10 +36,8 @@ bool sameDepartureCluster(const DepartureClusterCommitment& a,
            a.waiter_physical_entry_s == b.waiter_physical_entry_s &&
            a.waiter_control_stop_s == b.waiter_control_stop_s &&
            a.owner_release_exit_s == b.owner_release_exit_s &&
-           a.other_release_exit_s == b.other_release_exit_s &&
            a.active == b.active &&
-           a.handed_off_from_future == b.handed_off_from_future &&
-           a.handoff_already_inside == b.handoff_already_inside;
+           a.handed_off_from_future == b.handed_off_from_future;
 }
 
 void logDepartureCluster(
@@ -84,10 +82,38 @@ void logDepartureCluster(
          << " owner_s=" << owner_s
          << " other_s=" << other_s
          << " future_handoff="
-         << (commitment.handed_off_from_future ? "true" : "false")
-         << " already_inside="
-         << (commitment.handoff_already_inside ? "true" : "false");
+         << (commitment.handed_off_from_future ? "true" : "false");
     sink(line.str());
+}
+
+void logInvariantViolation(
+    const std::function<void(const std::string&)>& sink,
+    const std::string& debug_prefix, const char* stage,
+    const DepartureClusterCommitment& cluster,
+    const VehicleAgent& owner, const VehicleAgent& intruder,
+    double owner_s, double intruder_s) {
+    std::ostringstream line;
+    line << std::fixed << std::setprecision(3)
+         << "[A1_ADMISSION_INVARIANT_VIOLATION] stage=" << stage
+         << " owner=V" << owner.id
+         << " intruder=V" << intruder.id
+         << " owner_gen=" << owner.path_gen
+         << " intruder_gen=" << intruder.path_gen
+         << " owner_s=" << owner_s
+         << " intruder_s=" << intruder_s
+         << " owner_phase=" << missionPhaseName(owner.mission_phase)
+         << " intruder_phase=" << missionPhaseName(intruder.mission_phase)
+         << " intervals=[";
+    for (size_t i = 0; i < cluster.intervals.size(); ++i) {
+        if (i > 0) line << ";";
+        const auto& interval = cluster.intervals[i];
+        line << "(" << interval.owner_enter << "," << interval.owner_exit
+             << ":" << interval.other_enter << "," << interval.other_exit
+             << ")";
+    }
+    line << "]";
+    if (sink) sink(line.str());
+    ROS_ERROR("%s %s", debug_prefix.c_str(), line.str().c_str());
 }
 
 }  // namespace
@@ -163,10 +189,29 @@ FutureA1Commitment A1Coordinator::retainOwner(
             });
     };
 
+    if (owner.mission_phase == MissionPhase::UNLOAD_DWELL) {
+        if (owner.mode != VehicleMode::DWELL ||
+            owner.path_gen != retained.owner_path_gen) {
+            reason = "pre_service_dwell_invalid";
+            return FutureA1Commitment{};
+        }
+        const auto prediction = candidateForOwner();
+        if (prediction != candidates.end()) {
+            retained.predicted_a1_arrival_time = prediction->arrival_time;
+            retained.predicted_to_b_time = prediction->to_b_time;
+        }
+        reason = "service_owner_locked_unload_dwell";
+        return retained;
+    }
+
     if (owner.mission_phase == MissionPhase::TO_A1) {
+        const bool same_generation =
+            owner.path_gen == retained.owner_path_gen;
+        const bool launched_from_locked_dwell =
+            owner.path_gen == retained.owner_path_gen + 1;
         if (owner.mode != VehicleMode::ACTIVE ||
             owner.leg_target != LegTargetKind::A1 ||
-            owner.path_gen != retained.owner_path_gen ||
+            (!same_generation && !launched_from_locked_dwell) ||
             !owner.pending_dropoff_valid ||
             owner.pending_dropoff_track.empty()) {
             reason = "to_a1_service_invalid";
@@ -177,6 +222,7 @@ FutureA1Commitment A1Coordinator::retainOwner(
             retained.predicted_a1_arrival_time = prediction->arrival_time;
             retained.predicted_to_b_time = prediction->to_b_time;
         }
+        retained.owner_path_gen = owner.path_gen;
         reason = "service_owner_locked_to_a1";
         return retained;
     }
@@ -195,14 +241,6 @@ FutureA1Commitment A1Coordinator::retainOwner(
         return retained;
     }
 
-    if (owner.mission_phase == MissionPhase::UNLOAD_DWELL &&
-        owner.path_gen == retained.owner_path_gen &&
-        owner.path_s >= owner.a1_departure_priority_until_s - 1e-9 &&
-        activeDepartureClusterCount(owner.id) == 0) {
-        reason = "departure_resource_clear";
-        return FutureA1Commitment{};
-    }
-
     if (owner.mission_phase != MissionPhase::TO_B ||
         owner.mode != VehicleMode::ACTIVE ||
         owner.leg_target != LegTargetKind::B_SLOT || !owner.loaded ||
@@ -219,23 +257,16 @@ FutureA1Commitment A1Coordinator::retainOwner(
         return FutureA1Commitment{};
     }
 
-    const size_t active_clusters = activeDepartureClusterCount(owner.id);
-    const bool prefix_clear =
-        owner.path_s >= owner.a1_departure_priority_until_s - 1e-9;
-    if (prefix_clear && active_clusters == 0) {
-        reason = "departure_resource_clear";
-        return FutureA1Commitment{};
-    }
-    if (!owner.a1_departure_plan_active && !prefix_clear) {
+    if (!owner.a1_departure_plan_active) {
         reason = "departure_plan_lost_before_clear";
         return FutureA1Commitment{};
     }
     retained.owner_path_gen = owner.path_gen;
     retained.predicted_a1_arrival_time = 0.0;
     retained.predicted_to_b_time = 0.0;
-    reason = active_clusters > 0
-        ? "service_owner_locked_active_cluster"
-        : "service_owner_locked_departure_prefix";
+    reason = departureClusterCount(owner.id) > 0
+        ? "service_owner_locked_departure_closure"
+        : "service_owner_locked_pending_handoff";
     return retained;
 }
 
@@ -403,8 +434,7 @@ A1PairAuthority A1Coordinator::futureAuthorityForPair(
     const FutureA1ZoneSelection selected = selectProtectedZones(
         cache.blocks, preview_is_lo,
         owner->a1_departure_priority_until_s, other_s);
-    if (selected.protected_indices.empty() ||
-        (other_confirmed && selected.other_already_inside)) {
+    if (selected.protected_indices.empty()) {
         return result;
     }
 
@@ -449,22 +479,16 @@ A1PairAuthority A1Coordinator::departureAuthorityForPair(
         other->path_gen != cluster.other_path_gen) {
         return result;
     }
-    bool confirmed = false;
-    const double other_s = occupancyPathS(*other, &confirmed);
     result.protected_pair = true;
-    if (confirmed && futureA1OtherInsideCluster(cluster.intervals, other_s)) {
-        result.owner_id = other->id;
-        result.source = A1AuthoritySource::ACTUAL_OCCUPANCY;
-    } else {
-        result.owner_id = owner->id;
-        result.source = A1AuthoritySource::DEPARTURE_CLUSTER;
-    }
+    result.owner_id = owner->id;
+    result.source = A1AuthoritySource::DEPARTURE_CLUSTER;
     return result;
 }
 
-void A1Coordinator::refreshDepartureClusters(
+std::vector<A1ActionRequest> A1Coordinator::refreshDepartureClusters(
     std::vector<VehicleAgent>& vehicles,
     const ComputeZones& canonical_zones) {
+    std::vector<A1ActionRequest> requests;
     auto agentById = [&](int id) -> VehicleAgent* {
         for (VehicleAgent& vehicle : vehicles) {
             if (vehicle.id == id) return &vehicle;
@@ -483,13 +507,18 @@ void A1Coordinator::refreshDepartureClusters(
             cfg_.max_decel, 0.0);
         return departure_clusters_.erase(it);
     };
+    std::set<int> owners_ready_to_release;
 
     for (auto it = departure_clusters_.begin();
          it != departure_clusters_.end();) {
         DepartureClusterCommitment& cluster = it->second;
         VehicleAgent* owner = agentById(cluster.owner_id);
         VehicleAgent* other = agentById(cluster.other_id);
-        if (owner == nullptr || other == nullptr || !owner->active() ||
+        const bool owner_pre_service_dwell = owner != nullptr &&
+            owner->mode == VehicleMode::DWELL &&
+            owner->mission_phase == MissionPhase::UNLOAD_DWELL;
+        if (owner == nullptr || other == nullptr ||
+            (!owner->active() && !owner_pre_service_dwell) ||
             !other->active() || owner->track.empty() || other->track.empty()) {
             it = eraseWithEvent(it, "INVALIDATE", "vehicle_or_path_invalid");
             continue;
@@ -503,23 +532,36 @@ void A1Coordinator::refreshDepartureClusters(
                 cluster.active = true;
                 bool confirmed = false;
                 const double other_s = occupancyPathS(*other, &confirmed);
-                cluster.handoff_already_inside = confirmed &&
+                const bool intruder_inside = confirmed &&
                     futureA1OtherInsideCluster(cluster.intervals, other_s);
                 logDepartureCluster(
-                    coord_log_sink_, "CREATE",
-                    cluster.handoff_already_inside
-                        ? "handoff_already_inside" : "future_handoff",
+                    coord_log_sink_, "ACTIVATE", "future_handoff",
                     cluster, owner->path_s, other_s,
                     std::max(0.0, other->current_speed), cfg_.max_decel, 0.0);
+                if (intruder_inside) {
+                    logInvariantViolation(
+                        coord_log_sink_, debug_log_prefix_, "staged_to_active",
+                        cluster, *owner, *other, owner->path_s, other_s);
+                    requests.push_back({owner->id, VehicleAction::STOP,
+                                        other->id,
+                                        "a1_admission_invariant_violation"});
+                    requests.push_back({other->id, VehicleAction::STOP,
+                                        owner->id,
+                                        "a1_admission_invariant_violation"});
+                }
                 ++it;
                 continue;
             }
+            const int expected_departure_gen =
+                owner->path_gen +
+                (owner->mission_phase == MissionPhase::UNLOAD_DWELL ? 2 : 1);
             const bool preview_still_matches =
-                (owner->mission_phase == MissionPhase::TO_A1 ||
+                (owner->mission_phase == MissionPhase::UNLOAD_DWELL ||
+                 owner->mission_phase == MissionPhase::TO_A1 ||
                  owner->mission_phase == MissionPhase::PICKUP_DWELL) &&
                 owner->pending_dropoff_valid &&
                 !owner->pending_dropoff_track.empty() &&
-                owner->path_gen + 1 == cluster.owner_path_gen &&
+                expected_departure_gen == cluster.owner_path_gen &&
                 other->path_gen == cluster.other_path_gen &&
                 other->mission_phase == MissionPhase::TO_A1 &&
                 (owner->mission_phase == MissionPhase::PICKUP_DWELL ||
@@ -538,93 +580,143 @@ void A1Coordinator::refreshDepartureClusters(
                 cluster.owner_path_gen, owner->path_gen,
                 cluster.other_path_gen, other->path_gen)) {
             it = eraseWithEvent(it, "INVALIDATE", "path_gen_changed");
-        } else if (owner->mission_phase != MissionPhase::TO_B ||
-                   other->mission_phase != MissionPhase::TO_A1) {
+        } else if (owner->mission_phase != MissionPhase::TO_B) {
             it = eraseWithEvent(it, "INVALIDATE", "mission_phase_changed");
         } else {
             bool owner_confirmed = false;
             bool other_confirmed = false;
             const double owner_s = occupancyPathS(*owner, &owner_confirmed);
             const double other_s = occupancyPathS(*other, &other_confirmed);
+            double owner_transaction_exit_s = 0.0;
+            for (const auto& entry : departure_clusters_) {
+                if (entry.second.owner_id == owner->id) {
+                    owner_transaction_exit_s = std::max(
+                        owner_transaction_exit_s,
+                        entry.second.owner_release_exit_s);
+                }
+            }
             const bool owner_cleared = owner_confirmed &&
                 (!cfg_.real_mode || owner->a1_physical_departure_started) &&
-                owner_s > cluster.owner_release_exit_s + 1e-9;
-            const bool other_cleared = other_confirmed &&
-                other_s > cluster.other_release_exit_s + 1e-9;
-            if (owner_cleared || other_cleared) {
-                it = eraseWithEvent(
-                    it, "RELEASE",
-                    owner_cleared ? "owner_physically_cleared_cluster"
-                                  : "other_physically_cleared_cluster");
+                owner_s > owner_transaction_exit_s + 1e-9;
+            const bool intruder_inside = other_confirmed &&
+                futureA1OtherInsideCluster(cluster.intervals, other_s);
+            if (intruder_inside) {
+                logInvariantViolation(
+                    coord_log_sink_, debug_log_prefix_, "active_refresh",
+                    cluster, *owner, *other, owner_s, other_s);
+                requests.push_back({owner->id, VehicleAction::STOP, other->id,
+                                    "a1_admission_invariant_violation"});
+                requests.push_back({other->id, VehicleAction::STOP, owner->id,
+                                    "a1_admission_invariant_violation"});
+            }
+            if (owner_cleared) {
+                owners_ready_to_release.insert(owner->id);
+                ++it;
             } else {
                 ++it;
             }
         }
     }
 
-    for (VehicleAgent& owner : vehicles) {
-        if (!owner.active() || owner.track.empty() ||
-            owner.mission_phase != MissionPhase::TO_B ||
-            !owner.a1_departure_plan_active ||
-            owner.a1_departure_priority_until_s <= 1e-9) {
-            continue;
+    // Pair closures are frozen members of one A1 transaction. Release all
+    // pairs together only after the owner clears the farthest owner-side
+    // boundary; an earlier pair boundary cannot partially end protection.
+    for (int released_owner : owners_ready_to_release) {
+        for (auto it = departure_clusters_.begin();
+             it != departure_clusters_.end();) {
+            if (it->second.owner_id != released_owner) {
+                ++it;
+                continue;
+            }
+            it = eraseWithEvent(
+                it, "RELEASE",
+                "owner_physically_cleared_transaction_boundary");
         }
+        if (future_commitment_.valid() &&
+            future_commitment_.owner_id == released_owner) {
+            if (coord_log_sink_) {
+                coord_log_sink_(
+                    "[A1_TRANSACTION] event=RELEASE reason="
+                    "owner_cleared_farthest_departure_boundary owner=V" +
+                    std::to_string(released_owner));
+            }
+            clearFutureCommitment();
+        }
+    }
+
+    // A TO_B owner with a matching first-closure geometry but no staged
+    // commitment is an invariant failure. Never reconstruct a fresh closure
+    // from the full route after handoff or after RELEASE.
+    if (future_commitment_.valid()) {
+        VehicleAgent* owner = agentById(future_commitment_.owner_id);
+        if (owner != nullptr && owner->active() &&
+            owner->mission_phase == MissionPhase::TO_B &&
+            owner->a1_departure_plan_active) {
+        bool missing_handoff_detected = false;
         for (VehicleAgent& other : vehicles) {
-            if (other.id == owner.id || !other.active() || other.track.empty() ||
+            if (other.id == owner->id || !other.active() || other.track.empty() ||
                 other.mission_phase != MissionPhase::TO_A1) {
                 continue;
             }
-            const std::pair<int, int> key{std::min(owner.id, other.id),
-                                          std::max(owner.id, other.id)};
+            const std::pair<int, int> key{std::min(owner->id, other.id),
+                                          std::max(owner->id, other.id)};
             if (departure_clusters_.count(key) != 0) continue;
-            const bool owner_is_lo = owner.id < other.id;
-            const VehicleAgent& lo = owner_is_lo ? owner : other;
-            const VehicleAgent& hi = owner_is_lo ? other : owner;
+            const bool owner_is_lo = owner->id < other.id;
+            const VehicleAgent& lo = owner_is_lo ? *owner : other;
+            const VehicleAgent& hi = owner_is_lo ? other : *owner;
             const auto blocks = canonical_zones(lo, hi);
             bool other_confirmed = false;
             const double other_s = occupancyPathS(other, &other_confirmed);
             const FutureA1ZoneSelection selected = selectProtectedZones(
                 blocks, owner_is_lo,
-                owner.a1_departure_priority_until_s, other_s);
+                owner->a1_departure_priority_until_s, other_s);
             if (selected.protected_indices.empty() ||
                 selected.upstream_index < 0) {
                 continue;
             }
-            DepartureClusterCommitment cluster;
-            cluster.owner_id = owner.id;
-            cluster.owner_path_gen = owner.path_gen;
-            cluster.other_id = other.id;
-            cluster.other_path_gen = other.path_gen;
-            cluster.seed_indices = selected.seed_indices;
-            cluster.cluster_indices = selected.protected_indices;
-            cluster.waiter_physical_entry_s =
+            DepartureClusterCommitment missing;
+            missing.owner_id = owner->id;
+            missing.owner_path_gen = owner->path_gen;
+            missing.other_id = other.id;
+            missing.other_path_gen = other.path_gen;
+            missing.seed_indices = selected.seed_indices;
+            missing.cluster_indices = selected.protected_indices;
+            missing.waiter_physical_entry_s =
                 selected.normalized_zones[static_cast<size_t>(
                     selected.upstream_index)].s_other_enter;
-            cluster.waiter_control_stop_s = std::max(
-                0.0, cluster.waiter_physical_entry_s -
+            missing.waiter_control_stop_s = std::max(
+                0.0, missing.waiter_physical_entry_s -
                          cfg_.a1_control_stop_margin);
-            cluster.active = true;
-            cluster.handoff_already_inside =
-                other_confirmed && selected.other_already_inside;
             for (size_t index : selected.protected_indices) {
                 const ConflictZone& zone = selected.normalized_zones[index];
-                cluster.intervals.push_back(FutureA1ConflictInterval{
+                missing.intervals.push_back(FutureA1ConflictInterval{
                     zone.s_self_enter, zone.s_self_exit,
                     zone.s_other_enter, zone.s_other_exit});
-                cluster.owner_release_exit_s = std::max(
-                    cluster.owner_release_exit_s, zone.s_self_exit);
-                cluster.other_release_exit_s = std::max(
-                    cluster.other_release_exit_s, zone.s_other_exit);
+                missing.owner_release_exit_s = std::max(
+                    missing.owner_release_exit_s, zone.s_self_exit);
             }
-            departure_clusters_[key] = cluster;
-            logDepartureCluster(
-                coord_log_sink_, "CREATE",
-                cluster.handoff_already_inside
-                    ? "handoff_already_inside" : "deterministic_rebuild",
-                cluster, owner.path_s, other_s,
-                std::max(0.0, other.current_speed), cfg_.max_decel, 0.0);
+            logInvariantViolation(coord_log_sink_, debug_log_prefix_,
+                                  "missing_staged_handoff", missing,
+                                  *owner, other, owner->path_s, other_s);
+            missing_handoff_detected = true;
+            requests.push_back({owner->id, VehicleAction::STOP, other.id,
+                                "a1_missing_staged_closure"});
+            requests.push_back({other.id, VehicleAction::STOP, owner->id,
+                                "a1_missing_staged_closure"});
+        }
+        if (departureClusterCount(owner->id) == 0 &&
+            !missing_handoff_detected) {
+            if (coord_log_sink_) {
+                coord_log_sink_(
+                    "[A1_TRANSACTION] event=RELEASE reason="
+                    "no_first_departure_closure owner=V" +
+                    std::to_string(owner->id));
+            }
+            clearFutureCommitment();
+        }
         }
     }
+    return requests;
 }
 
 std::vector<A1ActionRequest> A1Coordinator::enforceFutureAdmission(
@@ -640,16 +732,22 @@ std::vector<A1ActionRequest> A1Coordinator::enforceFutureAdmission(
             break;
         }
     }
-    if (owner == nullptr || owner->path_gen != future_commitment_.owner_path_gen ||
+    const bool owner_generation_matches = owner != nullptr &&
+        (owner->path_gen == future_commitment_.owner_path_gen ||
+         (owner->mission_phase == MissionPhase::TO_A1 &&
+          owner->path_gen == future_commitment_.owner_path_gen + 1));
+    if (owner == nullptr || !owner_generation_matches ||
         !owner->pending_dropoff_valid || owner->pending_dropoff_track.empty() ||
-        (owner->mission_phase != MissionPhase::TO_A1 &&
+        (owner->mission_phase != MissionPhase::UNLOAD_DWELL &&
+         owner->mission_phase != MissionPhase::TO_A1 &&
          owner->mission_phase != MissionPhase::PICKUP_DWELL)) {
         return requests;
     }
     VehicleAgent preview = *owner;
     preview.track = owner->pending_dropoff_track;
     preview.path_s = 0.0;
-    preview.path_gen = owner->path_gen + 1;
+    preview.path_gen = owner->path_gen +
+        (owner->mission_phase == MissionPhase::UNLOAD_DWELL ? 2 : 1);
     preview.mode = VehicleMode::ACTIVE;
     preview.mission_phase = MissionPhase::TO_B;
     const double protected_until = owner->a1_departure_priority_until_s;
@@ -712,11 +810,11 @@ std::vector<A1ActionRequest> A1Coordinator::enforceFutureAdmission(
         }
         if (!future_entry_s) continue;
 
-        const bool already_inside = other_confirmed &&
+        bool already_inside = other_confirmed &&
             (future_zones.other_already_inside || ordinary_already_inside);
-        const std::optional<double> physical_entry_s = futureA1StopBoundary(
+        std::optional<double> physical_entry_s = futureA1StopBoundary(
             future_entry_s, ordinary_entry_s);
-        const double control_stop_s = std::max(
+        double control_stop_s = std::max(
             0.0, *physical_entry_s - cfg_.a1_control_stop_margin);
         const bool ordinary_selected_boundary = ordinary_entry_s &&
             std::abs(*ordinary_entry_s - *physical_entry_s) <= 1e-9;
@@ -726,7 +824,7 @@ std::vector<A1ActionRequest> A1Coordinator::enforceFutureAdmission(
         const std::pair<int, int> cluster_key{
             std::min(owner->id, other.id), std::max(owner->id, other.id)};
         auto existing = departure_clusters_.find(cluster_key);
-        if (existing == departure_clusters_.end() || !existing->second.active) {
+        if (existing == departure_clusters_.end()) {
             DepartureClusterCommitment staged;
             staged.owner_id = owner->id;
             staged.owner_path_gen = preview.path_gen;
@@ -737,7 +835,6 @@ std::vector<A1ActionRequest> A1Coordinator::enforceFutureAdmission(
             staged.waiter_physical_entry_s = *physical_entry_s;
             staged.waiter_control_stop_s = control_stop_s;
             staged.handed_off_from_future = true;
-            staged.handoff_already_inside = already_inside;
             for (size_t index : future_zones.protected_indices) {
                 const ConflictZone& zone = future_zones.normalized_zones[index];
                 staged.intervals.push_back(FutureA1ConflictInterval{
@@ -745,10 +842,23 @@ std::vector<A1ActionRequest> A1Coordinator::enforceFutureAdmission(
                     zone.s_other_enter, zone.s_other_exit});
                 staged.owner_release_exit_s = std::max(
                     staged.owner_release_exit_s, zone.s_self_exit);
-                staged.other_release_exit_s = std::max(
-                    staged.other_release_exit_s, zone.s_other_exit);
             }
-            departure_clusters_[cluster_key] = std::move(staged);
+            departure_clusters_[cluster_key] = staged;
+            logDepartureCluster(
+                coord_log_sink_, "STAGE", "owner_locked_first_closure",
+                staged, owner->path_s, other_s,
+                std::max(0.0, other.current_speed), cfg_.max_decel, dt);
+            existing = departure_clusters_.find(cluster_key);
+        } else if (!existing->second.active &&
+                   existing->second.owner_id == owner->id &&
+                   existing->second.owner_path_gen == preview.path_gen &&
+                   existing->second.other_path_gen == other.path_gen) {
+            // The staged geometry is immutable until the exact path-gen
+            // handoff. Use it rather than searching a later closure.
+            physical_entry_s = existing->second.waiter_physical_entry_s;
+            control_stop_s = existing->second.waiter_control_stop_s;
+            already_inside = other_confirmed && futureA1OtherInsideCluster(
+                existing->second.intervals, other_s);
         }
 
         const double speed = std::max(0.0, other.current_speed);
@@ -787,19 +897,31 @@ std::vector<A1ActionRequest> A1Coordinator::enforceFutureAdmission(
 
         const std::pair<int, int> log_key{owner->id, other.id};
         if (already_inside) {
+            const DepartureClusterCommitment& violation_cluster =
+                existing != departure_clusters_.end()
+                    ? existing->second : departure_clusters_.at(cluster_key);
+            logInvariantViolation(
+                coord_log_sink_, debug_log_prefix_, "future_admission",
+                violation_cluster, *owner, other, owner->path_s, other_s);
+            requests.push_back(A1ActionRequest{
+                owner->id, VehicleAction::STOP, other.id,
+                "a1_admission_invariant_violation"});
+            requests.push_back(A1ActionRequest{
+                other.id, VehicleAction::STOP, owner->id,
+                "a1_admission_invariant_violation"});
             if (admission_logged_.insert(log_key).second) {
                 std::ostringstream line;
                 line << std::fixed << std::setprecision(3)
                      << "[FUTURE_A1_ADMISSION] owner=V" << owner->id
                      << " blocked=V" << other.id
-                     << " reason=actual_occupied_priority early_stop=false"
-                     << " holder=V" << other.id
+                     << " reason=invariant_violation early_stop=false"
+                     << " holder=none"
                      << " conflict_zone=(" << selected.x << ","
                      << selected.y << ")";
                 appendGeometry(line);
                 if (coord_log_sink_) coord_log_sink_(line.str());
-                ROS_WARN("%s %s", debug_log_prefix_.c_str(),
-                         line.str().c_str());
+                ROS_ERROR("%s %s", debug_log_prefix_.c_str(),
+                          line.str().c_str());
             }
             continue;
         }
@@ -846,7 +968,18 @@ std::vector<A1ActionRequest> A1Coordinator::enforceDepartureClusters(
         const double other_s = occupancyPathS(*other, &confirmed);
         const bool already_inside = confirmed &&
             futureA1OtherInsideCluster(cluster.intervals, other_s);
-        if (already_inside) continue;
+        if (already_inside) {
+            logInvariantViolation(
+                coord_log_sink_, debug_log_prefix_, "active_enforcement",
+                cluster, *owner, *other, owner->path_s, other_s);
+            requests.push_back(A1ActionRequest{
+                owner->id, VehicleAction::STOP, other->id,
+                "a1_admission_invariant_violation"});
+            requests.push_back(A1ActionRequest{
+                other->id, VehicleAction::STOP, owner->id,
+                "a1_admission_invariant_violation"});
+            continue;
+        }
         const double distance = cluster.waiter_control_stop_s - other_s;
         const double speed = std::max(0.0, other->current_speed);
         const double stopping_distance =
@@ -881,13 +1014,16 @@ A1LaunchAdmission A1Coordinator::checkLaunchAdmission(
         return result;
     }
     VehicleAgent exit = service_owner;
-    if ((service_owner.mission_phase == MissionPhase::TO_A1 ||
+    if ((service_owner.mission_phase == MissionPhase::UNLOAD_DWELL ||
+         service_owner.mission_phase == MissionPhase::TO_A1 ||
          service_owner.mission_phase == MissionPhase::PICKUP_DWELL) &&
         service_owner.pending_dropoff_valid &&
         !service_owner.pending_dropoff_track.empty()) {
         exit.track = service_owner.pending_dropoff_track;
         exit.path_s = 0.0;
-        exit.path_gen = service_owner.path_gen + 1;
+        exit.path_gen = service_owner.path_gen +
+            (service_owner.mission_phase == MissionPhase::UNLOAD_DWELL
+                 ? 2 : 1);
         exit.mode = VehicleMode::ACTIVE;
         exit.mission_phase = MissionPhase::TO_B;
         result.owner_uses_pending_preview = true;
@@ -913,9 +1049,12 @@ A1LaunchAdmission A1Coordinator::checkLaunchAdmission(
         candidate_s);
     const bool candidate_has_cleared_slot =
         candidate_s + 1e-9 >= launch_candidate.slot_departure_clear_s;
-    result.actual_occupancy_priority = candidate_confirmed &&
+    result.invariant_violation = candidate_confirmed &&
         selected.other_already_inside && candidate_has_cleared_slot;
-    if (result.actual_occupancy_priority) return result;
+    if (result.invariant_violation) {
+        result.departure_resource_conflict = true;
+        return result;
+    }
     for (size_t index : selected.protected_indices) {
         const ConflictZone& zone = selected.normalized_zones[index];
         if (zone.s_other_enter >
@@ -932,10 +1071,10 @@ A1LaunchAdmission A1Coordinator::checkLaunchAdmission(
     return result;
 }
 
-size_t A1Coordinator::activeDepartureClusterCount(int owner_id) const {
+size_t A1Coordinator::departureClusterCount(int owner_id) const {
     size_t count = 0;
     for (const auto& entry : departure_clusters_) {
-        if (entry.second.active && entry.second.owner_id == owner_id) ++count;
+        if (entry.second.owner_id == owner_id) ++count;
     }
     return count;
 }
@@ -970,6 +1109,7 @@ void A1Coordinator::logDecision(const VehicleAgent& vehicle,
 
 A1CoordinationSnapshot A1Coordinator::snapshot() const {
     A1CoordinationSnapshot result;
+    result.future_commitment = future_commitment_;
     result.departure_clusters = departure_clusters_;
     return result;
 }
@@ -1001,6 +1141,7 @@ void A1Coordinator::restore(const A1CoordinationSnapshot& snapshot) {
                 incoming.second, -1.0, -1.0, 0.0, cfg_.max_decel, 0.0);
         }
     }
+    future_commitment_ = snapshot.future_commitment;
     departure_clusters_ = snapshot.departure_clusters;
 }
 

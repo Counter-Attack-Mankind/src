@@ -42,10 +42,10 @@ inline bool futureA1IntervalsOverlapOrTouch(double lhs_enter,
            rhs_enter <= lhs_exit + 1e-9;
 }
 
-// Start from the portion of the prepared exit covered by departure priority,
-// then close transitively over conflict zones that overlap/touch on the other
-// vehicle's path.  A zone already fully passed by the other vehicle is not a
-// current admission constraint and cannot bridge two remaining zones.
+// Starting from A1, select the earliest still-relevant overlap component on
+// the owner's future departure path. Closure may contain multiple zones, but
+// propagation requires continuity on both path-arc coordinates; a later
+// crossing cannot reconnect through only one participant's path.
 inline FutureA1ProtectedCluster selectFutureA1ProtectedCluster(
     const std::vector<FutureA1ConflictInterval>& zones,
     double protected_until, double other_path_s) {
@@ -54,15 +54,21 @@ inline FutureA1ProtectedCluster selectFutureA1ProtectedCluster(
 
     std::vector<bool> available(zones.size(), false);
     std::vector<bool> selected(zones.size(), false);
+    size_t first = zones.size();
     for (size_t i = 0; i < zones.size(); ++i) {
         const auto& zone = zones[i];
         if (other_path_s > zone.other_exit + 1e-9) continue;
         available[i] = true;
-        if (zone.owner_enter < protected_until - 1e-9) {
-            selected[i] = true;
-            result.seed_indices.push_back(i);
+        if (first == zones.size() ||
+            zone.owner_enter < zones[first].owner_enter - 1e-9 ||
+            (std::abs(zone.owner_enter - zones[first].owner_enter) <= 1e-9 &&
+             zone.other_enter < zones[first].other_enter)) {
+            first = i;
         }
     }
+    if (first == zones.size()) return result;
+    selected[first] = true;
+    result.seed_indices.push_back(first);
 
     bool changed = true;
     while (changed) {
@@ -71,11 +77,19 @@ inline FutureA1ProtectedCluster selectFutureA1ProtectedCluster(
             if (!available[candidate] || selected[candidate]) continue;
             for (size_t member = 0; member < zones.size(); ++member) {
                 if (!selected[member]) continue;
-                if (!futureA1IntervalsOverlapOrTouch(
+                const bool owner_connected =
+                    futureA1IntervalsOverlapOrTouch(
+                        zones[member].owner_enter,
+                        zones[member].owner_exit,
+                        zones[candidate].owner_enter,
+                        zones[candidate].owner_exit);
+                const bool other_connected =
+                    futureA1IntervalsOverlapOrTouch(
                         zones[member].other_enter,
                         zones[member].other_exit,
                         zones[candidate].other_enter,
-                        zones[candidate].other_exit)) {
+                        zones[candidate].other_exit);
+                if (!owner_connected || !other_connected) {
                     continue;
                 }
                 selected[candidate] = true;
@@ -121,10 +135,8 @@ inline bool departureClusterGenerationsMatch(
 }
 
 inline bool departureClusterCleared(
-    double owner_path_s, double owner_release_exit_s,
-    double other_path_s, double other_release_exit_s) {
-    return owner_path_s > owner_release_exit_s + 1e-9 ||
-           other_path_s > other_release_exit_s + 1e-9;
+    double owner_path_s, double owner_release_exit_s) {
+    return owner_path_s > owner_release_exit_s + 1e-9;
 }
 
 inline bool futureA1ArrivalWithinHorizon(double arrival_time,
@@ -151,9 +163,6 @@ inline int selectFutureA1Candidate(
             ? priority_winner(candidate.vehicle_id, best->vehicle_id)
             : -1;
         if (priority == candidate.vehicle_id) {
-            best = &candidate;
-        } else if (priority != best->vehicle_id &&
-                   candidate.vehicle_id < best->vehicle_id) {
             best = &candidate;
         }
     }
