@@ -226,6 +226,14 @@ private:
             rolling_dynamic_decision;
     };
 
+    // A real rolling period keeps only structural identity and the ordinary
+    // decision selected from the latest measured state. Predicted frames are
+    // never installed into the live real-vehicle executor.
+    using RealPlanAgentIdentity =
+        std::tuple<int, int, int, int, bool, int>;
+    using DepartureTransactionIdentity =
+        std::tuple<int, int, int, int, int, int, int, bool>;
+
     struct ExecutedRollingDecisionMetrics {
         unsigned long long far_periods = 0;
         unsigned long long mid_periods = 0;
@@ -748,12 +756,12 @@ private:
                 plan_frames != nullptr && s > 1;
             if (plan_frames != nullptr) {
                 // All decisions used to build this active plan share one
-                // absolute end time. At future offset tau, only [tau, H]
-                // remains visible; never open a fresh H-second window and
-                // accidentally reason out to 2H.
+                // prediction end time. At future offset tau, only the
+                // remaining prediction horizon stays visible; never open a
+                // fresh full window at every future step.
                 const double tau = static_cast<double>(s - 1) * dt;
                 const double remaining_horizon =
-                    std::max(dt, horizon - tau);
+                    std::max(dt, cfg_.prediction_horizon - tau);
                 rule_engine_->decide(agents_, dt, remaining_horizon,
                                      reuse_ordinary_coordination,
                                      reuse_ordinary_coordination
@@ -1134,9 +1142,62 @@ private:
         coordLogWithContext(line, "ROLLOUT", sim_plan_id_, -1, -1);
     }
 
-    void buildSimulationHorizonPlan(
+    std::vector<RealPlanAgentIdentity> captureRealPlanAgentIdentity() const {
+        std::vector<RealPlanAgentIdentity> identity;
+        identity.reserve(agents_.size());
+        for (const VehicleAgent& v : agents_) {
+            identity.emplace_back(
+                v.path_gen, static_cast<int>(v.mode),
+                static_cast<int>(v.mission_phase),
+                static_cast<int>(v.leg_target), v.pending_dropoff_valid,
+                v.pending_dropoff_slot);
+        }
+        return identity;
+    }
+
+    std::vector<DepartureTransactionIdentity>
+    captureDepartureTransactionIdentity() const {
+        std::vector<DepartureTransactionIdentity> identity;
+        const auto state = rule_engine_->snapshot();
+        identity.reserve(state.departure_clusters.size());
+        for (const auto& entry : state.departure_clusters) {
+            const auto& c = entry.second;
+            identity.emplace_back(
+                entry.first.first, entry.first.second, c.owner_id,
+                c.transaction_owner_path_gen, c.owner_path_gen, c.other_id,
+                c.other_path_gen, c.active);
+        }
+        return identity;
+    }
+
+    void rememberRealPlanIdentity() {
+        real_plan_agents_ = captureRealPlanAgentIdentity();
+        real_plan_departure_transactions_ =
+            captureDepartureTransactionIdentity();
+    }
+
+    bool realPlanNeedsRefresh() const {
+        if (!real_plan_valid_ || force_horizon_refresh_) return true;
+        if (sim_time_ - real_plan_start_time_ >=
+            rb_horizon_refresh_period_ - 1e-9) {
+            return true;
+        }
+        if (future_a1_commitment_.valid()) {
+            const VehicleAgent* owner =
+                agentById_c(future_a1_commitment_.owner_id);
+            if (owner == nullptr ||
+                owner->path_gen != future_a1_commitment_.owner_path_gen) {
+                return true;
+            }
+        }
+        if (captureRealPlanAgentIdentity() != real_plan_agents_) return true;
+        return captureDepartureTransactionIdentity() !=
+               real_plan_departure_transactions_;
+    }
+
+    void buildRollingHorizonPlan(
         std::vector<sandbox_msgs::Trajectory>& trajs,
-        std::vector<bool>& hold) {
+        std::vector<bool>& hold, bool install_simulation_plan) {
         // Normal rolling simulation prepares previews in publishHorizon(),
         // while batch mode calls this function directly. Keep both paths
         // behaviorally identical.
@@ -1161,11 +1222,24 @@ private:
                        /*first_step_task_state_is_current=*/true);
         rule_engine_->clearFutureA1Commitment();
         future_a1_commitment_ = commitment;
-        sim_plan_frames_ = std::move(frames);
-        sim_plan_cursor_ = 0;
-        sim_plan_valid_ = !sim_plan_frames_.empty();
-        sim_plan_start_time_ = sim_time_;
+        const size_t frame_count = frames.size();
         ++sim_plan_id_;
+        if (install_simulation_plan) {
+            sim_plan_frames_ = std::move(frames);
+            sim_plan_cursor_ = 0;
+            sim_plan_valid_ = !sim_plan_frames_.empty();
+            sim_plan_start_time_ = sim_time_;
+        } else {
+            real_plan_valid_ = !frames.empty();
+            real_plan_start_time_ = sim_time_;
+            if (real_plan_valid_) {
+                real_period_ordinary_decision_ =
+                    frames.front().rolling_dynamic_decision;
+            } else {
+                real_period_ordinary_decision_ = {};
+            }
+            rememberRealPlanIdentity();
+        }
         if (debug_timeline_start_ >= 0.0 &&
             sim_time_ >= debug_timeline_start_ - rb_horizon_ &&
             sim_time_ <= debug_timeline_end_) {
@@ -1187,10 +1261,11 @@ private:
         }
         logFutureA1Transition(previous_commitment, commitment, arrivals,
                               change_reason);
-        ROS_INFO("[sim_plan] built plan=%llu start=%.2f horizon=%.2f "
+        ROS_INFO("[%s_plan] built plan=%llu start=%.2f horizon=%.2f "
                  "frames=%zu commit_frames=%d",
+                 install_simulation_plan ? "sim" : "real",
                  static_cast<unsigned long long>(sim_plan_id_),
-                 sim_plan_start_time_, rb_horizon_, sim_plan_frames_.size(),
+                 sim_time_, rb_horizon_, frame_count,
                  rb_horizon_refresh_);
         for (const VehicleAgent& v : agents_) {
             if (v.mode != VehicleMode::DWELL ||
@@ -1206,6 +1281,20 @@ private:
                      std::max(0.0, rb_horizon_ - v.dwell_remaining),
                      rb_horizon_);
         }
+    }
+
+    void buildSimulationHorizonPlan(
+        std::vector<sandbox_msgs::Trajectory>& trajs,
+        std::vector<bool>& hold) {
+        buildRollingHorizonPlan(trajs, hold,
+                                /*install_simulation_plan=*/true);
+    }
+
+    void buildRealHorizonPlan(
+        std::vector<sandbox_msgs::Trajectory>& trajs,
+        std::vector<bool>& hold) {
+        buildRollingHorizonPlan(trajs, hold,
+                                /*install_simulation_plan=*/false);
     }
 
     bool simulationPlanNeedsRefresh() const {
@@ -1383,6 +1472,38 @@ private:
         return true;
     }
 
+    bool executeRealRollingDecision(double dt) {
+        if (!real_plan_valid_) return false;
+
+        rule_engine_->clearFutureA1Commitment();
+        if (future_a1_commitment_.valid()) {
+            rule_engine_->setFutureA1Commitment(future_a1_commitment_);
+        }
+        const double elapsed =
+            std::max(0.0, sim_time_ - real_plan_start_time_);
+        const double remaining_horizon =
+            std::max(dt, cfg_.prediction_horizon - elapsed);
+        rule_engine_->decide(agents_, dt, remaining_horizon,
+                             /*reuse_ordinary_coordination=*/true,
+                             &real_period_ordinary_decision_);
+        rule_engine_->clearFutureA1Commitment();
+        marker_pub_->setRollingDecision(real_period_ordinary_decision_);
+
+        // A1 departure transactions are live state. If one is created,
+        // released, or changes identity during this measured tick, start a
+        // fresh rolling period on the next 0.1 s tick. Ordinary TTC evolution
+        // is deliberately absent from this invalidation test.
+        if (captureDepartureTransactionIdentity() !=
+            real_plan_departure_transactions_) {
+            force_horizon_refresh_ = true;
+            ROS_INFO_THROTTLE(
+                1.0,
+                "[real_plan] departure transaction changed; refreshing on "
+                "next measured tick");
+        }
+        return true;
+    }
+
     // Freeze the already-required A1->B leg before cloning the world for a
     // rolling-horizon rollout. This is real-state task preparation, not a
     // simulated assignment: prepareDropoffLeg() only fills the pending_* fields
@@ -1420,7 +1541,10 @@ private:
         
         // =======世界模型推演，传入（预测时长，预测得到每辆车未来轨迹，预测得到每辆车未来是否保持静止）=============
         if (cfg_.real_mode) {
-            rollWorldModel(rb_horizon_, trajs, hold);
+            // Generate frames with simulation's frozen ordinary-decision
+            // semantics, but keep them local: real execution never restores
+            // predicted frame state over measured vehicle progress.
+            buildRealHorizonPlan(trajs, hold);
         } else {
             buildSimulationHorizonPlan(trajs, hold);
         }
@@ -2628,18 +2752,26 @@ private:
             }
 
         //3. 实车模式----滚动时域规划
-            updateDwellAndTasks(dt);    //更新任务---任务   dt 
-            rule_engine_->decide(agents_, dt);      //规则调度---决策
-            marker_pub_->setRollingDecision(
-                rule_engine_->lastRollingDynamicDecision());
-            realAdvance(dt);        //  用真实位姿更新车辆状态---执行
-            if (tick_count_ % 5 == 0) runDeadlockRecovery();        //5*0.1=0.5s进行一次死锁检测
-            updateSnapshotWedgeTrigger();
-            if (force_horizon_refresh_ ||
-                tick_count_ % rb_horizon_refresh_ == 0) {
-                publishHorizon();   // 新航段立即发布；否则20*0.1=2s刷新
+            // Task time advances once per tick. Arrival is evaluated only
+            // afterwards from the latest /object projection, so a newly
+            // entered DWELL phase is not decremented again in the same tick.
+            updateDwellAndTasks(dt);
+            realAdvance(dt);
+            if (realPlanNeedsRefresh()) {
+                publishHorizon();
                 force_horizon_refresh_ = false;
             }
+            if (!executeRealRollingDecision(dt)) {
+                ROS_ERROR_THROTTLE(
+                    1.0,
+                    "[real_plan] no frozen rolling decision; using one "
+                    "current-step decision");
+                rule_engine_->decide(agents_, dt);
+                marker_pub_->setRollingDecision(
+                    rule_engine_->lastRollingDynamicDecision());
+            }
+            if (tick_count_ % 5 == 0) runDeadlockRecovery();        //5*0.1=0.5s进行一次死锁检测
+            updateSnapshotWedgeTrigger();
             publishRealOutputs(dt);
             marker_pub_->publish(
                 agents_, visited_slots_, rule_engine_->conflicts(),
@@ -3218,12 +3350,20 @@ private:
     bool rb_one_shot_traj_ = false;                      // 一次性整条轨迹模式(默认):start后推演全程发一次latch
     bool force_horizon_refresh_ = false;                 // 新航段安装后立即覆盖发布
 
-    // 仿真专用:当前10秒协调计划及其2秒执行窗口。real_mode分支不读取这些字段。
+    // Simulation executes the predicted frames. Real mode only keeps the
+    // measured-state plan identity and frame-0 ordinary decision below.
     std::vector<SimPlanFrame> sim_plan_frames_;
     size_t sim_plan_cursor_ = 0;
     bool sim_plan_valid_ = false;
     uint64_t sim_plan_id_ = 0;
     double sim_plan_start_time_ = 0.0;
+    bool real_plan_valid_ = false;
+    double real_plan_start_time_ = 0.0;
+    forklift_planner::multi_vehicle::RuleEngine::RollingDynamicDecision
+        real_period_ordinary_decision_;
+    std::vector<RealPlanAgentIdentity> real_plan_agents_;
+    std::vector<DepartureTransactionIdentity>
+        real_plan_departure_transactions_;
     forklift_planner::multi_vehicle::RuleEngine::FutureA1Commitment
         future_a1_commitment_;
     A1ServiceMetrics a1_service_metrics_;

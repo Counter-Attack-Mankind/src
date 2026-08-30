@@ -1,0 +1,80 @@
+```xml
+<?xml version="1.0"?>
+<!--
+  正式实车 B -> A1 -> B 循环任务。
+
+  规划器、协调器以及车辆运动学相关参数统一从 planner_param.yaml 加载。
+  本 launch 文件只固定实车部署身份，以及车辆数量与控制器选择。
+
+  建议先使用 veh_count:=1 完成单车实车实验；
+  只有单车实验通过后，再使用 veh_count:=2 进行双车实验。
+-->
+<launch>
+  <arg name="server" default="10.1.1.198"/>
+  <arg name="veh_count" default="1"/>
+  <arg name="target_only" default="-1"/>
+  <arg name="controller" default="pp"/>
+  <arg name="start_rviz" default="true"/>
+
+  <!-- 加载共享地图、规划、滚动决策、TTC、bridge、路径以及 A1 相关参数。 -->
+  <rosparam command="load" file="$(find forklift_map)/config/map_param.yaml"/>
+  <rosparam command="load" file="$(find forklift_planner)/config/planner_param.yaml"/>
+  <param name="/forklift_planner/multi_vehicle/a1_cycle_catalog_file"
+         value="$(find forklift_planner)/config/a1_cycle_path_catalog.yaml"/>
+
+  <!--
+    正式实车部署身份参数。
+    以下参数用于明确当前运行模式，因此有意覆盖 YAML 中的对应配置。
+  -->
+  <param name="/forklift_planner/multi_vehicle/real_mode" value="true"/>
+  <param name="/forklift_planner/multi_vehicle/use_a1_cycle" value="true"/>
+  <param name="/forklift_planner/multi_vehicle/one_shot_traj" value="false"/>
+  <param name="/forklift_planner/multi_vehicle/vehicle_count"
+         value="$(arg veh_count)"/>
+
+  <!-- 加载现有的逐车控制器参数以及底盘接口增益参数。 -->
+  <rosparam command="load"
+            file="$(find chassis)/config/vehicle_chassis_gains.yaml"/>
+  <rosparam command="load"
+            file="$(find pure_pursuit)/config/vehicle_controller_gains.yaml"/>
+
+  <!-- 动捕定位链路：运动捕捉系统 -> /object。 -->
+  <include file="$(find vrpn_client_ros)/launch/sample.launch">
+    <arg name="server" value="$(arg server)"/>
+  </include>
+  <node pkg="nokov_localization" type="nokov_localization_v2.py"
+        name="nokov" output="screen"/>
+
+  <!-- 底盘控制链路：/chassis -> 串口通信。 -->
+  <node pkg="chassis" type="chassis_node" name="chassis" output="screen"/>
+
+  <node pkg="forklift_map" type="map_node" name="forklift_map"
+        output="screen"/>
+  <node if="$(arg start_rviz)" pkg="rviz" type="rviz" name="rviz"
+        args="-d $(find forklift_map)/config/forklift.rviz"
+        required="false"/>
+
+  <!--
+    实车规划链路：
+    /object -> 滚动规划器 -> /traj_i，
+    同时输出多车协调相关诊断信息。
+  -->
+  <node pkg="forklift_planner" type="multi_vehicle_patrol_node"
+        name="multi_vehicle_patrol_node" output="screen">
+    <param name="target_only" value="$(arg target_only)"/>
+  </node>
+
+  <!-- 当前正式分阶段实车入口仅支持启动 1 个或 2 个车辆控制器。 -->
+  <include if="$(eval int(arg('target_only')) == 0 or (int(arg('target_only')) &lt; 0 and int(arg('veh_count')) > 0))"
+           file="$(find forklift_planner)/launch/one_controller.launch">
+    <arg name="target" value="0"/>
+    <arg name="controller" value="$(arg controller)"/>
+  </include>
+
+  <include if="$(eval int(arg('target_only')) == 1 or (int(arg('target_only')) &lt; 0 and int(arg('veh_count')) > 1))"
+           file="$(find forklift_planner)/launch/one_controller.launch">
+    <arg name="target" value="1"/>
+    <arg name="controller" value="$(arg controller)"/>
+  </include>
+</launch>
+```
