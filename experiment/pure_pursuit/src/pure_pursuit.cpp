@@ -260,12 +260,14 @@ public:
              terminal_slowdown_distance_, terminal_max_speed_);
 
     const std::string planner_package = ros::package::getPath("forklift_planner");
-    debug_log_dir_ = planner_package.empty()
-        ? "forklift_planner/logs" : planner_package + "/logs";
+    const std::string planner_parent = planner_package.empty()
+        ? "." : planner_package.substr(0, planner_package.find_last_of('/'));
+    debug_log_dir_ = planner_parent + "/log";
     debug_log_enable_ = node_handle_.param("debug_log_enable", debug_log_enable_);
     node_handle_.param<std::string>("debug_log_dir", debug_log_dir_, debug_log_dir_);
     if(debug_log_enable_) {
       ensure_log_dir();
+      initialize_debug_logs();
       ROS_INFO("[PP] target=%d debug logs enabled: %s", tracking_object_, debug_log_dir_.c_str());
     }
 
@@ -312,7 +314,8 @@ private:
   int car_index_ = 0, lookahead_index_ = 0;
   bool debug_log_enable_ = true;
   std::string debug_log_dir_;
-  int debug_log_seq_ = 0;
+  unsigned long long trajectory_seq_ = 0;
+  double trajectory_receive_time_ = 0.0;
   std::ofstream open_loop_log_, closed_loop_log_;
 
   bool approached_ = false;
@@ -360,7 +363,9 @@ private:
     visualization_.visualize_goal(next_goal.x, next_goal.y, next_goal.yaw);
 
     start_time_ = ros::Time::now().toSec();
-    open_debug_logs(*msg);
+    trajectory_receive_time_ = start_time_;
+    ++trajectory_seq_;
+    log_open_loop_trajectory(*msg);
     trajectory_ = *msg;
     approached_ = false;
   }
@@ -380,10 +385,10 @@ private:
     mkdir(debug_log_dir_.c_str(), 0755);
   }
 
-  std::string log_path(const std::string &kind) {
+  std::string log_path(const std::string &kind) const {
     std::stringstream ss;
-    ss << debug_log_dir_ << "/controller_" << tracking_object_ << "_"
-       << kind << "_" << debug_log_seq_ << "_" << ros::Time::now().toNSec() << ".csv";
+    ss << debug_log_dir_ << "/controller_V" << tracking_object_ << "_"
+       << kind << ".csv";
     return ss.str();
   }
 
@@ -407,42 +412,49 @@ private:
     return ref;
   }
 
-  void open_debug_logs(const Trajectory &traj) {
+  void initialize_debug_logs() {
     if(!debug_log_enable_) return;
     ensure_log_dir();
-    if(open_loop_log_.is_open()) open_loop_log_.close();
-    if(closed_loop_log_.is_open()) closed_loop_log_.close();
-    ++debug_log_seq_;
-
-    const std::string open_path = log_path("open_loop_traj");
-    const std::string closed_path = log_path("closed_loop_tracking");
-    open_loop_log_.open(open_path.c_str(), std::ios::out);
-    closed_loop_log_.open(closed_path.c_str(), std::ios::out);
+    const std::string open_path = log_path("open_loop");
+    const std::string closed_path = log_path("tracking");
+    open_loop_log_.open(open_path.c_str(), std::ios::out | std::ios::trunc);
+    closed_loop_log_.open(closed_path.c_str(), std::ios::out | std::ios::trunc);
 
     if(open_loop_log_) {
-      open_loop_log_ << "index,traj_time,x,y,yaw,velocity,acceleration\n";
-      for(size_t i = 0; i < traj.points.size(); ++i) {
-        const auto &p = traj.points[i];
-        open_loop_log_ << i << "," << p.time << "," << p.x << "," << p.y << ","
-                       << p.yaw << "," << p.velocity << "," << p.acceleration << "\n";
-      }
+      open_loop_log_ << "trajectory_seq,receive_wall_time,index,traj_time,"
+                     << "x,y,yaw,velocity,acceleration\n";
       open_loop_log_.flush();
     }
 
     if(closed_loop_log_) {
-      closed_loop_log_ << "wall_time,traj_time,target,range,car_index,lookahead_index,"
+      closed_loop_log_ << "wall_time,trajectory_seq,trajectory_receive_time,"
+                       << "traj_time,target,range,car_index,lookahead_index,"
                        << "ref_x,ref_y,ref_yaw,ref_velocity,"
                        << "actual_x,actual_y,actual_yaw,"
                        << "longitudinal_error,lateral_error,yaw_error,nearest_distance,"
                        << "lookahead_distance,lookahead_scale,longitude_kp,longitude_ki,"
-                       << "throttle,steering\n";
+                       << "throttle,steering,lookahead_x,lookahead_y,"
+                       << "using_virtual_lookahead,eta\n";
+      closed_loop_log_.flush();
     }
 
     ROS_INFO("[PP] target=%d logging open_loop=%s closed_loop=%s",
              tracking_object_, open_path.c_str(), closed_path.c_str());
   }
 
-  void log_tracking_sample(double throttle, double steering) {
+  void log_open_loop_trajectory(const Trajectory &traj) {
+    if(!debug_log_enable_ || !open_loop_log_) return;
+    for(size_t i = 0; i < traj.points.size(); ++i) {
+      const auto &p = traj.points[i];
+      open_loop_log_ << trajectory_seq_ << "," << trajectory_receive_time_
+                     << "," << i << "," << p.time << "," << p.x << ","
+                     << p.y << "," << p.yaw << "," << p.velocity << ","
+                     << p.acceleration << "\n";
+    }
+    open_loop_log_.flush();
+  }
+
+  void log_tracking_sample(double throttle, double steering, double eta) {
     if(!debug_log_enable_ || !closed_loop_log_ || trajectory_.points.empty()) return;
     const double now = ros::Time::now().toSec();
     const double elapsed = now - start_time_;
@@ -457,14 +469,18 @@ private:
     const double nearest_distance = (car_index_ >= 0 && car_index_ < (int)trajectory_.points.size())
         ? distance_to_traj(car_index_, object_.x, object_.y) : 0.0;
 
-    closed_loop_log_ << now << "," << elapsed << "," << tracking_object_ << ","
+    closed_loop_log_ << now << "," << trajectory_seq_ << ","
+                     << trajectory_receive_time_ << "," << elapsed << ","
+                     << tracking_object_ << ","
                      << current_range_ << "," << car_index_ << "," << lookahead_index_ << ","
                      << ref.x << "," << ref.y << "," << ref.yaw << "," << ref.velocity << ","
                      << object_.x << "," << object_.y << "," << object_.yaw << ","
                      << longitudinal_error << "," << lateral_error << "," << yaw_error << ","
                      << nearest_distance << "," << lookahead_distance_ << "," << lookahead_scale_ << ","
                      << longitude_kp_ << "," << longitude_ki_ << ","
-                     << throttle << "," << steering << "\n";
+                     << throttle << "," << steering << ","
+                     << lateral_target_x_ << "," << lateral_target_y_ << ","
+                     << (using_virtual_lookahead_ ? 1 : 0) << "," << eta << "\n";
     closed_loop_log_.flush();
   }
 
@@ -648,7 +664,7 @@ private:
 //    last_commands_.push_back(command);
 
     command_publisher_.publish(command);
-    log_tracking_sample(velocity, delta);
+    log_tracking_sample(velocity, delta, eta);
   }
 
   void control_callback(const ros::TimerEvent &evt) {

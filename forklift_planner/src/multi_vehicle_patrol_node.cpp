@@ -69,7 +69,9 @@ public:
         const std::string planner_package =
             ros::package::getPath("forklift_planner");
         const std::string default_log_dir = planner_package.empty()
-            ? "forklift_planner/logs" : planner_package + "/logs";
+            ? "log"
+            : (std::filesystem::path(planner_package).parent_path() / "log")
+                  .string();
         nh_.param<std::string>("debug_log_dir", debug_log_dir_,
                                default_log_dir);
         nh_.param<std::string>("coord_log_file", coord_log_file_,
@@ -94,7 +96,6 @@ public:
         onset_log_file_ = debug_log_dir_ + "/forklift_onset.log";
         realbridge_positions_file_ =
             debug_log_dir_ + "/realbridge_positions.txt";
-        initCoordLog();
         rb_horizon_ = cfg_.rolling_horizon;
         rb_horizon_refresh_period_ = cfg_.rolling_refresh_period;
         rb_horizon_refresh_ = std::max(
@@ -113,6 +114,7 @@ public:
                      "its path still uses start_slots[%d] -> target_slots[%d].",
                      target_only_, target_only_, target_only_);
         }
+        initCoordLog();
 
         map_ = std::make_unique<ForkliftMap>(mp_);
         resource_map_ = std::make_unique<
@@ -146,6 +148,9 @@ public:
         marker_pub_ = std::make_unique<forklift_planner::multi_vehicle::MarkerPublisher>(
             nh_, mp_, pp_, map_->slots(), cfg_, a1_pickup);
         initAgents();
+        if (cfg_.real_mode && !rb_one_shot_traj_) {
+            initRealProjectionLogs();
+        }
         visited_slots_.assign(map_->slots().size(), false);
         one_shot_done_.assign(agents_.size(), false);
         if (stress_quiet_) {
@@ -337,6 +342,81 @@ private:
         coord_log_.flush();
         ROS_WARN("[multi_patrol] coordination log: %s",
                  coord_log_file_.c_str());
+    }
+
+    void initRealProjectionLogs() {
+        std::error_code error;
+        std::filesystem::create_directories(debug_log_dir_, error);
+        if (error) {
+            ROS_WARN("[real_projection] failed to create log directory %s: %s",
+                     debug_log_dir_.c_str(), error.message().c_str());
+            return;
+        }
+        real_projection_logs_.resize(agents_.size());
+        for (size_t i = 0; i < agents_.size(); ++i) {
+            if (!targetEnabled(static_cast<int>(i))) continue;
+            const std::string path =
+                debug_log_dir_ + "/real_projection_V" +
+                std::to_string(agents_[i].id) + ".csv";
+            real_projection_logs_[i].open(
+                path, std::ios::out | std::ios::trunc);
+            if (!real_projection_logs_[i]) {
+                ROS_WARN("[real_projection] failed to open %s", path.c_str());
+                continue;
+            }
+            real_projection_logs_[i]
+                << "wall_time,sim_time,vehicle_id,real_x,real_y,real_yaw,"
+                << "path_gen,mode,mission_phase,leg_target,previous_path_s,"
+                << "projected_path_s,delta_s,projected_x,projected_y,"
+                << "projected_yaw,projection_distance,"
+                << "yaw_error_to_projected_path,wp_type,current_speed,action,"
+                << "real_plan_id,search_s_min,search_s_max\n";
+            real_projection_logs_[i].flush();
+            ROS_WARN("[real_projection] V%d log: %s", agents_[i].id,
+                     path.c_str());
+        }
+    }
+
+    void logRealProjectionSample(size_t i, double previous_path_s,
+                                 double projected_path_s,
+                                 double search_s_min,
+                                 double search_s_max) {
+        if (i >= agents_.size() || i >= real_projection_logs_.size() ||
+            !real_projection_logs_[i] || !real_pose_ok_[i]) {
+            return;
+        }
+        const VehicleAgent& v = agents_[i];
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        RoughWp projected{nan, nan, nan, WpType::FORWARD};
+        std::string wp_type = "NONE";
+        if (!v.track.empty()) {
+            const double s = std::max(
+                0.0, std::min(projected_path_s, v.track.length()));
+            projected = v.track.poseAtS(s);
+            wp_type = v.track.typeAtS(s) == WpType::REVERSE
+                ? "REVERSE" : "FORWARD";
+        }
+        const double dx = projected.x - real_x_[i];
+        const double dy = projected.y - real_y_[i];
+        const double projection_distance = std::hypot(dx, dy);
+        const double yaw_error = std::atan2(
+            std::sin(real_yaw_[i] - projected.theta),
+            std::cos(real_yaw_[i] - projected.theta));
+        std::ofstream& log = real_projection_logs_[i];
+        log << std::setprecision(15) << ros::Time::now().toSec() << ","
+            << sim_time_ << "," << v.id << "," << real_x_[i] << ","
+            << real_y_[i] << "," << real_yaw_[i] << "," << v.path_gen
+            << "," << static_cast<int>(v.mode) << ","
+            << static_cast<int>(v.mission_phase) << ","
+            << static_cast<int>(v.leg_target) << "," << previous_path_s
+            << "," << projected_path_s << ","
+            << (projected_path_s - previous_path_s) << "," << projected.x
+            << "," << projected.y << "," << projected.theta << ","
+            << projection_distance << "," << yaw_error << "," << wp_type
+            << "," << v.current_speed << "," << actionName(v.action) << ","
+            << static_cast<unsigned long long>(sim_plan_id_) << ","
+            << search_s_min << "," << search_s_max << "\n";
+        log.flush();
     }
 
     void coordLog(const std::string& line) {
@@ -3115,6 +3195,7 @@ private:
                 rb_track_gen_[i] = v.path_gen;
                 rb_prev_path_s_[i] = 0.0;
             }
+            const double previous_path_s = rb_prev_path_s_[i];
             const double lo = std::max(0.0, rb_prev_path_s_[i] - 0.10);
             const double hi = std::min(v.track.length(), rb_prev_path_s_[i] + 0.50);
             double new_s = projectOntoTrackRange(v.track, real_x_[i], real_y_[i], lo, hi);
@@ -3123,6 +3204,7 @@ private:
                                                      cfg_.max_speed));
             v.path_s = new_s;
             rb_prev_path_s_[i] = new_s;
+            logRealProjectionSample(i, previous_path_s, new_s, lo, hi);
             // 到库→DWELL —— 复刻 advanceVehicles 705-714(实车容差 cfg_.real_arrive_tol)
             if (v.path_s >= v.track.length() - cfg_.real_arrive_tol) {
                 // 关键(联动 rule_engine):sim 里 DWELL 车 path_s≈length,故其碰撞足迹
@@ -3134,6 +3216,16 @@ private:
                 rb_prev_path_s_[i] = v.track.length();
                 handleLegArrival(v);
             }
+        }
+        // Keep one row per measured 0.1 s tick while an enabled vehicle is
+        // waiting/dwelling too. No projection is performed in these modes;
+        // NaN search bounds distinguish them from active projection samples.
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        for (size_t i = 0; i < agents_.size(); ++i) {
+            const VehicleAgent& v = agents_[i];
+            if (!targetEnabled(v.id) || !real_pose_ok_[i]) continue;
+            if (v.mode == VehicleMode::ACTIVE && !v.track.empty()) continue;
+            logRealProjectionSample(i, v.path_s, v.path_s, nan, nan);
         }
     }
 
@@ -3318,6 +3410,7 @@ private:
     std::string onset_log_file_;
     std::string realbridge_positions_file_;
     std::ofstream coord_log_;
+    std::vector<std::ofstream> real_projection_logs_;
     std::string coord_log_source_ = "REAL";
     uint64_t coord_log_plan_id_ = 0;
     int coord_log_frame_id_ = -1;
@@ -3684,7 +3777,7 @@ public:
         ROS_ERROR("[CLUSTER-DUMP] ===== 簇 dump 结束 =====");
     }
 
-    // 持久 onset 文件:把关键现场同时写到 forklift_planner/logs。
+    // 持久 onset 文件:把关键现场同时写到统一的 debug_log_dir。
     // 长测排错专用——只在出问题那一刻写,故文件小、不刷屏。
     void onsetLog(const std::string& s) {
         const std::string console_line = contextualLog(

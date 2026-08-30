@@ -24,4 +24,4 @@ v_min : -0.26
 v_max : 0.26
 
 # Debug CSV logs for tuning PP gains.
-debug_log_enable : fasle
+debug_log_enable : true
