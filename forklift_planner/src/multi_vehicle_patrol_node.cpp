@@ -30,6 +30,7 @@
 #include "forklift_planner/multi_vehicle/future_a1_policy.h"
 #include "forklift_planner/multi_vehicle/marker_publisher.h"
 #include "forklift_planner/multi_vehicle/multi_vehicle_config.h"
+#include "forklift_planner/multi_vehicle/real_state_estimation.h"
 #include "forklift_planner/multi_vehicle/rule_engine.h"
 #include "forklift_planner/multi_vehicle/task_allocator.h"
 #include "forklift_planner/multi_vehicle/traffic_resource_map.h"
@@ -370,7 +371,11 @@ private:
                 << "projected_path_s,delta_s,projected_x,projected_y,"
                 << "projected_yaw,projection_distance,"
                 << "yaw_error_to_projected_path,wp_type,current_speed,action,"
-                << "real_plan_id,search_s_min,search_s_max\n";
+                << "real_plan_id,search_s_min,search_s_max,"
+                << "raw_single_step_speed,window_speed,speed_window_duration,"
+                << "speed_window_samples,best_xy_distance,"
+                << "selected_heading_error,selected_continuity_error,"
+                << "projection_candidate_count\n";
             real_projection_logs_[i].flush();
             ROS_WARN("[real_projection] V%d log: %s", agents_[i].id,
                      path.c_str());
@@ -380,7 +385,11 @@ private:
     void logRealProjectionSample(size_t i, double previous_path_s,
                                  double projected_path_s,
                                  double search_s_min,
-                                 double search_s_max) {
+                                 double search_s_max,
+                                 const forklift_planner::multi_vehicle::
+                                     ArcLengthSpeedResult& speed,
+                                 const forklift_planner::multi_vehicle::
+                                     RealProjectionResult& projection) {
         if (i >= agents_.size() || i >= real_projection_logs_.size() ||
             !real_projection_logs_[i] || !real_pose_ok_[i]) {
             return;
@@ -415,8 +424,23 @@ private:
             << projection_distance << "," << yaw_error << "," << wp_type
             << "," << v.current_speed << "," << actionName(v.action) << ","
             << static_cast<unsigned long long>(sim_plan_id_) << ","
-            << search_s_min << "," << search_s_max << "\n";
+            << search_s_min << "," << search_s_max << ","
+            << speed.raw_single_step_speed << "," << speed.window_speed << ","
+            << speed.window_duration << "," << speed.window_samples << ","
+            << projection.best_xy_distance << ","
+            << projection.selected_heading_error << ","
+            << projection.selected_continuity_error << ","
+            << projection.candidate_count << "\n";
         log.flush();
+    }
+
+    void publishTrajectoryWithPathGen(
+        size_t i, sandbox_msgs::Trajectory trajectory) {
+        if (i >= traj_pubs_.size()) return;
+        if (i < agents_.size()) {
+            trajectory.header.seq = static_cast<uint32_t>(agents_[i].path_gen);
+        }
+        traj_pubs_[i].publish(trajectory);
     }
 
     void coordLog(const std::string& line) {
@@ -1668,7 +1692,7 @@ private:
                     tp.time = 0.0;
                     hold.points.push_back(tp);
 
-                    traj_pubs_[i].publish(hold);
+                    publishTrajectoryWithPathGen(i, hold);
             }
 
         continue;
@@ -1709,7 +1733,7 @@ private:
             arr.markers.push_back(m);
 
             if (i < traj_pubs_.size()) {
-                traj_pubs_[i].publish(trajs[i]);
+                publishTrajectoryWithPathGen(i, trajs[i]);
             }
         }
         if (!arr.markers.empty()) horizon_marker_pub_.publish(arr);
@@ -1733,7 +1757,7 @@ private:
             }
             trimTrailingStationary(trajs[i]);            // 裁掉到点后的尾部静止点,只留一个停止点
             trajs[i].header.stamp = now;
-            if (i < traj_pubs_.size()) traj_pubs_[i].publish(trajs[i]);             // latch 发一次,控制器自主跟到底
+            if (i < traj_pubs_.size()) publishTrajectoryWithPathGen(i, trajs[i]);             // latch 发一次,控制器自主跟到底
             one_shot_done_[i] = true;
             logFullTraj(i, trajs[i]);
             // RViz:整条轨迹画成该车颜色 LINE_STRIP(ns=horizon_traj,沿用现有显示)
@@ -1770,7 +1794,7 @@ private:
             p.x = real_x_[i]; p.y = real_y_[i]; p.yaw = real_yaw_[i];
             p.velocity = 0.0; p.time = 0.0;
             t.points.push_back(p);
-            traj_pubs_[i].publish(t);                 // latch:控制器停在原地
+            publishTrajectoryWithPathGen(i, t);      // latch:控制器停在原地
             ++sent;
         }
         ROS_ERROR("[real][one_shot] *** 急停:已对 %d 辆车发单点 hold 轨迹 → 控制器停车 ***", sent);
@@ -2981,6 +3005,12 @@ private:
         real_yaw_.assign(n, 0.0);
         real_pose_ok_.assign(n, false);
         rb_prev_path_s_.assign(n, 0.0);
+        rb_speed_windows_.assign(
+            n, forklift_planner::multi_vehicle::ArcLengthSpeedWindow(0.4));
+        rb_speed_identity_.assign(n, std::make_tuple(-1, -1, -1));
+        rb_motion_x_.assign(n, 0.0);
+        rb_motion_y_.assign(n, 0.0);
+        rb_motion_pose_valid_.assign(n, false);
         rb_cmd_speed_.assign(n, 0.0);
         rb_last_seen_.assign(n, 0.0);
         rb_published_gen_.assign(n, -1);
@@ -2989,8 +3019,14 @@ private:
         rb_logged_gen_.assign(n, -1);
         real_trails_.assign(n, {});
         for (int i = 0; i < n; ++i) {
-            traj_pubs_[i] = nh_.advertise<sandbox_msgs::Trajectory>(
-                "/traj_" + std::to_string(i), 1, /*latch=*/true);
+            ros::AdvertiseOptions traj_options;
+            traj_options.init<sandbox_msgs::Trajectory>(
+                "/traj_" + std::to_string(i), 1);
+            // ROS1 normally overwrites Header.seq with its publication counter.
+            // This topic deliberately owns seq as the stable mission path_gen.
+            traj_options.has_header = false;
+            traj_options.latch = true;
+            traj_pubs_[i] = nh_.advertise(traj_options);
             speed_pubs_[i] = nh_.advertise<std_msgs::Float64>(
                 "/coord_speed_" + std::to_string(i), 1, /*latch=*/false);
             state_pubs_[i] = nh_.advertise<std_msgs::String>(
@@ -3173,17 +3209,6 @@ private:
                               "齐了去【启动/急停键盘】终端按 Enter。", seen.c_str(), miss.c_str());
     }
 
-    static double projectOntoTrackRange(const forklift_planner::multi_vehicle::PathTrack& tr,
-                                        double x, double y, double lo, double hi) {
-        double best_s = lo, best_d2 = 1e18;
-        for (double s = lo; s <= hi + 1e-9; s += 0.01) {
-            const auto p = tr.poseAtS(s);
-            const double d2 = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
-            if (d2 < best_d2) { best_d2 = d2; best_s = s; }
-        }
-        return best_s;
-    }
-
     // 替代 advanceVehicles 的「位置推进」:实车位置取自 /object 投影,不做 sim 积分/硬护栏。
     // 到库→DWELL 逐字节复刻 advanceVehicles 705-714,保证和 sim 同样的"到点停 10s"。
     void realAdvance(double dt) {
@@ -3195,16 +3220,44 @@ private:
                 rb_track_gen_[i] = v.path_gen;
                 rb_prev_path_s_[i] = 0.0;
             }
+            const auto speed_identity = std::make_tuple(
+                v.path_gen, static_cast<int>(v.mission_phase),
+                static_cast<int>(v.leg_target));
+            if (rb_speed_identity_[i] != speed_identity) {
+                rb_speed_windows_[i].clear(0.0);
+                rb_speed_identity_[i] = speed_identity;
+                rb_motion_pose_valid_[i] = false;
+            }
             const double previous_path_s = rb_prev_path_s_[i];
             const double lo = std::max(0.0, rb_prev_path_s_[i] - 0.10);
             const double hi = std::min(v.track.length(), rb_prev_path_s_[i] + 0.50);
-            double new_s = projectOntoTrackRange(v.track, real_x_[i], real_y_[i], lo, hi);
-            new_s = std::max(new_s, rb_prev_path_s_[i]);  // 单调不减(沿固定路径只前进)
-            v.current_speed = std::max(0.0, std::min((new_s - rb_prev_path_s_[i]) / dt,
-                                                     cfg_.max_speed));
+            bool motion_heading_valid = false;
+            double motion_heading = 0.0;
+            if (rb_motion_pose_valid_[i]) {
+                const double dx = real_x_[i] - rb_motion_x_[i];
+                const double dy = real_y_[i] - rb_motion_y_[i];
+                if (std::hypot(dx, dy) >= 0.003) {
+                    motion_heading = std::atan2(dy, dx);
+                    motion_heading_valid = true;
+                }
+            }
+            const auto projection =
+                forklift_planner::multi_vehicle::selectRealProjection(
+                    v.track, real_x_[i], real_y_[i], real_yaw_[i],
+                    previous_path_s, v.current_speed, dt, lo, hi,
+                    motion_heading_valid, motion_heading);
+            const double new_s = projection.path_s;
+            const double sample_time = ros::Time::now().toSec();
+            const auto speed = rb_speed_windows_[i].update(
+                sample_time, new_s, previous_path_s, dt, cfg_.max_speed);
+            v.current_speed = speed.window_speed;
             v.path_s = new_s;
             rb_prev_path_s_[i] = new_s;
-            logRealProjectionSample(i, previous_path_s, new_s, lo, hi);
+            rb_motion_x_[i] = real_x_[i];
+            rb_motion_y_[i] = real_y_[i];
+            rb_motion_pose_valid_[i] = true;
+            logRealProjectionSample(i, previous_path_s, new_s, lo, hi,
+                                    speed, projection);
             // 到库→DWELL —— 复刻 advanceVehicles 705-714(实车容差 cfg_.real_arrive_tol)
             if (v.path_s >= v.track.length() - cfg_.real_arrive_tol) {
                 // 关键(联动 rule_engine):sim 里 DWELL 车 path_s≈length,故其碰撞足迹
@@ -3215,6 +3268,9 @@ private:
                 v.path_s = v.track.length();
                 rb_prev_path_s_[i] = v.track.length();
                 handleLegArrival(v);
+                rb_speed_windows_[i].clear(0.0);
+                rb_speed_identity_[i] = std::make_tuple(-1, -1, -1);
+                rb_motion_pose_valid_[i] = false;
             }
         }
         // Keep one row per measured 0.1 s tick while an enabled vehicle is
@@ -3225,7 +3281,12 @@ private:
             const VehicleAgent& v = agents_[i];
             if (!targetEnabled(v.id) || !real_pose_ok_[i]) continue;
             if (v.mode == VehicleMode::ACTIVE && !v.track.empty()) continue;
-            logRealProjectionSample(i, v.path_s, v.path_s, nan, nan);
+            rb_speed_windows_[i].clear(0.0);
+            forklift_planner::multi_vehicle::ArcLengthSpeedResult speed;
+            speed.window_speed = v.current_speed;
+            forklift_planner::multi_vehicle::RealProjectionResult projection;
+            logRealProjectionSample(i, v.path_s, v.path_s, nan, nan,
+                                    speed, projection);
         }
     }
 
@@ -3379,7 +3440,7 @@ private:
                                   std::to_string(len).substr(0,4) + "]";
         ROS_WARN("[real] V%d 新路径 len=%.2f  倒车段 s=%s", id, len,
                  segs.empty() ? "无(全程前进)" : segs.c_str());
-        traj_pubs_[id].publish(msg);
+        publishTrajectoryWithPathGen(static_cast<size_t>(id), msg);
     }
 
     ros::NodeHandle nh_;
@@ -3421,7 +3482,7 @@ private:
     // ── 实车模式(real_mode)I/O ──────────────────────────────────────────────
     ros::Subscriber object_sub_;                       // /object 动捕位姿(mm)
     ros::Publisher start_marker_pub_;                  // 起始摆位标记(足迹框+ID+朝向,latched)
-    std::vector<ros::Publisher> traj_pubs_, speed_pubs_;// /traj_i(路径) + /coord_speed_i(实时速度)
+    std::vector<ros::Publisher> traj_pubs_, speed_pubs_;// /traj_i + /coord_speed_i
     std::vector<ros::Publisher> state_pubs_;            // /coord_state_i(只读调试:停车原因)
     ros::Publisher horizon_marker_pub_;                 // 推演 5s 轨迹的 RViz 可视化(LINE_STRIP/车)
     ros::Publisher snapshot_trigger_pub_;
@@ -3472,7 +3533,12 @@ private:
     std::vector<double> real_x_, real_y_, real_yaw_;   // 各车真实位姿(已 /1000 转米)
     std::vector<std::deque<geometry_msgs::Point>> real_trails_; // RViz 实车走过的真实轨迹(ns=real_trail)
     std::vector<bool> real_pose_ok_;                   // 动捕是否已收到该车
-    std::vector<double> rb_prev_path_s_;               // 上一拍 path_s(局部投影+差分估速度)
+    std::vector<double> rb_prev_path_s_;               // 上一拍 path_s(局部投影)
+    std::vector<forklift_planner::multi_vehicle::ArcLengthSpeedWindow>
+        rb_speed_windows_;
+    std::vector<std::tuple<int, int, int>> rb_speed_identity_;
+    std::vector<double> rb_motion_x_, rb_motion_y_;
+    std::vector<bool> rb_motion_pose_valid_;
     std::vector<double> rb_cmd_speed_;                 // 上一拍发出的速度命令(带符号),斜坡限速用
     std::vector<double> rb_last_seen_;                 // 各车动捕最后到达时刻(s),看门狗用
     // 动捕失联超时、到点容差 → 已提为 ROS 参数 cfg_.real_pose_timeout / real_arrive_tol,

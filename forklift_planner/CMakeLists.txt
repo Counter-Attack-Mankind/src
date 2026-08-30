@@ -103,6 +103,16 @@ target_link_libraries(conflict_zone_geometry_diag
 )
 
 if(CATKIN_ENABLE_TESTING)
+  add_executable(real_state_estimation_test
+    test/real_state_estimation_test.cpp
+    src/multi_vehicle/path_track.cpp
+  )
+  add_dependencies(real_state_estimation_test ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(real_state_estimation_test ${catkin_LIBRARIES})
+  add_test(NAME real_state_estimation_test
+           COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
+                   $<TARGET_FILE:real_state_estimation_test>)
+
   add_executable(bridge_ttc_correction_test
     test/bridge_ttc_correction_test.cpp
     src/multi_vehicle/bridge_ttc_correction.cpp

@@ -316,6 +316,9 @@ private:
   std::string debug_log_dir_;
   unsigned long long trajectory_seq_ = 0;
   double trajectory_receive_time_ = 0.0;
+  int current_path_gen_ = -1;
+  bool object_seen_ = false;
+  std::string trajectory_refresh_type_ = "NEW_PATH";
   std::ofstream open_loop_log_, closed_loop_log_;
 
   bool approached_ = false;
@@ -331,7 +334,25 @@ private:
       object_ = *msg;
       object_.x = new_x;
       object_.y = new_y;
+      object_seen_ = true;
     }
+  }
+
+  int nearest_index_in(const Trajectory &traj) const {
+    if(!object_seen_ || traj.points.empty()) return 0;
+    int nearest = 0;
+    double best_score = DBL_MAX;
+    for(int i = 0; i < static_cast<int>(traj.points.size()); ++i) {
+      const TrajectoryPoint &point = traj.points[i];
+      const double distance = hypot(point.y - object_.y, point.x - object_.x);
+      const double yaw_error = fabs(normalize_angle(point.yaw - object_.yaw));
+      const double score = distance + 0.03 * yaw_error / M_PI;
+      if(score < best_score) {
+        best_score = score;
+        nearest = i;
+      }
+    }
+    return nearest;
   }
 
   void traj_callback(const TrajectoryConstPtr &msg) {
@@ -340,13 +361,20 @@ private:
 
     std::cout << tracking_object_ << " - Trajectory received" << std::endl;
 
-    // 每次收到新轨迹都完整重置，保证多次实验之间状态干净
-    car_index_ = lookahead_index_ = 0;
-    current_range_ = 0;
-    longitude_output_ = longitude_perror_ = 0.0;
-    lookahead_gain_ = 1.0;
-    final_stable_cycles_ = 0;
-    using_virtual_lookahead_ = false;
+    const int incoming_path_gen = static_cast<int>(msg->header.seq);
+    const bool new_path = current_path_gen_ < 0 ||
+                          incoming_path_gen != current_path_gen_;
+    trajectory_refresh_type_ = new_path ? "NEW_PATH" : "ROLLING_REFRESH";
+    if(new_path) {
+      current_path_gen_ = incoming_path_gen;
+      car_index_ = lookahead_index_ = 0;
+      current_range_ = 0;
+      longitude_output_ = longitude_perror_ = 0.0;
+      lookahead_gain_ = 1.0;
+      final_stable_cycles_ = 0;
+      using_virtual_lookahead_ = false;
+      approached_ = false;
+    }
 
     ranges_.clear();
     int start = 0;
@@ -359,6 +387,20 @@ private:
     }
     ranges_.emplace_back(start, (int)msg->points.size());
 
+    if(!new_path) {
+      car_index_ = nearest_index_in(*msg);
+      current_range_ = 0;
+      for(int range = 0; range < static_cast<int>(ranges_.size()); ++range) {
+        if(car_index_ >= ranges_[range].first &&
+           car_index_ < ranges_[range].second) {
+          current_range_ = range;
+          break;
+        }
+      }
+      lookahead_index_ = car_index_;
+      using_virtual_lookahead_ = false;
+    }
+
     auto next_goal = msg->points[ranges_[current_range_].second - 1];
     visualization_.visualize_goal(next_goal.x, next_goal.y, next_goal.yaw);
 
@@ -367,7 +409,13 @@ private:
     ++trajectory_seq_;
     log_open_loop_trajectory(*msg);
     trajectory_ = *msg;
-    approached_ = false;
+    if(!new_path && object_seen_) update_lookahead();
+    ROS_INFO("[PP] target=%d trajectory_seq=%llu path_gen=%d refresh=%s "
+             "car_index=%d lookahead_index=%d longitude_output=%.6f "
+             "longitude_perror=%.6f",
+             tracking_object_, trajectory_seq_, current_path_gen_,
+             trajectory_refresh_type_.c_str(), car_index_, lookahead_index_,
+             longitude_output_, longitude_perror_);
   }
 
   inline double distance_to_traj(int i, double x, double y) {
@@ -428,11 +476,13 @@ private:
 
     if(closed_loop_log_) {
       closed_loop_log_ << "wall_time,trajectory_seq,trajectory_receive_time,"
-                       << "traj_time,target,range,car_index,lookahead_index,"
+                       << "traj_time,target,path_gen,trajectory_refresh_type,"
+                       << "range,car_index,lookahead_index,"
                        << "ref_x,ref_y,ref_yaw,ref_velocity,"
                        << "actual_x,actual_y,actual_yaw,"
                        << "longitudinal_error,lateral_error,yaw_error,nearest_distance,"
                        << "lookahead_distance,lookahead_scale,longitude_kp,longitude_ki,"
+                       << "longitude_output,longitude_perror,"
                        << "throttle,steering,lookahead_x,lookahead_y,"
                        << "using_virtual_lookahead,eta\n";
       closed_loop_log_.flush();
@@ -471,13 +521,15 @@ private:
 
     closed_loop_log_ << now << "," << trajectory_seq_ << ","
                      << trajectory_receive_time_ << "," << elapsed << ","
-                     << tracking_object_ << ","
+                     << tracking_object_ << "," << current_path_gen_ << ","
+                     << trajectory_refresh_type_ << ","
                      << current_range_ << "," << car_index_ << "," << lookahead_index_ << ","
                      << ref.x << "," << ref.y << "," << ref.yaw << "," << ref.velocity << ","
                      << object_.x << "," << object_.y << "," << object_.yaw << ","
                      << longitudinal_error << "," << lateral_error << "," << yaw_error << ","
                      << nearest_distance << "," << lookahead_distance_ << "," << lookahead_scale_ << ","
                      << longitude_kp_ << "," << longitude_ki_ << ","
+                     << longitude_output_ << "," << longitude_perror_ << ","
                      << throttle << "," << steering << ","
                      << lateral_target_x_ << "," << lateral_target_y_ << ","
                      << (using_virtual_lookahead_ ? 1 : 0) << "," << eta << "\n";
