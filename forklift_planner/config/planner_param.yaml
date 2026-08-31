@@ -3,7 +3,7 @@ forklift_planner:
   vehicle_speed:    0.20   # m/s，单车参考速度
   stop_duration:    2.0    # s，泊车点等待时间
   wheel_base:       0.143  # m，轴距
-  max_steer_angle:  0.40   # rad，最大转向角
+  max_steer_angle:  0.40   # rad，Planner 路径可行性边界
   max_steer_rate:   0.25   # rad/s，最大转向角速度
   path_resolution:  0.01   # m，路径采样间隔
 

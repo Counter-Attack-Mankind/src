@@ -1,4 +1,5 @@
 chassis:
+  chassis_max_steer_angle: 0.50  # rad, final physical safety boundary
   steering_gain_by_target: [1.0, 1.0, 1.16, 1.12, 1.12, 1.12, 1.12, 1.12]
   group_a_max_target: 2
   group_b_min_target: 3

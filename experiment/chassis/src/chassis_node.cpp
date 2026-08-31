@@ -6,10 +6,12 @@
 #include <sandbox_msgs/ChassisCommand.h>
 #include <hal/tiny_serial.h>
 #include <TinyProtocol.h>
+#include <algorithm>
 #include <thread>
 #include <functional>
 
 ros::Publisher *velocity_publisher_;
+double chassis_max_steer_angle_ = 0.50;
 
 #define MSG_TYPE_TWIST 0xe1
 #define MSG_TYPE_PID 0xe2
@@ -59,9 +61,12 @@ tiny_serial_handle_t port_handle;
 Tiny::ProtoLight proto;
 
 void cmd_vel_cb(const sandbox_msgs::ChassisCommandConstPtr &msg) {
-  // 夹值与推演器(map_param/multi_vehicle_config)一致:转向 = max_steer_angle 0.50rad = 28.65°;
+  // Chassis uses the final physical safety boundary; Planner and PP are stricter.
   // 油门 = max_speed 0.26m/s ×100 = 26。否则最紧弯/最高速跟不上规划轨迹。
-  double steering = std::max(std::min(-msg->steering / M_PI * 180, 28.65), -28.65);
+  const double steering_rad = std::max(
+      -chassis_max_steer_angle_,
+      std::min(chassis_max_steer_angle_, -msg->steering));
+  double steering = steering_rad / M_PI * 180.0;
   double throttle = std::max(std::min(msg->throttle * 100, 26.0), -26.0);
   TwistMessage twist = {
       int16_t (throttle),
@@ -84,6 +89,11 @@ int serial_receive_fd(void *p, void *buf, int len) {
 int main(int argc, char **argv) {
   ros::init(argc, argv, "chassis_node");
   ros::NodeHandle nh;
+  ros::NodeHandle pnh("~");
+  pnh.param("chassis_max_steer_angle", chassis_max_steer_angle_,
+            chassis_max_steer_angle_);
+  chassis_max_steer_angle_ = std::max(0.0, chassis_max_steer_angle_);
+  ROS_INFO("[chassis] max steering angle: %.3f rad", chassis_max_steer_angle_);
 
   // port, baudrate, timeout in milliseconds
   port_handle = tiny_serial_open("/dev/ttyUSB0", 57600);

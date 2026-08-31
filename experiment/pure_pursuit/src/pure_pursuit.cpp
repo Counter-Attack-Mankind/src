@@ -266,6 +266,14 @@ public:
     longitude_kp_ = node_handle_.param("longitude_kp", longitude_kp_);
     longitude_ki_ = node_handle_.param("longitude_ki", longitude_ki_);
     lookahead_scale_ = node_handle_.param("lookahead_scale", lookahead_scale_);
+    lookahead_distance_min_ = node_handle_.param(
+        "lookahead_distance_min", lookahead_distance_min_);
+    lookahead_distance_max_ = node_handle_.param(
+        "lookahead_distance_max", lookahead_distance_max_);
+    lookahead_distance_ratio_ = node_handle_.param(
+        "lookahead_distance_ratio", lookahead_distance_ratio_);
+    pp_max_steer_angle_ = node_handle_.param(
+        "pp_max_steer_angle", pp_max_steer_angle_);
     final_lon_tolerance_ = node_handle_.param("final_lon_tolerance", final_lon_tolerance_);
     final_lat_tolerance_ = node_handle_.param("final_lat_tolerance", final_lat_tolerance_);
     final_yaw_tolerance_ = node_handle_.param("final_yaw_tolerance", final_yaw_tolerance_);
@@ -273,8 +281,11 @@ public:
     terminal_lookahead_extension_ = node_handle_.param("terminal_lookahead_extension", terminal_lookahead_extension_);
     terminal_slowdown_distance_ = node_handle_.param("terminal_slowdown_distance", terminal_slowdown_distance_);
     terminal_max_speed_ = node_handle_.param("terminal_max_speed", terminal_max_speed_);
-    ROS_INFO("[PP] target=%d longitude_kp=%.3f longitude_ki=%.3f lookahead_scale=%.3f",
-             tracking_object_, longitude_kp_, longitude_ki_, lookahead_scale_);
+    ROS_INFO("[PP] target=%d longitude_kp=%.3f longitude_ki=%.3f "
+             "lookahead=[%.3f,%.3f] ratio=%.3f scale=%.3f max_steer=%.3frad",
+             tracking_object_, longitude_kp_, longitude_ki_,
+             lookahead_distance_min_, lookahead_distance_max_,
+             lookahead_distance_ratio_, lookahead_scale_, pp_max_steer_angle_);
     ROS_INFO("[PP] final tolerance: lon=%.3f lat=%.3f yaw=%.1fdeg stable=%d, extension=%.3f slow_dist=%.3f max_speed=%.3f",
              final_lon_tolerance_, final_lat_tolerance_, final_yaw_tolerance_ * 180.0 / M_PI,
              final_stable_cycles_required_, terminal_lookahead_extension_,
@@ -317,7 +328,12 @@ private:
   int current_range_ = 0;
   int tracking_object_ = 0;
 
-  double lookahead_distance_ = 0.18, lookahead_gain_ = 1.0, lookahead_scale_ = 1.0;
+  double lookahead_distance_ = 0.10;
+  double lookahead_distance_min_ = 0.10;
+  double lookahead_distance_max_ = 0.15;
+  double lookahead_distance_ratio_ = 0.8;
+  double lookahead_scale_ = 1.0;
+  double pp_max_steer_angle_ = 0.45;
   double longitude_kp_ = 1.8, longitude_ki_ = 0.0, longitude_output_ = 0.0, longitude_perror_ = 0.0;
   // 末端位姿判定参数：分别约束目标坐标系下的纵向、横向和航向误差。
   double final_lon_tolerance_ = 0.02;
@@ -390,7 +406,6 @@ private:
       current_path_gen_ = incoming_path_gen;
       car_index_ = lookahead_index_ = 0;
       current_range_ = 0;
-      lookahead_gain_ = 1.0;
       final_stable_cycles_ = 0;
       using_virtual_lookahead_ = false;
       approached_ = false;
@@ -591,31 +606,37 @@ private:
     bool found_lookahead = false;
     int start = ranges_[current_range_].first, end = ranges_[current_range_].second;
 
-    double min_distance = FLT_MAX;
-    for(int i = std::max(start, car_index_); i < end; i++) {
-      double distance = distance_to_traj(i, object_.x, object_.y);
-      if(distance < min_distance) {
-        car_index_ = i;
-        min_distance = distance;
+    car_index_ = nearest_index_in_range(start, end);
+
+    const double v_cmd = fabs(trajectory_.points[car_index_].velocity);
+    const double base_lookahead = std::max(
+        lookahead_distance_min_,
+        std::min(lookahead_distance_max_,
+                 v_cmd * lookahead_distance_ratio_));
+    lookahead_distance_ = base_lookahead * lookahead_scale_;
+
+    double travel_sign = 1.0;
+    for(int i = end - 1; i >= start; --i) {
+      if(fabs(trajectory_.points[i].velocity) > 0.01) {
+        travel_sign = trajectory_.points[i].velocity > 0.0 ? 1.0 : -1.0;
+        break;
       }
     }
-
-    double v_cmd = fabs(trajectory_.points[car_index_].velocity);
-    if(v_cmd < 0.1) {
-      lookahead_distance_ = 0.08;
-    } else if(v_cmd > 0.2) {
-      lookahead_distance_ = 0.16;
-    } else {
-      lookahead_distance_ = v_cmd * 0.5;
-    }
-
-    // Scale lookahead per vehicle: smaller tracks curves more tightly, larger is smoother.
-    lookahead_distance_ *= lookahead_gain_ * lookahead_scale_;
-
-    for(int i = std::max(car_index_, lookahead_index_); i < end; i++) {
-      double distance = distance_to_traj(i, object_.x, object_.y);
-
-      if(distance >= lookahead_distance_) {
+    const double motion_yaw = object_.yaw + (travel_sign < 0.0 ? M_PI : 0.0);
+    const double motion_x = cos(motion_yaw);
+    const double motion_y = sin(motion_yaw);
+    double accumulated_distance = 0.0;
+    int last_forward_index = -1;
+    for(int i = car_index_ + 1; i < end; ++i) {
+      accumulated_distance += hypot(
+          trajectory_.points[i].x - trajectory_.points[i - 1].x,
+          trajectory_.points[i].y - trajectory_.points[i - 1].y);
+      const double relative_x = trajectory_.points[i].x - object_.x;
+      const double relative_y = trajectory_.points[i].y - object_.y;
+      const double forward_dot = relative_x * motion_x + relative_y * motion_y;
+      if(forward_dot <= 0.0) continue;
+      last_forward_index = i;
+      if(accumulated_distance >= lookahead_distance_) {
         lookahead_index_ = i;
         found_lookahead = true;
         break;
@@ -623,12 +644,18 @@ private:
     }
 
     if(!found_lookahead) {
-      lookahead_index_ = end-1;
+      lookahead_index_ = last_forward_index >= 0 ? last_forward_index : car_index_;
     }
 
     lateral_target_x_ = trajectory_.points[lookahead_index_].x;
     lateral_target_y_ = trajectory_.points[lookahead_index_].y;
     using_virtual_lookahead_ = false;
+
+    if(!found_lookahead && last_forward_index < 0) {
+      lateral_target_x_ = object_.x + lookahead_distance_ * motion_x;
+      lateral_target_y_ = object_.y + lookahead_distance_ * motion_y;
+      using_virtual_lookahead_ = true;
+    }
 
     if(current_range_ < static_cast<int>(ranges_.size()) - 1) {
       const double remaining_length = remaining_range_length(car_index_, end);
@@ -721,9 +748,6 @@ private:
         using_virtual_lookahead_ = false;
         auto goal = trajectory_.points[end - 1];
 
-        double traj_length = distance_to_traj(0, goal.x, goal.y);
-        lookahead_gain_ = std::min(traj_length / lookahead_distance_, 1.0);
-
         visualization_.visualize_goal(goal.x, goal.y, goal.yaw);
         std::cout << tracking_object_ << " - Approached, changing goal to: (" << goal.x << ", " << goal.y << ')' << std::endl;
     }
@@ -771,6 +795,8 @@ private:
 
     // steering angle
     double delta = atan2(wheel_base_ * sin(eta), lookahead_distance / 2 + (lookahead.velocity > 0 ? lfw_ : lrv_) * cos(eta));
+    delta = std::max(-pp_max_steer_angle_,
+                     std::min(pp_max_steer_angle_, delta));
     double velocity = longitude_controller();
 
 //    ROS_INFO("[%d] velocity: %f", tracking_object_, velocity);
