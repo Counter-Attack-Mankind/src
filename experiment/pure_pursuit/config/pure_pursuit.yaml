@@ -18,7 +18,7 @@ control_dt : 0.01
 lookahead_distance_min : 0.10
 lookahead_distance_max : 0.15
 lookahead_distance_ratio : 0.8
-pp_max_steer_angle : 0.45  # rad, PP control correction boundary
+pp_max_steer_angle : 0.60  # rad, PP control correction boundary
 v_lookahead_lb : 0.125
 v_lookahead_ub : 0.25
 v_min : -0.26
