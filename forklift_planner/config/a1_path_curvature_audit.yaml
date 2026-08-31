@@ -1,0 +1,4360 @@
+parameters:
+  wheel_base: 0.143
+  max_steer_angle: 0.4
+  max_steer_rate: 0.25
+  turn_speed: 0.2
+  path_resolution: 0.01
+  kappa_limit: 2.95659593523
+  steer_limit: 0.4
+  turn_ramp_len: 0.32
+  reference_dkappa_ds: 9.2393622976
+  a1_near_radius: 0.915
+catalog:
+  requested_file: "/mnt/d/desktop/叉车/src/forklift_planner/config/a1_cycle_path_catalog.yaml"
+  file_exists: false
+  format: ""
+  declared_slot_count: -1
+  usable_for_enumeration: false
+  selection_source: FORKLIFT_MAP_SLOTS_PLUS_RUNTIME_VALIDATION
+summary:
+  total_b_to_a1: 66
+  total_a1_to_b: 66
+  curvature_limit_exceeded_count: 53
+  arc_fallback_count: 44
+  max_anomaly_near_a1_count: 117
+  left_max_abs_curvature: 5.28785775663
+  right_max_abs_curvature: 5.28785775663
+  right_to_left_curvature_ratio: 1
+  left_max_abs_dkappa_ds: 490.680337071
+  right_max_abs_dkappa_ds: 467.081493163
+  right_to_left_curvature_rate_ratio: 0.951905870024
+  worst_curvature: {direction: B_TO_A1, slot: 10, value: 5.28785775663, s: 2.63900361589, layer: "ORDINARY_OR_UNTAGGED_JOIN"}
+  worst_curvature_rate: {direction: B_TO_A1, slot: 20, value: 490.680337071, s: 1.14842088775, layer: "ARC_FALLBACK:local_arc_fallback"}
+  rejected_routes:
+routes:
+  - direction: B_TO_A1
+    slot: 0
+    row: 0
+    col: 0
+    side: LEFT
+    path_length: 3.03446221194
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 0.301570765713
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 0.123833333333
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 1.09324088356
+    max_anomaly_near_a1: false
+    cusp_s: [2.09004132733]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.49164022767, s_end: 3.03446221194}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.19762456216, s_end: 3.02446220889}
+  - direction: A1_TO_B
+    slot: 0
+    row: 0
+    col: 0
+    side: LEFT
+    path_length: 2.55514569527
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.723874660666]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.723874660666, s_end: 2.55514569527}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.72070513017, s_end: 2.54199055476}
+  - direction: B_TO_A1
+    slot: 1
+    row: 0
+    col: 1
+    side: LEFT
+    path_length: 2.8151288786
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 0.520904099046
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 0.343166666667
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.909526497596
+    max_anomaly_near_a1: true
+    cusp_s: [1.870707994]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.27226530647, s_end: 2.8151288786}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.97829122883, s_end: 2.80512887555}
+  - direction: A1_TO_B
+    slot: 1
+    row: 0
+    col: 1
+    side: LEFT
+    path_length: 2.33581236194
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.723874660666]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.723874660666, s_end: 2.33581236194}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.50137179683, s_end: 2.32265722143}
+  - direction: B_TO_A1
+    slot: 2
+    row: 0
+    col: 2
+    side: LEFT
+    path_length: 2.11579554527
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.634986372712
+    max_abs_curvature_x: 0.292600383165
+    max_abs_curvature_y: 3.7977256034
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 0.5625
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.730164005008
+    max_anomaly_near_a1: true
+    cusp_s: [0.723874660666]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.723874660666, s_end: 2.11579554527}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.2789578955, s_end: 2.10579554222}
+  - direction: A1_TO_B
+    slot: 2
+    row: 0
+    col: 2
+    side: LEFT
+    path_length: 2.11647902861
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.723874660666]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.723874660666, s_end: 2.11647902861}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.2820384635, s_end: 2.10332388809}
+  - direction: B_TO_A1
+    slot: 3
+    row: 0
+    col: 3
+    side: LEFT
+    path_length: 1.89982895897
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.634986372712
+    max_abs_curvature_x: 0.511933716499
+    max_abs_curvature_y: 3.7977256034
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 0.781833333333
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.52883196952
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 1.89982895897}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.06299130919, s_end: 1.88982895592}
+  - direction: A1_TO_B
+    slot: 3
+    row: 0
+    col: 3
+    side: LEFT
+    path_length: 1.90051244231
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 1.90051244231}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.0660718772, s_end: 1.88735730179}
+  - direction: B_TO_A1
+    slot: 4
+    row: 0
+    col: 4
+    side: LEFT
+    path_length: 1.68049562564
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.634986372712
+    max_abs_curvature_x: 0.731267049832
+    max_abs_curvature_y: 3.7977256034
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "CLOTHOID:clothoid"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.00116666667
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.349858902969
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 1.68049562564}
+      - {type: CLOTHOID, label: "clothoid", s_start: 0.843657975861, s_end: 1.67049562259}
+  - direction: A1_TO_B
+    slot: 4
+    row: 0
+    col: 4
+    side: LEFT
+    path_length: 1.68117910897
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 1.68117910897}
+      - {type: CLOTHOID, label: "clothoid", s_start: 0.846738543866, s_end: 1.66802396846}
+  - direction: B_TO_A1
+    slot: 5
+    row: 0
+    col: 5
+    side: RIGHT
+    path_length: 1.68049562564
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.67657076571
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.49883333333
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.349858902969
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 1.68049562564}
+      - {type: CLOTHOID, label: "clothoid", s_start: 0.843657975861, s_end: 1.67049562259}
+  - direction: A1_TO_B
+    slot: 5
+    row: 0
+    col: 5
+    side: RIGHT
+    path_length: 1.68117910897
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 1.68117910897}
+      - {type: CLOTHOID, label: "clothoid", s_start: 0.846738543866, s_end: 1.66802396846}
+  - direction: B_TO_A1
+    slot: 6
+    row: 0
+    col: 6
+    side: RIGHT
+    path_length: 1.89982895897
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.89590409905
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.71816666667
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.52883196952
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 1.89982895897}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.06299130919, s_end: 1.88982895592}
+  - direction: A1_TO_B
+    slot: 6
+    row: 0
+    col: 6
+    side: RIGHT
+    path_length: 1.90051244231
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 1.90051244231}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.0660718772, s_end: 1.88735730179}
+  - direction: B_TO_A1
+    slot: 7
+    row: 0
+    col: 7
+    side: RIGHT
+    path_length: 2.11579554527
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.566095500491
+    max_abs_curvature_x: 2.14180538872
+    max_abs_curvature_y: 3.81839679425
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.9375
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.730164005008
+    max_anomaly_near_a1: true
+    cusp_s: [0.723874660666]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.723874660666, s_end: 2.11579554527}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.2789578955, s_end: 2.10579554222}
+  - direction: A1_TO_B
+    slot: 7
+    row: 0
+    col: 7
+    side: RIGHT
+    path_length: 2.11647902861
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.723874660666]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.723874660666, s_end: 2.11647902861}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.2820384635, s_end: 2.10332388809}
+  - direction: B_TO_A1
+    slot: 8
+    row: 0
+    col: 8
+    side: RIGHT
+    path_length: 2.8151288786
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.497204628271
+    max_abs_curvature_x: 2.01258492376
+    max_abs_curvature_y: 3.85190888385
+    max_abs_equivalent_steer: 0.399987346739
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 2.15683333333
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.924748658689
+    max_anomaly_near_a1: false
+    cusp_s: [1.870707994]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.27226530647, s_end: 2.8151288786}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.97829122883, s_end: 2.80512887555}
+  - direction: A1_TO_B
+    slot: 8
+    row: 0
+    col: 8
+    side: RIGHT
+    path_length: 2.33581236194
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.723874660666]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.723874660666, s_end: 2.33581236194}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.50137179683, s_end: 2.32265722143}
+  - direction: B_TO_A1
+    slot: 9
+    row: 0
+    col: 9
+    side: RIGHT
+    path_length: 3.03446221194
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.497204628271
+    max_abs_curvature_x: 2.2319182571
+    max_abs_curvature_y: 3.85190888385
+    max_abs_equivalent_steer: 0.399987346739
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 2.37616666667
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 1.11255911277
+    max_anomaly_near_a1: false
+    cusp_s: [2.09004132733]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.49164022767, s_end: 3.03446221194}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.19762456216, s_end: 3.02446220889}
+  - direction: A1_TO_B
+    slot: 9
+    row: 0
+    col: 9
+    side: RIGHT
+    path_length: 2.55514569527
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.723874660666]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.723874660666, s_end: 2.55514569527}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.72070513017, s_end: 2.54199055476}
+  - direction: B_TO_A1
+    slot: 10
+    row: 1
+    col: 0
+    side: LEFT
+    path_length: 3.54394328547
+    max_abs_curvature: 5.28785775663
+    max_abs_curvature_s: 2.63900361589
+    max_abs_curvature_x: 1.72483341667
+    max_abs_curvature_y: 3.78430614782
+    max_abs_equivalent_steer: 0.647434194085
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 278.350062893
+    max_abs_dkappa_ds_s: 2.39148420904
+    max_abs_dkappa_ds_x: 1.865
+    max_abs_dkappa_ds_y: 3.6016375
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 30.126544877
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: false
+    clothoid_count: 0
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.757882577041
+    max_anomaly_near_a1: true
+    cusp_s: [2.16997743821]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0, s_end: 3.54394328547}
+  - direction: A1_TO_B
+    slot: 10
+    row: 1
+    col: 0
+    side: LEFT
+    path_length: 3.40552454726
+    max_abs_curvature: 5.28785775663
+    max_abs_curvature_s: 0.569156906844
+    max_abs_curvature_x: 1.39016658333
+    max_abs_curvature_y: 3.79719385218
+    max_abs_equivalent_steer: 0.647434194085
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 278.350062893
+    max_abs_dkappa_ds_s: 1.16208980559
+    max_abs_dkappa_ds_x: 1.865
+    max_abs_dkappa_ds_y: 3.59200677083
+    max_rate_layer: "CLOTHOID:clothoid"
+    curvature_rate_ratio: 30.126544877
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: false
+    clothoid_count: 2
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.594564223231
+    max_anomaly_near_a1: true
+    cusp_s: [1.38359657642]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.38359657642, s_end: 3.40552454726}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.57927882849, s_end: 2.43056425308}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.60381928521, s_end: 3.3951047098}
+  - direction: B_TO_A1
+    slot: 11
+    row: 2
+    col: 0
+    side: LEFT
+    path_length: 3.318925554
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.517070840968
+    max_abs_curvature_x: 0.884070765713
+    max_abs_curvature_y: 2.71075592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 154.430834601
+    max_abs_dkappa_ds_s: 0.152933373516
+    max_abs_dkappa_ds_x: 0.706333333333
+    max_abs_dkappa_ds_y: 3.00856662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.7144473425
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 1.47061674433
+    max_anomaly_near_a1: false
+    cusp_s: [0.706058034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.706058034182, s_end: 3.318925554}
+      - {type: CLOTHOID, label: "clothoid", s_start: 0.83282361958, s_end: 1.68410904417}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.91251308034, s_end: 2.53078352021}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.55084670106, s_end: 3.22555758968}
+  - direction: A1_TO_B
+    slot: 11
+    row: 2
+    col: 0
+    side: LEFT
+    path_length: 4.55493728378
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 4.55493728378}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.48599028625, s_end: 2.33727571084}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.43869156501, s_end: 3.2899769896}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.75323202173, s_end: 4.54451744632}
+  - direction: B_TO_A1
+    slot: 12
+    row: 1
+    col: 1
+    side: LEFT
+    path_length: 3.32210995213
+    max_abs_curvature: 5.28785775663
+    max_abs_curvature_s: 2.41717028255
+    max_abs_curvature_x: 1.72483341667
+    max_abs_curvature_y: 3.78430614782
+    max_abs_equivalent_steer: 0.647434194085
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 278.350062893
+    max_abs_dkappa_ds_s: 2.16965087571
+    max_abs_dkappa_ds_x: 1.865
+    max_abs_dkappa_ds_y: 3.6016375
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 30.126544877
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: false
+    clothoid_count: 0
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.757882577041
+    max_anomaly_near_a1: true
+    cusp_s: [1.94814410487]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0, s_end: 3.32210995213}
+  - direction: A1_TO_B
+    slot: 12
+    row: 1
+    col: 1
+    side: LEFT
+    path_length: 3.19499796183
+    max_abs_curvature: 5.28785775663
+    max_abs_curvature_s: 0.569156906844
+    max_abs_curvature_x: 1.39016658333
+    max_abs_curvature_y: 3.79719385218
+    max_abs_equivalent_steer: 0.647434194085
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 278.350062893
+    max_abs_dkappa_ds_s: 1.16208980559
+    max_abs_dkappa_ds_x: 1.865
+    max_abs_dkappa_ds_y: 3.59200677083
+    max_rate_layer: "CLOTHOID:clothoid"
+    curvature_rate_ratio: 30.126544877
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: false
+    clothoid_count: 2
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.594564223231
+    max_anomaly_near_a1: true
+    cusp_s: [1.38359657642]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.38359657642, s_end: 3.19499796183}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.58493416107, s_end: 2.42621958566}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.44328000712, s_end: 3.12456543171}
+  - direction: B_TO_A1
+    slot: 13
+    row: 2
+    col: 1
+    side: LEFT
+    path_length: 3.54075888733
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.517070840968
+    max_abs_curvature_x: 1.10590409905
+    max_abs_curvature_y: 2.71075592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 154.430834601
+    max_abs_dkappa_ds_s: 0.152933373516
+    max_abs_dkappa_ds_x: 0.928166666667
+    max_abs_dkappa_ds_y: 3.00856662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.7144473425
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 1.40382223187
+    max_anomaly_near_a1: false
+    cusp_s: [0.706058034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.706058034182, s_end: 3.54075888733}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.05465695291, s_end: 1.9059423775}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.13434641367, s_end: 2.75261685354}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.77268003439, s_end: 3.44739092302}
+  - direction: A1_TO_B
+    slot: 13
+    row: 2
+    col: 1
+    side: LEFT
+    path_length: 4.33310395044
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 4.33310395044}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.48599028625, s_end: 2.33727571084}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.43869156501, s_end: 3.2899769896}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.53139868839, s_end: 4.32268411298}
+  - direction: B_TO_A1
+    slot: 14
+    row: 1
+    col: 2
+    side: LEFT
+    path_length: 3.1002766188
+    max_abs_curvature: 5.28785775663
+    max_abs_curvature_s: 2.19533694922
+    max_abs_curvature_x: 1.72483341667
+    max_abs_curvature_y: 3.78430614782
+    max_abs_equivalent_steer: 0.647434194085
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 278.350062893
+    max_abs_dkappa_ds_s: 1.94781754237
+    max_abs_dkappa_ds_x: 1.865
+    max_abs_dkappa_ds_y: 3.6016375
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 30.126544877
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: false
+    clothoid_count: 0
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.757882577041
+    max_anomaly_near_a1: true
+    cusp_s: [1.72631077154]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0, s_end: 3.1002766188}
+  - direction: A1_TO_B
+    slot: 14
+    row: 1
+    col: 2
+    side: LEFT
+    path_length: 3.01227376981
+    max_abs_curvature: 5.28785775663
+    max_abs_curvature_s: 0.569156906844
+    max_abs_curvature_x: 1.39016658333
+    max_abs_curvature_y: 3.79719385218
+    max_abs_equivalent_steer: 0.647434194085
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 332.034564556
+    max_abs_dkappa_ds_s: 1.79392810789
+    max_abs_dkappa_ds_x: 1.86483952265
+    max_abs_dkappa_ds_y: 3.78083021854
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 35.9369568874
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.594564223231
+    max_anomaly_near_a1: true
+    cusp_s: [1.38359657642]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.233918181818, s_end: 3.01227376981}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 1.78412001684, s_end: 2.25490838765}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.26990838765, s_end: 2.93119381224}
+  - direction: B_TO_A1
+    slot: 15
+    row: 2
+    col: 2
+    side: LEFT
+    path_length: 3.76259222066
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.517070840968
+    max_abs_curvature_x: 1.32773743238
+    max_abs_curvature_y: 2.71075592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 154.430834601
+    max_abs_dkappa_ds_s: 0.152933373516
+    max_abs_dkappa_ds_x: 1.15
+    max_abs_dkappa_ds_y: 3.00856662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.7144473425
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 1.37008764839
+    max_anomaly_near_a1: false
+    cusp_s: [0.706058034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.706058034182, s_end: 3.76259222066}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.27649028625, s_end: 2.12777571084}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.35617974701, s_end: 2.97445018687}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.99451336772, s_end: 3.66922425635}
+  - direction: A1_TO_B
+    slot: 15
+    row: 2
+    col: 2
+    side: LEFT
+    path_length: 4.31127061711
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 4.31127061711}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.68599028625, s_end: 2.53727571084}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.63869156501, s_end: 3.4899769896}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.50956535506, s_end: 4.30085077965}
+  - direction: B_TO_A1
+    slot: 16
+    row: 1
+    col: 3
+    side: RIGHT
+    path_length: 3.52210995213
+    max_abs_curvature: 5.28785775663
+    max_abs_curvature_s: 2.95295304529
+    max_abs_curvature_x: 1.10983341667
+    max_abs_curvature_y: 3.79719385218
+    max_abs_equivalent_steer: 0.647434194085
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 278.350062893
+    max_abs_dkappa_ds_s: 2.16965087571
+    max_abs_dkappa_ds_x: 0.435
+    max_abs_dkappa_ds_y: 3.6016375
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 30.126544877
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: false
+    clothoid_count: 0
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.594564223231
+    max_anomaly_near_a1: true
+    cusp_s: [1.94814410487]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0, s_end: 3.52210995213}
+  - direction: A1_TO_B
+    slot: 16
+    row: 1
+    col: 3
+    side: RIGHT
+    path_length: 3.39499796183
+    max_abs_curvature: 5.28785775663
+    max_abs_curvature_s: 0.569156906844
+    max_abs_curvature_x: 1.10983341667
+    max_abs_curvature_y: 3.79719385218
+    max_abs_equivalent_steer: 0.647434194085
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 278.350062893
+    max_abs_dkappa_ds_s: 1.36208980559
+    max_abs_dkappa_ds_x: 0.435
+    max_abs_dkappa_ds_y: 3.59200677083
+    max_rate_layer: "CLOTHOID:clothoid"
+    curvature_rate_ratio: 30.126544877
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: false
+    clothoid_count: 2
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.594564223231
+    max_anomaly_near_a1: true
+    cusp_s: [1.58359657642]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.233918181818, s_end: 3.39499796183}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78493416107, s_end: 2.62621958566}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.64328000712, s_end: 3.32456543171}
+  - direction: B_TO_A1
+    slot: 17
+    row: 2
+    col: 3
+    side: RIGHT
+    path_length: 3.42020048165
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 2.94976051243
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 3.13928798165
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 2
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [0.706058034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.706058034182, s_end: 3.42020048165}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.05465695291, s_end: 1.9059423775}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 2.23517597961, s_end: 2.66987077838}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 2.77828327838, s_end: 3.13928798165}
+  - direction: A1_TO_B
+    slot: 17
+    row: 2
+    col: 3
+    side: RIGHT
+    path_length: 4.53310395044
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 4.53310395044}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.68599028625, s_end: 2.53727571084}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.63869156501, s_end: 3.4899769896}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.73139868839, s_end: 4.52268411298}
+  - direction: B_TO_A1
+    slot: 18
+    row: 1
+    col: 4
+    side: RIGHT
+    path_length: 3.74394328547
+    max_abs_curvature: 5.28785775663
+    max_abs_curvature_s: 3.17478637862
+    max_abs_curvature_x: 1.10983341667
+    max_abs_curvature_y: 3.79719385218
+    max_abs_equivalent_steer: 0.647434194085
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 278.350062893
+    max_abs_dkappa_ds_s: 2.39148420904
+    max_abs_dkappa_ds_x: 0.435
+    max_abs_dkappa_ds_y: 3.6016375
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 30.126544877
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: false
+    clothoid_count: 0
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.594564223231
+    max_anomaly_near_a1: true
+    cusp_s: [2.16997743821]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0, s_end: 3.74394328547}
+  - direction: A1_TO_B
+    slot: 18
+    row: 1
+    col: 4
+    side: RIGHT
+    path_length: 3.60552454726
+    max_abs_curvature: 5.28785775663
+    max_abs_curvature_s: 0.569156906844
+    max_abs_curvature_x: 1.10983341667
+    max_abs_curvature_y: 3.79719385218
+    max_abs_equivalent_steer: 0.647434194085
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 278.350062893
+    max_abs_dkappa_ds_s: 1.36208980559
+    max_abs_dkappa_ds_x: 0.435
+    max_abs_dkappa_ds_y: 3.59200677083
+    max_rate_layer: "CLOTHOID:clothoid"
+    curvature_rate_ratio: 30.126544877
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: false
+    clothoid_count: 2
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.594564223231
+    max_anomaly_near_a1: true
+    cusp_s: [1.58359657642]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.58359657642, s_end: 3.60552454726}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.77927882849, s_end: 2.63056425308}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.80381928521, s_end: 3.5951047098}
+  - direction: B_TO_A1
+    slot: 19
+    row: 2
+    col: 4
+    side: RIGHT
+    path_length: 3.19836714832
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 2.7279271791
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 2.91745464832
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 2
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [0.706058034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.706058034182, s_end: 3.19836714832}
+      - {type: CLOTHOID, label: "clothoid", s_start: 0.83282361958, s_end: 1.68410904417}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 2.01334264628, s_end: 2.44803744504}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 2.55644994504, s_end: 2.91745464832}
+  - direction: A1_TO_B
+    slot: 19
+    row: 2
+    col: 4
+    side: RIGHT
+    path_length: 4.75493728378
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 4.75493728378}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.68599028625, s_end: 2.53727571084}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.63869156501, s_end: 3.4899769896}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.95323202173, s_end: 4.74451744632}
+  - direction: B_TO_A1
+    slot: 20
+    row: 3
+    col: 0
+    side: LEFT
+    path_length: 3.39139516099
+    max_abs_curvature: 4.45945831249
+    max_abs_curvature_s: 1.24528046214
+    max_abs_curvature_x: 0.267438525489
+    max_abs_curvature_y: 2.97469096753
+    max_abs_equivalent_steer: 0.567681623072
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 490.680337071
+    max_abs_dkappa_ds_s: 1.14842088775
+    max_abs_dkappa_ds_x: 0.360438763392
+    max_abs_dkappa_ds_y: 2.95042288283
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 53.1075978262
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 2
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 1.67950562858
+    max_anomaly_near_a1: false
+    cusp_s: [0.865541327333]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.865541327333, s_end: 3.39139516099}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 1.1396154719, s_end: 1.49183210603}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.60352187617, s_end: 2.45480730076}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.55455751121, s_end: 3.38139515794}
+  - direction: A1_TO_B
+    slot: 20
+    row: 3
+    col: 0
+    side: LEFT
+    path_length: 4.3134733385
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 4.3134733385}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.29497501942, s_end: 1.96626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.98569432554, s_end: 2.65697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.51176807645, s_end: 4.30305350104}
+  - direction: B_TO_A1
+    slot: 21
+    row: 4
+    col: 0
+    side: LEFT
+    path_length: 6.10198355654
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 5.13651847852
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.74298759449
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.97054132733]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.47197783935, s_end: 6.10198355654}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.0303413043, s_end: 2.76285086286}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.28631957247, s_end: 4.00057382693}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.01152358934, s_end: 4.6065527173}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.73314932239, s_end: 5.26441601583}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.3339047036, s_end: 6.00861559222}
+  - direction: A1_TO_B
+    slot: 21
+    row: 4
+    col: 0
+    side: LEFT
+    path_length: 6.35837589602
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.35837589602}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.56463017725, s_end: 5.41591560184}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.55667063397, s_end: 6.34795605856}
+  - direction: B_TO_A1
+    slot: 22
+    row: 3
+    col: 1
+    side: LEFT
+    path_length: 3.28019965403
+    max_abs_curvature: 3.98128794666
+    max_abs_curvature_s: 1.17085746737
+    max_abs_curvature_x: 0.248538039255
+    max_abs_curvature_y: 2.99822015644
+    max_abs_equivalent_steer: 0.51755828608
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 391.094416894
+    max_abs_dkappa_ds_s: 1.02291268626
+    max_abs_dkappa_ds_x: 0.386313915777
+    max_abs_dkappa_ds_y: 2.95044364682
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 42.3291569588
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 2
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 1.66592750606
+    max_anomaly_near_a1: false
+    cusp_s: [0.706058034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.706058034182, s_end: 3.28019965403}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 1.01304970085, s_end: 1.40756911715}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.49232636922, s_end: 2.34361179381}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.44336200426, s_end: 3.27019965098}
+  - direction: A1_TO_B
+    slot: 22
+    row: 3
+    col: 1
+    side: LEFT
+    path_length: 4.09414000517
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 4.09414000517}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.29497501942, s_end: 1.96626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.98569432554, s_end: 2.65697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.29243474312, s_end: 4.08372016771}
+  - direction: B_TO_A1
+    slot: 23
+    row: 4
+    col: 1
+    side: LEFT
+    path_length: 5.8826502232
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 4.91718514519
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.52365426115
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.751207994]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.25262818462, s_end: 5.8826502232}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.81100797097, s_end: 2.54351752953}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.06698623914, s_end: 3.7812404936}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.79219025601, s_end: 4.38721938396}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.51381598905, s_end: 5.0450826825}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.11457137026, s_end: 5.78928225889}
+  - direction: A1_TO_B
+    slot: 23
+    row: 4
+    col: 1
+    side: LEFT
+    path_length: 6.156395239
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.156395239}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.59830268854, s_end: 5.38958811314}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.40467728429, s_end: 6.08596270888}
+  - direction: B_TO_A1
+    slot: 24
+    row: 3
+    col: 2
+    side: LEFT
+    path_length: 3.47425042247
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.517070840968
+    max_abs_curvature_x: 0.74023743238
+    max_abs_curvature_y: 2.90974407311
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 154.430834601
+    max_abs_dkappa_ds_s: 0.152933373516
+    max_abs_dkappa_ds_x: 0.5625
+    max_abs_dkappa_ds_y: 2.61193337352
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.7144473425
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 1.55139704996
+    max_anomaly_near_a1: false
+    cusp_s: [0.706058034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.706058034182, s_end: 3.47425042247}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.08995384706, s_end: 1.73876060296}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.7500876858, s_end: 2.45870103655}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.63741277269, s_end: 3.46425041942}
+  - direction: A1_TO_B
+    slot: 24
+    row: 3
+    col: 2
+    side: LEFT
+    path_length: 3.87480667184
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 3.87480667184}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.29497501942, s_end: 1.96626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.98569432554, s_end: 2.65697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.07310140978, s_end: 3.86438683438}
+  - direction: B_TO_A1
+    slot: 25
+    row: 4
+    col: 2
+    side: LEFT
+    path_length: 5.66331688987
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 4.69785181186
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.30432092782
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.53187466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.03326998057, s_end: 5.66331688987}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.59167463764, s_end: 2.3241841962}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.84765290581, s_end: 3.56190716027}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.57285692267, s_end: 4.16788605063}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.29448265572, s_end: 4.82574934917}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.89523803693, s_end: 5.56994892556}
+  - direction: A1_TO_B
+    slot: 25
+    row: 4
+    col: 2
+    side: LEFT
+    path_length: 7.73522292424
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 5.3731184563, 6.95725170927]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.83142115842}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.63131664357, s_end: 5.36260206816}
+  - direction: B_TO_A1
+    slot: 26
+    row: 3
+    col: 3
+    side: LEFT
+    path_length: 3.69398481026
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.517070840968
+    max_abs_curvature_x: 0.959570765713
+    max_abs_curvature_y: 2.90974407311
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 154.430834601
+    max_abs_dkappa_ds_s: 0.152933373516
+    max_abs_dkappa_ds_x: 0.781833333333
+    max_abs_dkappa_ds_y: 2.61193337352
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.7144473425
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 1.49376171842
+    max_anomaly_near_a1: false
+    cusp_s: [0.706058034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.706058034182, s_end: 3.69398481026}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.29309809671, s_end: 1.97239122413}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.98407029163, s_end: 2.66193252611}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.85714716048, s_end: 3.68398480721}
+  - direction: A1_TO_B
+    slot: 26
+    row: 3
+    col: 3
+    side: LEFT
+    path_length: 3.65472305071
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 3.65472305071}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.28429188869, s_end: 1.97557731328}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.98963097647, s_end: 2.65091640106}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.85301778865, s_end: 3.64430321325}
+  - direction: B_TO_A1
+    slot: 27
+    row: 4
+    col: 3
+    side: LEFT
+    path_length: 5.44398355654
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 4.47851847852
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.08498759449
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.31254132733]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.813894126344, s_end: 5.44398355654}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.3723413043, s_end: 2.10485086286}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.62831957247, s_end: 3.34257382693}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.35352358934, s_end: 3.9485527173}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.07514932239, s_end: 4.60641601583}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.6759047036, s_end: 5.35061559222}
+  - direction: A1_TO_B
+    slot: 27
+    row: 4
+    col: 3
+    side: LEFT
+    path_length: 7.5158895909
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 5.3731184563, 6.73791837594]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.83137244392}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.63131664357, s_end: 5.36260206816}
+  - direction: B_TO_A1
+    slot: 28
+    row: 3
+    col: 4
+    side: LEFT
+    path_length: 3.91331814359
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.517070840968
+    max_abs_curvature_x: 1.17890409905
+    max_abs_curvature_y: 2.90974407311
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 154.430834601
+    max_abs_dkappa_ds_s: 0.152933373516
+    max_abs_dkappa_ds_x: 1.00116666667
+    max_abs_dkappa_ds_y: 2.61193337352
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.7144473425
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 1.46697974029
+    max_anomaly_near_a1: false
+    cusp_s: [0.706058034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.706058034182, s_end: 3.91331814359}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.51243143004, s_end: 2.19172455746}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.20340362497, s_end: 2.88126585944}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.07648049381, s_end: 3.90331814054}
+  - direction: A1_TO_B
+    slot: 28
+    row: 3
+    col: 4
+    side: LEFT
+    path_length: 3.44440038056
+    max_abs_curvature: 3.21560363066
+    max_abs_curvature_s: 2.3812771694
+    max_abs_curvature_x: 1.71522798609
+    max_abs_curvature_y: 2.99529822535
+    max_abs_equivalent_steer: 0.430999510264
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 301.398164414
+    max_abs_dkappa_ds_s: 2.55074669426
+    max_abs_dkappa_ds_x: 1.5540163979
+    max_abs_dkappa_ds_y: 2.95025
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 32.6211003212
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 2
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 1.45602680814
+    max_anomaly_near_a1: false
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 3.44440038056}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.19599028625, s_end: 2.04727571084}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 2.06227571084, s_end: 2.55074669426}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.69268242585, s_end: 3.37396785044}
+  - direction: B_TO_A1
+    slot: 29
+    row: 4
+    col: 4
+    side: LEFT
+    path_length: 5.2246502232
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 4.25918514519
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 3.86565426115
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.093207994]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.595803266363, s_end: 5.2246502232}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.15300797097, s_end: 1.88551752953}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.40898623914, s_end: 3.1232404936}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.13419025601, s_end: 3.72921938396}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.85581598905, s_end: 4.3870826825}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.45657137026, s_end: 5.13128225889}
+  - direction: A1_TO_B
+    slot: 29
+    row: 4
+    col: 4
+    side: LEFT
+    path_length: 7.29655625757
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 5.3731184563, 6.5185850426]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.83130509082}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.63131664357, s_end: 5.36260206816}
+  - direction: B_TO_A1
+    slot: 30
+    row: 3
+    col: 5
+    side: RIGHT
+    path_length: 3.52379882595
+    max_abs_curvature: 3.21560363065
+    max_abs_curvature_s: 2.55247576977
+    max_abs_curvature_x: 1.86394118569
+    max_abs_curvature_y: 3.79011105084
+    max_abs_equivalent_steer: 0.430999510264
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 303.930691272
+    max_abs_dkappa_ds_s: 2.57241336093
+    max_abs_dkappa_ds_x: 1.8440163979
+    max_abs_dkappa_ds_y: 3.79075
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 32.8952022318
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 2
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.83318878021
+    max_anomaly_near_a1: true
+    cusp_s: [0.706058034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.706058034182, s_end: 3.52379882595}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.21765695291, s_end: 2.0689423775}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 2.0839423775, s_end: 2.57241336093}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.73499165776, s_end: 3.45449891904}
+  - direction: A1_TO_B
+    slot: 30
+    row: 3
+    col: 5
+    side: RIGHT
+    path_length: 3.83521985227
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 3.83521985227}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.47891883331, s_end: 2.1802042579}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.19416959724, s_end: 2.84545502183}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.03351459022, s_end: 3.82480001481}
+  - direction: B_TO_A1
+    slot: 31
+    row: 4
+    col: 5
+    side: RIGHT
+    path_length: 5.2246502232
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 4.25918514519
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 3.86565426115
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.093207994]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.595803266363, s_end: 5.2246502232}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.15300797097, s_end: 1.88551752953}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.40898623914, s_end: 3.1232404936}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.13419025601, s_end: 3.72921938396}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.85581598905, s_end: 4.3870826825}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.45657137026, s_end: 5.13128225889}
+  - direction: A1_TO_B
+    slot: 31
+    row: 4
+    col: 5
+    side: RIGHT
+    path_length: 6.89122355352
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 4.96778575225, 6.11325233855]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.42597238677}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.22598393951, s_end: 4.9572693641}
+  - direction: B_TO_A1
+    slot: 32
+    row: 3
+    col: 6
+    side: RIGHT
+    path_length: 3.30151568359
+    max_abs_curvature: 3.06930892446
+    max_abs_curvature_s: 1.91224581401
+    max_abs_curvature_x: 2.14966326347
+    max_abs_curvature_y: 3.52367197613
+    max_abs_equivalent_steer: 0.413594290215
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 292.399648631
+    max_abs_dkappa_ds_s: 2.36495285643
+    max_abs_dkappa_ds_x: 1.82919376002
+    max_abs_dkappa_ds_y: 3.79075
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 31.6471677604
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 2
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.822686741203
+    max_anomaly_near_a1: true
+    cusp_s: [0.706058034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.706058034182, s_end: 3.30151568359}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.0132389478, s_end: 1.83819706934}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 1.85319706934, s_end: 2.36495285643}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.5127085154, s_end: 3.23221577667}
+  - direction: A1_TO_B
+    slot: 32
+    row: 3
+    col: 6
+    side: RIGHT
+    path_length: 4.0554733385
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 4.0554733385}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.49497501942, s_end: 2.16626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.18569432554, s_end: 2.85697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.25376807645, s_end: 4.04505350104}
+  - direction: B_TO_A1
+    slot: 33
+    row: 4
+    col: 6
+    side: RIGHT
+    path_length: 5.44398355654
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 4.47851847852
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.08498759449
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.31254132733]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.813894126344, s_end: 5.44398355654}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.3723413043, s_end: 2.10485086286}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.62831957247, s_end: 3.34257382693}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.35352358934, s_end: 3.9485527173}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.07514932239, s_end: 4.60641601583}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.6759047036, s_end: 5.35061559222}
+  - direction: A1_TO_B
+    slot: 33
+    row: 4
+    col: 6
+    side: RIGHT
+    path_length: 7.11055688685
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 4.96778575225, 6.33258567188]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.42603973986}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.22598393951, s_end: 4.9572693641}
+  - direction: B_TO_A1
+    slot: 34
+    row: 3
+    col: 7
+    side: RIGHT
+    path_length: 3.08771162513
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.517070840968
+    max_abs_curvature_x: 1.75976256762
+    max_abs_curvature_y: 2.90974407311
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 154.430834601
+    max_abs_dkappa_ds_s: 0.152933373516
+    max_abs_dkappa_ds_x: 1.9375
+    max_abs_dkappa_ds_y: 2.61193337352
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.7144473425
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 1.55139704996
+    max_anomaly_near_a1: false
+    cusp_s: [0.706058034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.706058034182, s_end: 3.08771162513}
+      - {type: CLOTHOID, label: "clothoid", s_start: 0.870073285597, s_end: 1.55636838343}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.58452865591, s_end: 2.22413547602}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.29890445694, s_end: 3.01841171822}
+  - direction: A1_TO_B
+    slot: 34
+    row: 3
+    col: 7
+    side: RIGHT
+    path_length: 4.27480667184
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 4.27480667184}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.49497501942, s_end: 2.16626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.18569432554, s_end: 2.85697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.47310140978, s_end: 4.26438683438}
+  - direction: B_TO_A1
+    slot: 35
+    row: 4
+    col: 7
+    side: RIGHT
+    path_length: 5.66331688987
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 4.69785181186
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.30432092782
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.53187466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.03326998057, s_end: 5.66331688987}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.59167463764, s_end: 2.3241841962}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.84765290581, s_end: 3.56190716027}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.57285692267, s_end: 4.16788605063}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.29448265572, s_end: 4.82574934917}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.89523803693, s_end: 5.56994892556}
+  - direction: A1_TO_B
+    slot: 35
+    row: 4
+    col: 7
+    side: RIGHT
+    path_length: 7.32989022018
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 4.96778575225, 6.55191900522]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.42608845437}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.22598393951, s_end: 4.9572693641}
+  - direction: B_TO_A1
+    slot: 36
+    row: 3
+    col: 8
+    side: RIGHT
+    path_length: 3.14901485117
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.418655309224
+    max_abs_curvature_x: 2.05776462191
+    max_abs_curvature_y: 2.8511831375
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 154.430834601
+    max_abs_dkappa_ds_s: 0.152933373516
+    max_abs_dkappa_ds_x: 2.15683333333
+    max_abs_dkappa_ds_y: 2.61193337352
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.7144473425
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 1.72467432139
+    max_anomaly_near_a1: false
+    cusp_s: [0.846207994]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.418655309224, s_end: 3.14901485117}
+      - {type: CLOTHOID, label: "clothoid", s_start: 0.963805352815, s_end: 1.58814265681}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.62133033333, s_end: 2.31306871865}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.36020768298, s_end: 3.07971494425}
+  - direction: A1_TO_B
+    slot: 36
+    row: 3
+    col: 8
+    side: RIGHT
+    path_length: 4.49414000517
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 4.49414000517}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.49497501942, s_end: 2.16626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.18569432554, s_end: 2.85697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.69243474312, s_end: 4.48372016771}
+  - direction: B_TO_A1
+    slot: 37
+    row: 4
+    col: 8
+    side: RIGHT
+    path_length: 5.8826502232
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 4.91718514519
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.52365426115
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.751207994]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.25262818462, s_end: 5.8826502232}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.81100797097, s_end: 2.54351752953}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.06698623914, s_end: 3.7812404936}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.79219025601, s_end: 4.38721938396}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.51381598905, s_end: 5.0450826825}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.11457137026, s_end: 5.78928225889}
+  - direction: A1_TO_B
+    slot: 37
+    row: 4
+    col: 8
+    side: RIGHT
+    path_length: 5.75106253495
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.75106253495}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.19296998449, s_end: 4.98425540908}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.99934458023, s_end: 5.68063000482}
+  - direction: B_TO_A1
+    slot: 38
+    row: 3
+    col: 9
+    side: RIGHT
+    path_length: 3.3683481845
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.517070840968
+    max_abs_curvature_x: 2.19842923429
+    max_abs_curvature_y: 2.90974407311
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 154.430834601
+    max_abs_dkappa_ds_s: 0.152933373516
+    max_abs_dkappa_ds_x: 2.37616666667
+    max_abs_dkappa_ds_y: 2.61193337352
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.7144473425
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 1.74542056357
+    max_anomaly_near_a1: false
+    cusp_s: [1.06554132733]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.576120160015, s_end: 3.3683481845}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.18313868615, s_end: 1.80747599015}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.84066366667, s_end: 2.53240205199}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.57954101631, s_end: 3.29904827759}
+  - direction: A1_TO_B
+    slot: 38
+    row: 3
+    col: 9
+    side: RIGHT
+    path_length: 4.7134733385
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 3
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 4.7134733385}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.49497501942, s_end: 2.16626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.18569432554, s_end: 2.85697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.91176807645, s_end: 4.70305350104}
+  - direction: B_TO_A1
+    slot: 39
+    row: 4
+    col: 9
+    side: RIGHT
+    path_length: 6.10198355654
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 5.13651847852
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.74298759449
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.97054132733]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.47197783935, s_end: 6.10198355654}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.0303413043, s_end: 2.76285086286}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.28631957247, s_end: 4.00057382693}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.01152358934, s_end: 4.6065527173}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.73314932239, s_end: 5.26441601583}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.3339047036, s_end: 6.00861559222}
+  - direction: A1_TO_B
+    slot: 39
+    row: 4
+    col: 9
+    side: RIGHT
+    path_length: 5.95304319197
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.95304319197}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.1592974732, s_end: 5.01058289779}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.15133792992, s_end: 5.94262335451}
+  - direction: B_TO_A1
+    slot: 40
+    row: 5
+    col: 0
+    side: LEFT
+    path_length: 5.80311688987
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 4.83765181186
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.44412092782
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.95167466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.45268423902, s_end: 5.80311688987}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.01147463764, s_end: 2.7439841962}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.98745290581, s_end: 3.70170716027}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.71265692267, s_end: 4.30768605063}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.43428265572, s_end: 4.96554934917}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.03503803693, s_end: 5.70974892556}
+  - direction: A1_TO_B
+    slot: 40
+    row: 5
+    col: 0
+    side: LEFT
+    path_length: 6.05950922935
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.05950922935}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.28463017725, s_end: 5.13591560184}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.2578039673, s_end: 6.04908939189}
+  - direction: B_TO_A1
+    slot: 41
+    row: 6
+    col: 0
+    side: LEFT
+    path_length: 6.93620373799
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 5.97073865998
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 5.57720777594
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.74667466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.3296638472, s_end: 6.93620373799}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.79876667092, s_end: 2.39533545003}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.81935049097, s_end: 4.02858608052}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.12053975393, s_end: 4.83479400839}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.8457437708, s_end: 5.44077289875}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.56736950384, s_end: 6.09863619729}
+      - {type: CLOTHOID, label: "clothoid", s_start: 6.16812488505, s_end: 6.84283577368}
+  - direction: A1_TO_B
+    slot: 41
+    row: 6
+    col: 0
+    side: LEFT
+    path_length: 7.35954107287
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 7.35954107287}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.81736955876, s_end: 5.34236463241}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.70646851805, s_end: 6.55775394264}
+      - {type: CLOTHOID, label: "clothoid", s_start: 6.57123522527, s_end: 7.33252064986}
+  - direction: B_TO_A1
+    slot: 42
+    row: 5
+    col: 1
+    side: LEFT
+    path_length: 5.56491688987
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 4.59945181186
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.20592092782
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.71347466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.21383943392, s_end: 5.56491688987}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.77327463764, s_end: 2.5057841962}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.74925290581, s_end: 3.46350716027}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.47445692267, s_end: 4.06948605063}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.19608265572, s_end: 4.72734934917}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.79683803693, s_end: 5.47154892556}
+  - direction: A1_TO_B
+    slot: 42
+    row: 5
+    col: 1
+    side: LEFT
+    path_length: 5.84470578489
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.84470578489}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.35131664357, s_end: 5.08260206816}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.09298783018, s_end: 5.77427325477}
+  - direction: B_TO_A1
+    slot: 43
+    row: 6
+    col: 1
+    side: LEFT
+    path_length: 6.69800373799
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 5.73253865998
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 5.33900777594
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.50847466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.09141677984, s_end: 6.69800373799}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.56056667092, s_end: 2.15713545003}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.58115049097, s_end: 3.79038608052}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.88233975393, s_end: 4.59659400839}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.6075437708, s_end: 5.20257289875}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.32916950384, s_end: 5.86043619729}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.92992488505, s_end: 6.60463577368}
+  - direction: A1_TO_B
+    slot: 43
+    row: 6
+    col: 1
+    side: LEFT
+    path_length: 7.36924931619
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 7.36924931619}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.81736955876, s_end: 5.34236463241}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.70646851805, s_end: 6.55775394264}
+      - {type: CLOTHOID, label: "clothoid", s_start: 6.57199193578, s_end: 7.35327736037}
+  - direction: B_TO_A1
+    slot: 44
+    row: 5
+    col: 2
+    side: LEFT
+    path_length: 5.32671688987
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 4.36125181186
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 3.96772092782
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.47527466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.980935507148, s_end: 5.32671688987}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.53507463764, s_end: 2.2675841962}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.51105290581, s_end: 3.22530716027}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.23625692267, s_end: 3.83128605063}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.95788265572, s_end: 4.48914934917}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.55863803693, s_end: 5.23334892556}
+  - direction: A1_TO_B
+    slot: 44
+    row: 5
+    col: 2
+    side: LEFT
+    path_length: 7.39862292424
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 5.0931184563, 6.62065170927]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.55237681994}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.35131664357, s_end: 5.08260206816}
+  - direction: B_TO_A1
+    slot: 45
+    row: 6
+    col: 2
+    side: LEFT
+    path_length: 6.45980373799
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 5.49433865998
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 5.10080777594
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.27027466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.853130760193, s_end: 6.45980373799}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.32236667092, s_end: 1.91893545003}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.34295049097, s_end: 3.55218608052}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.64413975393, s_end: 4.35839400839}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.3693437708, s_end: 4.96437289875}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.09096950384, s_end: 5.62223619729}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.69172488505, s_end: 6.36643577368}
+  - direction: A1_TO_B
+    slot: 45
+    row: 6
+    col: 2
+    side: LEFT
+    path_length: 8.93205863917
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 6.62655417123, 8.1540874242]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 7.20561906451}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.81736955876, s_end: 5.34236463241}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.70646851805, s_end: 6.55775394264}
+  - direction: B_TO_A1
+    slot: 46
+    row: 5
+    col: 3
+    side: LEFT
+    path_length: 5.08851688987
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 4.12305181186
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 3.72952092782
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.23707466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.743569331067, s_end: 5.08851688987}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.29687463764, s_end: 2.0293841962}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.27285290581, s_end: 2.98710716027}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.99805692267, s_end: 3.59308605063}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.71968265572, s_end: 4.25094934917}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.32043803693, s_end: 4.99514892556}
+  - direction: A1_TO_B
+    slot: 46
+    row: 5
+    col: 3
+    side: LEFT
+    path_length: 7.16042292424
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 5.0931184563, 6.38245170927]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.55288070155}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.35131664357, s_end: 5.08260206816}
+  - direction: B_TO_A1
+    slot: 47
+    row: 6
+    col: 3
+    side: LEFT
+    path_length: 6.22160373799
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 5.25613865998
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.86260777594
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.03207466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.615486372712, s_end: 6.22160373799}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.08416667092, s_end: 1.68073545003}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.10475049097, s_end: 3.31398608052}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.40593975393, s_end: 4.12019400839}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.1311437708, s_end: 4.72617289875}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.85276950384, s_end: 5.38403619729}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.45352488505, s_end: 6.12823577368}
+  - direction: A1_TO_B
+    slot: 47
+    row: 6
+    col: 3
+    side: LEFT
+    path_length: 8.69385863917
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 6.62655417123, 7.9158874242]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 7.2062543935}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.81736955876, s_end: 5.34236463241}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.70646851805, s_end: 6.55775394264}
+  - direction: B_TO_A1
+    slot: 48
+    row: 5
+    col: 4
+    side: RIGHT
+    path_length: 4.82756333197
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 4.35712336275
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 4.54665083197
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [1.23707466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.743569331067, s_end: 4.82756333197}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.29687463764, s_end: 2.0293841962}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 2.4246492324, s_end: 2.85934403116}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 2.92084403116, s_end: 3.35553882993}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.64253882993, s_end: 4.0772336287}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.1856461287, s_end: 4.54665083197}
+  - direction: A1_TO_B
+    slot: 48
+    row: 5
+    col: 4
+    side: RIGHT
+    path_length: 6.75509022018
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 4.68778575225, 5.97711900522]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.14754799749}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.94598393951, s_end: 4.6772693641}
+  - direction: B_TO_A1
+    slot: 49
+    row: 6
+    col: 4
+    side: RIGHT
+    path_length: 5.96065018009
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 5.49021021088
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 5.67973768009
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 1
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [1.03207466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.615486372712, s_end: 5.96065018009}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.08416667092, s_end: 1.68073545003}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.10475049097, s_end: 3.31398608052}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.55773608052, s_end: 3.99243087929}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.05393087929, s_end: 4.48862567805}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.77562567805, s_end: 5.21032047682}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.31873297682, s_end: 5.67973768009}
+  - direction: A1_TO_B
+    slot: 49
+    row: 6
+    col: 4
+    side: RIGHT
+    path_length: 8.28852593511
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 6.22122146718, 7.51055472015]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.80092168944}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.4120368547, s_end: 4.93703192836}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.301135814, s_end: 6.15242123859}
+  - direction: B_TO_A1
+    slot: 50
+    row: 5
+    col: 5
+    side: RIGHT
+    path_length: 5.06576333197
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 4.59532336275
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 4.78485083197
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [1.47527466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.980935507148, s_end: 5.06576333197}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.53507463764, s_end: 2.2675841962}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 2.6628492324, s_end: 3.09754403116}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.15904403116, s_end: 3.59373882993}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.88073882993, s_end: 4.3154336287}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.4238461287, s_end: 4.78485083197}
+  - direction: A1_TO_B
+    slot: 50
+    row: 5
+    col: 5
+    side: RIGHT
+    path_length: 6.99329022018
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 4.68778575225, 6.21531900522]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.14704411589}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.94598393951, s_end: 4.6772693641}
+  - direction: B_TO_A1
+    slot: 51
+    row: 6
+    col: 5
+    side: RIGHT
+    path_length: 6.19885018009
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 5.72841021088
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 5.91793768009
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 1
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [1.27027466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.853130760193, s_end: 6.19885018009}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.32236667092, s_end: 1.91893545003}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.34295049097, s_end: 3.55218608052}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.79593608052, s_end: 4.23063087929}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.29213087929, s_end: 4.72682567805}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.01382567805, s_end: 5.44852047682}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.55693297682, s_end: 5.91793768009}
+  - direction: A1_TO_B
+    slot: 51
+    row: 6
+    col: 5
+    side: RIGHT
+    path_length: 8.52672593511
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 6.22122146718, 7.74875472015]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.80028636046}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.4120368547, s_end: 4.93703192836}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.301135814, s_end: 6.15242123859}
+  - direction: B_TO_A1
+    slot: 52
+    row: 5
+    col: 6
+    side: RIGHT
+    path_length: 5.30396333197
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 4.83352336275
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 5.02305083197
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [1.71347466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.21383943392, s_end: 5.30396333197}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.77327463764, s_end: 2.5057841962}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 2.9010492324, s_end: 3.33574403116}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.39724403116, s_end: 3.83193882993}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.11893882993, s_end: 4.5536336287}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.6620461287, s_end: 5.02305083197}
+  - direction: A1_TO_B
+    slot: 52
+    row: 5
+    col: 6
+    side: RIGHT
+    path_length: 5.43937308084
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.43937308084}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.94598393951, s_end: 4.6772693641}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.68765512612, s_end: 5.36894055071}
+  - direction: B_TO_A1
+    slot: 53
+    row: 6
+    col: 6
+    side: RIGHT
+    path_length: 6.43705018009
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 5.96661021088
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 6.15613768009
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 1
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [1.50847466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.09141677984, s_end: 6.43705018009}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.56056667092, s_end: 2.15713545003}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.58115049097, s_end: 3.79038608052}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.03413608052, s_end: 4.46883087929}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.53033087929, s_end: 4.96502567805}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.25202567805, s_end: 5.68672047682}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.79513297682, s_end: 6.15613768009}
+  - direction: A1_TO_B
+    slot: 53
+    row: 6
+    col: 6
+    side: RIGHT
+    path_length: 6.96391661213
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.96391661213}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.4120368547, s_end: 4.93703192836}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.301135814, s_end: 6.15242123859}
+      - {type: CLOTHOID, label: "clothoid", s_start: 6.16665923172, s_end: 6.94794465632}
+  - direction: B_TO_A1
+    slot: 54
+    row: 5
+    col: 7
+    side: RIGHT
+    path_length: 5.54216333197
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 5.07172336275
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 5.26125083197
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 0
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [1.95167466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.45268423902, s_end: 5.54216333197}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.01147463764, s_end: 2.7439841962}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.1392492324, s_end: 3.57394403116}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.63544403116, s_end: 4.07013882993}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.35713882993, s_end: 4.7918336287}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.9002461287, s_end: 5.26125083197}
+  - direction: A1_TO_B
+    slot: 54
+    row: 5
+    col: 7
+    side: RIGHT
+    path_length: 5.6541765253
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 0
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 5.6541765253}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.8792974732, s_end: 4.73058289779}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.85247126325, s_end: 5.64375668784}
+  - direction: B_TO_A1
+    slot: 55
+    row: 6
+    col: 7
+    side: RIGHT
+    path_length: 6.67525018009
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 6.20481021088
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 6.39433768009
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 1
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [1.74667466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.3296638472, s_end: 6.67525018009}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.79876667092, s_end: 2.39533545003}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.81935049097, s_end: 4.02858608052}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.27233608052, s_end: 4.70703087929}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.76853087929, s_end: 5.20322567805}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.49022567805, s_end: 5.92492047682}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 6.03333297682, s_end: 6.39433768009}
+  - direction: A1_TO_B
+    slot: 55
+    row: 6
+    col: 7
+    side: RIGHT
+    path_length: 6.95420836881
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.95420836881}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.4120368547, s_end: 4.93703192836}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.301135814, s_end: 6.15242123859}
+      - {type: CLOTHOID, label: "clothoid", s_start: 6.16590252121, s_end: 6.9271879458}
+  - direction: B_TO_A1
+    slot: 56
+    row: 7
+    col: 0
+    side: LEFT
+    path_length: 6.94457040466
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 5.97910532665
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 5.58557444261
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [2.03504132733]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.61778158126, s_end: 6.94457040466}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.08713333758, s_end: 2.6837021167}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.82771715763, s_end: 4.03695274719}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.1289064206, s_end: 4.84316067506}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.85411043746, s_end: 5.44913956542}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.57573617051, s_end: 6.10700286396}
+      - {type: CLOTHOID, label: "clothoid", s_start: 6.17649155172, s_end: 6.85120244035}
+  - direction: A1_TO_B
+    slot: 56
+    row: 7
+    col: 0
+    side: LEFT
+    path_length: 7.36119195287
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 7.36119195287}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.81736955876, s_end: 5.34236463241}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.42646851805, s_end: 6.27775394264}
+      - {type: CLOTHOID, label: "clothoid", s_start: 6.52675138776, s_end: 7.34803681236}
+  - direction: B_TO_A1
+    slot: 57
+    row: 7
+    col: 1
+    side: LEFT
+    path_length: 6.72523707133
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 5.75977199331
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 5.36624110928
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.815707994]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.39873910907, s_end: 6.72523707133}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.86780000425, s_end: 2.46436878336}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.6083838243, s_end: 3.81761941386}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.90957308726, s_end: 4.62382734172}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.63477710413, s_end: 5.22980623209}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.35640283718, s_end: 5.88766953062}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.95715821839, s_end: 6.63186910701}
+  - direction: A1_TO_B
+    slot: 57
+    row: 7
+    col: 1
+    side: LEFT
+    path_length: 7.14185861954
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 7.14185861954}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.81736955876, s_end: 5.34236463241}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.42646851805, s_end: 6.27775394264}
+      - {type: CLOTHOID, label: "clothoid", s_start: 6.30741805443, s_end: 7.12870347902}
+  - direction: B_TO_A1
+    slot: 58
+    row: 7
+    col: 2
+    side: LEFT
+    path_length: 6.50590373799
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 5.54043865998
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 5.14690777594
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.59637466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.17984043339, s_end: 6.50590373799}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.64846667092, s_end: 2.24503545003}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.38905049097, s_end: 3.59828608052}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.69023975393, s_end: 4.40449400839}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.4154437708, s_end: 5.01047289875}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.13706950384, s_end: 5.66833619729}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.73782488505, s_end: 6.41253577368}
+  - direction: A1_TO_B
+    slot: 58
+    row: 7
+    col: 2
+    side: LEFT
+    path_length: 6.95673582044
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.95673582044}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.81736955876, s_end: 5.34236463241}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.55178209626, s_end: 6.17306752085}
+      - {type: CLOTHOID, label: "clothoid", s_start: 6.18551786573, s_end: 6.86680329032}
+  - direction: B_TO_A1
+    slot: 59
+    row: 7
+    col: 3
+    side: LEFT
+    path_length: 6.28657040466
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 5.32110532665
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.92757444261
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.37704132733]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.961227204535, s_end: 6.28657040466}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.42913333758, s_end: 2.0257021167}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.16971715763, s_end: 3.37895274719}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.4709064206, s_end: 4.18516067506}
+      - {type: CLOTHOID, label: "clothoid", s_start: 4.19611043746, s_end: 4.79113956542}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.91773617051, s_end: 5.44900286396}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.51849155172, s_end: 6.19320244035}
+  - direction: A1_TO_B
+    slot: 59
+    row: 7
+    col: 3
+    side: LEFT
+    path_length: 9.02229017767
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 6.45823754475, 8.20640421141]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 7.15750421141}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.81736955876, s_end: 5.34236463241}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.42646851805, s_end: 6.27775394264}
+  - direction: B_TO_A1
+    slot: 60
+    row: 7
+    col: 4
+    side: LEFT
+    path_length: 6.06723707133
+    max_abs_curvature: 2.95659593524
+    max_abs_curvature_s: 5.10177199331
+    max_abs_curvature_x: 0.64835139008
+    max_abs_curvature_y: 3.76685343878
+    max_abs_equivalent_steer: 0.400000000001
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 278.849302154
+    max_abs_dkappa_ds_s: 4.70824110928
+    max_abs_dkappa_ds_x: 0.435143086823
+    max_abs_dkappa_ds_y: 3.46236042546
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 30.1805788291
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 1
+    anomaly_distance_to_a1: 0.855466708729
+    max_anomaly_near_a1: true
+    cusp_s: [1.157707994]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.743318077833, s_end: 6.06723707133}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.20980000425, s_end: 1.80636878336}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 1.9503838243, s_end: 3.15961941386}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.25157308726, s_end: 3.96582734172}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.97677710413, s_end: 4.57180623209}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.69840283718, s_end: 5.22966953062}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.29915821839, s_end: 5.97386910701}
+  - direction: A1_TO_B
+    slot: 60
+    row: 7
+    col: 4
+    side: LEFT
+    path_length: 8.80295684434
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.536570840968
+    max_abs_curvature_x: 1.42773743238
+    max_abs_curvature_y: 3.83125592689
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 6.45823754475, 7.98707087808]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 7.15770377568}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.78497501942, s_end: 2.45626044401}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.47569432554, s_end: 3.14697975013}
+      - {type: CLOTHOID, label: "clothoid", s_start: 3.33192889849, s_end: 4.18321432308}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.81736955876, s_end: 5.34236463241}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.42646851805, s_end: 6.27775394264}
+  - direction: B_TO_A1
+    slot: 61
+    row: 7
+    col: 5
+    side: RIGHT
+    path_length: 5.80628351343
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 5.33584354421
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 5.52537101343
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 1
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [1.157707994]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.743318077833, s_end: 5.80628351343}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.20980000425, s_end: 1.80636878336}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 1.9503838243, s_end: 3.15961941386}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.40336941386, s_end: 3.83806421262}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.89956421262, s_end: 4.33425901139}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.62125901139, s_end: 5.05595381015}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.16436631015, s_end: 5.52537101343}
+  - direction: A1_TO_B
+    slot: 61
+    row: 7
+    col: 5
+    side: RIGHT
+    path_length: 8.39762414028
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 6.05290484069, 7.58173817403]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.75237107163}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.4120368547, s_end: 4.93703192836}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.021135814, s_end: 5.87242123859}
+  - direction: B_TO_A1
+    slot: 62
+    row: 7
+    col: 6
+    side: RIGHT
+    path_length: 6.02561684676
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 5.55517687754
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 5.74470434676
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 1
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [1.37704132733]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.961227204535, s_end: 6.02561684676}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.42913333758, s_end: 2.0257021167}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.16971715763, s_end: 3.37895274719}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.62270274719, s_end: 4.05739754595}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.11889754595, s_end: 4.55359234472}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.84059234472, s_end: 5.27528714349}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.38369964349, s_end: 5.74470434676}
+  - direction: A1_TO_B
+    slot: 62
+    row: 7
+    col: 6
+    side: RIGHT
+    path_length: 8.61695747362
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 4
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182, 6.05290484069, 7.80107150736]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.75217150736}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.4120368547, s_end: 4.93703192836}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.021135814, s_end: 5.87242123859}
+  - direction: B_TO_A1
+    slot: 63
+    row: 7
+    col: 7
+    side: RIGHT
+    path_length: 6.24495018009
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 5.77451021088
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 5.96403768009
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 1
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [1.59637466067]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.17984043339, s_end: 6.24495018009}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.64846667092, s_end: 2.24503545003}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.38905049097, s_end: 3.59828608052}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 3.84203608052, s_end: 4.27673087929}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.33823087929, s_end: 4.77292567805}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.05992567805, s_end: 5.49462047682}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.60303297682, s_end: 5.96403768009}
+  - direction: A1_TO_B
+    slot: 63
+    row: 7
+    col: 7
+    side: RIGHT
+    path_length: 6.55140311639
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.55140311639}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.4120368547, s_end: 4.93703192836}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.1464493922, s_end: 5.76773481679}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.78018516167, s_end: 6.46147058626}
+  - direction: B_TO_A1
+    slot: 64
+    row: 7
+    col: 8
+    side: RIGHT
+    path_length: 6.46428351343
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 5.99384354421
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 6.18337101343
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 1
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [1.815707994]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.39873910907, s_end: 6.46428351343}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.86780000425, s_end: 2.46436878336}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.6083838243, s_end: 3.81761941386}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.06136941386, s_end: 4.49606421262}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.55756421262, s_end: 4.99225901139}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.27925901139, s_end: 5.71395381015}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.82236631015, s_end: 6.18337101343}
+  - direction: A1_TO_B
+    slot: 64
+    row: 7
+    col: 8
+    side: RIGHT
+    path_length: 6.73652591548
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.73652591548}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.4120368547, s_end: 4.93703192836}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.021135814, s_end: 5.87242123859}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.90208535038, s_end: 6.72337077497}
+  - direction: B_TO_A1
+    slot: 65
+    row: 7
+    col: 9
+    side: RIGHT
+    path_length: 6.68361684676
+    max_abs_curvature: 4.35090009246
+    max_abs_curvature_s: 6.21317687754
+    max_abs_curvature_x: 1.32382363365
+    max_abs_curvature_y: 3.85181265024
+    max_abs_equivalent_steer: 0.556567951885
+    max_curvature_layer: "ARC_FALLBACK:local_arc_fallback"
+    max_abs_dkappa_ds: 467.081493163
+    max_abs_dkappa_ds_s: 6.40270434676
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.0205875
+    max_rate_layer: "ARC_FALLBACK:local_arc_fallback"
+    curvature_rate_ratio: 50.5534341136
+    curvature_limit_exceeded: true
+    status: CURVATURE_LIMIT_EXCEEDED
+    used_arc_fallback: true
+    clothoid_count: 1
+    lane_shift_count: 1
+    arc_fallback_count: 4
+    anomaly_distance_to_a1: 0.3544125
+    max_anomaly_near_a1: true
+    cusp_s: [2.03504132733]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 1.61778158126, s_end: 6.68361684676}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.08713333758, s_end: 2.6837021167}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 2.82771715763, s_end: 4.03695274719}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.28070274719, s_end: 4.71539754595}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 4.77689754595, s_end: 5.21159234472}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 5.49859234472, s_end: 5.93328714349}
+      - {type: ARC_FALLBACK, label: "local_arc_fallback", s_start: 6.04169964349, s_end: 6.40270434676}
+  - direction: A1_TO_B
+    slot: 65
+    row: 7
+    col: 9
+    side: RIGHT
+    path_length: 6.95585924882
+    max_abs_curvature: 2.9564916345
+    max_abs_curvature_s: 0.329898224306
+    max_abs_curvature_x: 1.21403636885
+    max_abs_curvature_y: 3.9772151101
+    max_abs_equivalent_steer: 0.399987346738
+    max_curvature_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    max_abs_dkappa_ds: 153.918564559
+    max_abs_dkappa_ds_s: 0.172433373516
+    max_abs_dkappa_ds_x: 1.25
+    max_abs_dkappa_ds_y: 4.12906662648
+    max_rate_layer: "ORDINARY_OR_UNTAGGED_JOIN"
+    curvature_rate_ratio: 16.6590030352
+    curvature_limit_exceeded: false
+    status: PASS
+    used_arc_fallback: false
+    clothoid_count: 5
+    lane_shift_count: 1
+    arc_fallback_count: 0
+    anomaly_distance_to_a1: 0.245933373516
+    max_anomaly_near_a1: true
+    cusp_s: [0.725558034182]
+    debug_layer_ranges:
+      - {type: SKELETON, label: "route_skeleton", s_start: 0.725558034182, s_end: 6.95585924882}
+      - {type: CLOTHOID, label: "clothoid", s_start: 1.52521242521, s_end: 2.30649784981}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.31822888646, s_end: 2.88951431105}
+      - {type: CLOTHOID, label: "clothoid", s_start: 2.92659619444, s_end: 3.77788161903}
+      - {type: LANE_SHIFT, label: "lane_shift", s_start: 4.4120368547, s_end: 4.93703192836}
+      - {type: CLOTHOID, label: "clothoid", s_start: 5.021135814, s_end: 5.87242123859}
+      - {type: CLOTHOID, label: "clothoid", s_start: 6.12141868371, s_end: 6.9427041083}

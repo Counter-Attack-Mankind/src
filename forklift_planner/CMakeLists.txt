@@ -89,6 +89,18 @@ add_executable(path_debug
 add_dependencies(path_debug ${catkin_EXPORTED_TARGETS})
 target_link_libraries(path_debug ${catkin_LIBRARIES})
 
+# Read-only B <-> A1 final-path curvature audit. It reuses the production
+# route generators and writes diagnostics only; it is not part of runtime
+# planning or control.
+add_executable(path_curvature_audit
+  ${PATH_GENERATOR_SOURCES}
+  src/multi_vehicle/footprint.cpp
+  src/multi_vehicle/multi_vehicle_config.cpp
+  src/path_generator_routes/path_curvature_audit.cpp
+)
+add_dependencies(path_curvature_audit ${catkin_EXPORTED_TARGETS})
+target_link_libraries(path_curvature_audit ${catkin_LIBRARIES})
+
 # [DIAG] EXP-002: offline ConflictZone geometry probe.  This executable does
 # not participate in the patrol node or change coordination behavior.
 add_executable(conflict_zone_geometry_diag
