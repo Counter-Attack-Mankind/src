@@ -442,6 +442,35 @@ private:
     return hypot(trajectory_.points[i].y - y, trajectory_.points[i].x - x);
   }
 
+  int nearest_index_in_range(int start, int end) const {
+    start = std::max(0, start);
+    end = std::min(end, static_cast<int>(trajectory_.points.size()));
+    if(start >= end) return start;
+
+    int nearest = start;
+    double min_distance = DBL_MAX;
+    for(int i = start; i < end; ++i) {
+      const double distance = hypot(trajectory_.points[i].x - object_.x,
+                                    trajectory_.points[i].y - object_.y);
+      if(distance < min_distance) {
+        min_distance = distance;
+        nearest = i;
+      }
+    }
+    return nearest;
+  }
+
+  double remaining_range_length(int from, int end) const {
+    from = std::max(0, from);
+    end = std::min(end, static_cast<int>(trajectory_.points.size()));
+    double length = 0.0;
+    for(int i = from + 1; i < end; ++i) {
+      length += hypot(trajectory_.points[i].x - trajectory_.points[i - 1].x,
+                      trajectory_.points[i].y - trajectory_.points[i - 1].y);
+    }
+    return length;
+  }
+
   static double normalize_angle(double angle) {
     const double kPi = 3.14159265358979323846;
     while(angle > kPi) angle -= 2.0 * kPi;
@@ -563,7 +592,7 @@ private:
     int start = ranges_[current_range_].first, end = ranges_[current_range_].second;
 
     double min_distance = FLT_MAX;
-    for(int i = car_index_; i < end; i++) {
+    for(int i = std::max(start, car_index_); i < end; i++) {
       double distance = distance_to_traj(i, object_.x, object_.y);
       if(distance < min_distance) {
         car_index_ = i;
@@ -600,6 +629,26 @@ private:
     lateral_target_x_ = trajectory_.points[lookahead_index_].x;
     lateral_target_y_ = trajectory_.points[lookahead_index_].y;
     using_virtual_lookahead_ = false;
+
+    if(current_range_ < static_cast<int>(ranges_.size()) - 1) {
+      const double remaining_length = remaining_range_length(car_index_, end);
+      const double extension = std::min(
+          0.12, std::max(0.0, lookahead_distance_ - remaining_length));
+      if(extension > 1e-6) {
+        const TrajectoryPoint &cusp = trajectory_.points[end - 1];
+        double travel_sign = 1.0;
+        for(int i = end - 1; i >= start; --i) {
+          if(fabs(trajectory_.points[i].velocity) > 0.01) {
+            travel_sign = trajectory_.points[i].velocity > 0.0 ? 1.0 : -1.0;
+            break;
+          }
+        }
+        const double motion_yaw = cusp.yaw + (travel_sign < 0.0 ? M_PI : 0.0);
+        lateral_target_x_ = cusp.x + extension * cos(motion_yaw);
+        lateral_target_y_ = cusp.y + extension * sin(motion_yaw);
+        using_virtual_lookahead_ = true;
+      }
+    }
 
     // 最后一段没有足够远的真实预瞄点时，沿“实际行驶方向”延长一个虚拟点。
     // 前进时延伸到目标朝向前方；倒车时延伸到目标朝向后方。
@@ -658,10 +707,18 @@ private:
       return;
     }
 
-    if(approaching_distance <= approaching_tolerance_) {
+    const int start = ranges_[current_range_].first;
+    const int projected_index = nearest_index_in_range(start, end);
+    const bool projection_at_cusp =
+        projected_index >= std::max(start, end - 2);
+    if(projection_at_cusp && approaching_distance <= approaching_tolerance_) {
         current_range_++;
 
+        const int next_start = ranges_[current_range_].first;
         end = ranges_[current_range_].second;
+        car_index_ = nearest_index_in_range(next_start, end);
+        lookahead_index_ = car_index_;
+        using_virtual_lookahead_ = false;
         auto goal = trajectory_.points[end - 1];
 
         double traj_length = distance_to_traj(0, goal.x, goal.y);
