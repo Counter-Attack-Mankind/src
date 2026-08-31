@@ -784,7 +784,8 @@ private:
     void rollWorldModel(double horizon, std::vector<sandbox_msgs::Trajectory>& out,
                         std::vector<bool>& hold,
                         std::vector<SimPlanFrame>* plan_frames = nullptr,
-                        bool first_step_task_state_is_current = false) {
+                        bool first_step_task_state_is_current = false,
+                        std::vector<size_t>* path_gen_cut_indices = nullptr) {
 
         const double dt = 1.0 / pp_.update_rate;            //系统每触发一次，就向前推进dt时间
         const int H = std::max(1, (int)std::lround(horizon / dt));      //四舍五入决定仿真步数，但至少模拟1步
@@ -805,6 +806,12 @@ private:
 
         //===========（状态快照与回滚）============
         const std::vector<VehicleAgent> sa = agents_;    //（将Agents通过拷贝构造函数给sa，sa设为const，后续仅改变备份的agents，对显示不产生影响）  
+        std::vector<int> live_path_gen(n, -1);
+        for (size_t i = 0; i < n; ++i) live_path_gen[i] = sa[i].path_gen;
+        if (path_gen_cut_indices != nullptr) {
+            path_gen_cut_indices->assign(
+                n, std::numeric_limits<size_t>::max());
+        }
         const std::vector<bool> sv = visited_slots_;
         const auto sr = rule_engine_->snapshot();       //保存规则引擎状态
         const auto sl = allocator_->snapshot();         //保存任务分配器状态
@@ -832,6 +839,12 @@ private:
                 tp.x = p.x; tp.y = p.y; tp.yaw = p.theta;                          // 车头朝向
                 tp.velocity = (rev ? -1.0 : 1.0) * std::max(0.0, v.current_speed); // 前进+/倒车-
                 tp.time = s * dt;
+                if (path_gen_cut_indices != nullptr &&
+                    (*path_gen_cut_indices)[i] ==
+                        std::numeric_limits<size_t>::max() &&
+                    v.path_gen != live_path_gen[i]) {
+                    (*path_gen_cut_indices)[i] = out[i].points.size();
+                }
                 out[i].points.push_back(tp);
                 if (v.current_speed > 1e-3) hold[i] = false;   // 整段都不动才算 hold
             }
@@ -1301,7 +1314,8 @@ private:
 
     void buildRollingHorizonPlan(
         std::vector<sandbox_msgs::Trajectory>& trajs,
-        std::vector<bool>& hold, bool install_simulation_plan) {
+        std::vector<bool>& hold, bool install_simulation_plan,
+        std::vector<size_t>* path_gen_cut_indices = nullptr) {
         // Normal rolling simulation prepares previews in publishHorizon(),
         // while batch mode calls this function directly. Keep both paths
         // behaviorally identical.
@@ -1323,7 +1337,8 @@ private:
         }
         std::vector<SimPlanFrame> frames;
         rollWorldModel(rb_horizon_, trajs, hold, &frames,
-                       /*first_step_task_state_is_current=*/true);
+                       /*first_step_task_state_is_current=*/true,
+                       path_gen_cut_indices);
         rule_engine_->clearFutureA1Commitment();
         future_a1_commitment_ = commitment;
         const size_t frame_count = frames.size();
@@ -1396,9 +1411,11 @@ private:
 
     void buildRealHorizonPlan(
         std::vector<sandbox_msgs::Trajectory>& trajs,
-        std::vector<bool>& hold) {
+        std::vector<bool>& hold,
+        std::vector<size_t>& path_gen_cut_indices) {
         buildRollingHorizonPlan(trajs, hold,
-                                /*install_simulation_plan=*/false);
+                                /*install_simulation_plan=*/false,
+                                &path_gen_cut_indices);
     }
 
     bool simulationPlanNeedsRefresh() const {
@@ -1637,6 +1654,7 @@ private:
     void publishHorizon() {
         std::vector<sandbox_msgs::Trajectory> trajs;
         std::vector<bool> hold;
+        std::vector<size_t> path_gen_cut_indices;
 
         // Give the cloned world only future tasks that have already been
         // selected and stored in real state. The rollout itself remains unable
@@ -1648,7 +1666,7 @@ private:
             // Generate frames with simulation's frozen ordinary-decision
             // semantics, but keep them local: real execution never restores
             // predicted frame state over measured vehicle progress.
-            buildRealHorizonPlan(trajs, hold);
+            buildRealHorizonPlan(trajs, hold, path_gen_cut_indices);
         } else {
             buildSimulationHorizonPlan(trajs, hold);
         }
@@ -1733,7 +1751,12 @@ private:
             arr.markers.push_back(m);
 
             if (i < traj_pubs_.size()) {
-                publishTrajectoryWithPathGen(i, trajs[i]);
+                sandbox_msgs::Trajectory control_traj = trajs[i];
+                if (cfg_.real_mode && i < path_gen_cut_indices.size() &&
+                    path_gen_cut_indices[i] < control_traj.points.size()) {
+                    control_traj.points.resize(path_gen_cut_indices[i]);
+                }
+                publishTrajectoryWithPathGen(i, control_traj);
             }
         }
         if (!arr.markers.empty()) horizon_marker_pub_.publish(arr);

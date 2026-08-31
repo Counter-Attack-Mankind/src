@@ -57,6 +57,7 @@ public:
                  double waypoint_x, double waypoint_y, bool is_virtual_waypoint) {
     points_.header.stamp = ros::Time::now();
     line_strip_.header.stamp = ros::Time::now();
+    lookahead_waypoint_.header.stamp = ros::Time::now();
     virtual_waypoint_.header.stamp = ros::Time::now();
     points_.points.clear();
     line_strip_.points.clear();
@@ -72,14 +73,20 @@ public:
 
     // 虚拟末端预瞄点单独使用较大的球体显示，便于在 RViz 中观察末端对齐过程。
     if(is_virtual_waypoint) {
+      lookahead_waypoint_.action = visualization_msgs::Marker::DELETE;
       virtual_waypoint_.action = visualization_msgs::Marker::ADD;
       virtual_waypoint_.pose.position.x = waypoint_x;
       virtual_waypoint_.pose.position.y = waypoint_y;
       virtual_waypoint_.pose.position.z = 0.035;
     } else {
+      lookahead_waypoint_.action = visualization_msgs::Marker::ADD;
+      lookahead_waypoint_.pose.position.x = waypoint_x;
+      lookahead_waypoint_.pose.position.y = waypoint_y;
+      lookahead_waypoint_.pose.position.z = 0.03;
       // 离开末端虚拟预瞄状态后删除旧 Marker，避免 RViz 中残留。
       virtual_waypoint_.action = visualization_msgs::Marker::DELETE;
     }
+    marker_publisher_.publish(lookahead_waypoint_);
     marker_publisher_.publish(virtual_waypoint_);
   }
 
@@ -165,21 +172,25 @@ private:
 
   void init_marker() {
     points_.header.frame_id = line_strip_.header.frame_id = goal_.header.frame_id =
-        virtual_waypoint_.header.frame_id = visualization_frame_;
+        lookahead_waypoint_.header.frame_id = virtual_waypoint_.header.frame_id =
+            visualization_frame_;
     std::stringstream ss;
     ss << "Markers_" << target_;
-    points_.ns = line_strip_.ns = goal_.ns = virtual_waypoint_.ns = ss.str();
+    points_.ns = line_strip_.ns = goal_.ns = lookahead_waypoint_.ns =
+        virtual_waypoint_.ns = ss.str();
     points_.action = line_strip_.action = goal_.action = visualization_msgs::Marker::ADD;
     points_.pose.orientation.w = line_strip_.pose.orientation.w = goal_.pose.orientation.w =
-        virtual_waypoint_.pose.orientation.w = 1.0;
+        lookahead_waypoint_.pose.orientation.w = virtual_waypoint_.pose.orientation.w = 1.0;
     points_.id = 0;
     line_strip_.id = 1;
     goal_.id = 2;
     virtual_waypoint_.id = 3;
+    lookahead_waypoint_.id = 4;
 
     points_.type = visualization_msgs::Marker::POINTS;
     line_strip_.type = visualization_msgs::Marker::LINE_STRIP;
     goal_.type = visualization_msgs::Marker::CYLINDER;
+    lookahead_waypoint_.type = visualization_msgs::Marker::SPHERE;
     virtual_waypoint_.type = visualization_msgs::Marker::SPHERE;
     points_.scale.x = 0.02;
     points_.scale.y = 0.02;
@@ -189,6 +200,15 @@ private:
     goal_.scale.x = approaching_tolerance_;
     goal_.scale.y = approaching_tolerance_;
     goal_.scale.z = 0.1;
+
+    lookahead_waypoint_.scale.x = 0.055;
+    lookahead_waypoint_.scale.y = 0.055;
+    lookahead_waypoint_.scale.z = 0.055;
+    lookahead_waypoint_.color.r = 0.0;
+    lookahead_waypoint_.color.g = 1.0;
+    lookahead_waypoint_.color.b = 0.35;
+    lookahead_waypoint_.color.a = 1.0;
+    lookahead_waypoint_.lifetime = ros::Duration(0.25);
 
     virtual_waypoint_.scale.x = 0.07;
     virtual_waypoint_.scale.y = 0.07;
@@ -215,7 +235,8 @@ private:
   ros::NodeHandle node_handle_;
   ros::Publisher marker_publisher_;
   std::string visualization_frame_ = "map";
-  visualization_msgs::Marker points_, line_strip_, goal_, virtual_waypoint_;
+  visualization_msgs::Marker points_, line_strip_, goal_, lookahead_waypoint_,
+      virtual_waypoint_;
 };
 
 TrajectoryPoint interpolate(const TrajectoryPoint p0, TrajectoryPoint p1, double weight) {
@@ -369,7 +390,6 @@ private:
       current_path_gen_ = incoming_path_gen;
       car_index_ = lookahead_index_ = 0;
       current_range_ = 0;
-      longitude_output_ = longitude_perror_ = 0.0;
       lookahead_gain_ = 1.0;
       final_stable_cycles_ = 0;
       using_virtual_lookahead_ = false;
