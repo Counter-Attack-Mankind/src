@@ -251,7 +251,7 @@ int main() {
     RuleEngine::DepartureClusterCommitment departure;
     departure.owner_id = crossing_a.id;
     departure.other_id = crossing_b.id;
-    seeded.departure_clusters[{crossing_a.id, crossing_b.id}] = departure;
+    seeded.a1.departure_clusters[{crossing_a.id, crossing_b.id}] = departure;
     seeded.following_pairs.insert({crossing_a.id, crossing_b.id});
     seeded.tokens.grant(77, crossing_a.id, 6.0);
     seeded.conflicts.push_back(ConflictMarker{});
@@ -278,8 +278,8 @@ int main() {
         engine.futureA1Commitment();
     if (!sameControlState(crossing_a, before_vehicle) ||
         before_state.reservations.size() != after_state.reservations.size() ||
-        before_state.departure_clusters.size() !=
-            after_state.departure_clusters.size() ||
+        before_state.a1.departure_clusters.size() !=
+            after_state.a1.departure_clusters.size() ||
         before_state.following_pairs != after_state.following_pairs ||
         before_state.tokens.holder(77) != after_state.tokens.holder(77) ||
         before_state.conflicts.size() != after_state.conflicts.size() ||

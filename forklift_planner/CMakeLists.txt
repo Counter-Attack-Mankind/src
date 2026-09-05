@@ -60,6 +60,7 @@ add_executable(multi_vehicle_patrol_node
   src/multi_vehicle/marker_publisher.cpp
   src/multi_vehicle/multi_vehicle_config.cpp
   src/multi_vehicle/path_track.cpp
+  src/multi_vehicle/a1/a1_coordinator.cpp
   src/multi_vehicle/rule_engine.cpp
   src/multi_vehicle/spatiotemporal_interaction.cpp
   src/multi_vehicle/task_allocator.cpp
@@ -154,6 +155,7 @@ if(CATKIN_ENABLE_TESTING)
     src/multi_vehicle/dynamic_speed_coordination.cpp
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
+    src/multi_vehicle/a1/a1_coordinator.cpp
     src/multi_vehicle/rule_engine.cpp
     src/multi_vehicle/spatiotemporal_interaction.cpp
     src/multi_vehicle/traffic_resource_map.cpp
@@ -184,6 +186,7 @@ if(CATKIN_ENABLE_TESTING)
     src/multi_vehicle/dynamic_speed_coordination.cpp
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
+    src/multi_vehicle/a1/a1_coordinator.cpp
     src/multi_vehicle/rule_engine.cpp
     src/multi_vehicle/spatiotemporal_interaction.cpp
     src/multi_vehicle/traffic_resource_map.cpp
@@ -214,6 +217,7 @@ if(CATKIN_ENABLE_TESTING)
     src/multi_vehicle/dynamic_speed_coordination.cpp
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
+    src/multi_vehicle/a1/a1_coordinator.cpp
     src/multi_vehicle/rule_engine.cpp
     src/multi_vehicle/spatiotemporal_interaction.cpp
     src/multi_vehicle/traffic_resource_map.cpp

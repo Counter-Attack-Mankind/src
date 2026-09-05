@@ -153,12 +153,12 @@ int main() {
     commitment.waiter_stop_s = 0.490;
     commitment.owner_release_exit_s = 3.125;
     commitment.active = true;
-    live.departure_clusters[{0, 1}] = commitment;
+    live.a1.departure_clusters[{0, 1}] = commitment;
     const RuleEngine::SimSnapshot saved = live;
-    live.departure_clusters.clear();
+    live.a1.departure_clusters.clear();
     live = saved;
-    if (live.departure_clusters.size() != 1 ||
-        !near(live.departure_clusters.at({0, 1}).waiter_stop_s, 0.490)) {
+    if (live.a1.departure_clusters.size() != 1 ||
+        !near(live.a1.departure_clusters.at({0, 1}).waiter_stop_s, 0.490)) {
         return fail("departure cluster snapshot/restore value was lost");
     }
 

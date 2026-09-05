@@ -11,8 +11,8 @@
 #include <vector>
 
 #include "forklift_map/map_param.h"
+#include "forklift_planner/multi_vehicle/a1/a1_coordinator.h"
 #include "forklift_planner/multi_vehicle/dynamic_speed_coordination.h"
-#include "forklift_planner/multi_vehicle/future_a1_policy.h"
 #include "forklift_planner/multi_vehicle/multi_vehicle_config.h"
 #include "forklift_planner/multi_vehicle/spatiotemporal_interaction.h"
 #include "forklift_planner/multi_vehicle/traffic_resource.h"
@@ -98,48 +98,43 @@ class RuleEngine {
 public:
     RuleEngine(const MapParam& mp, const MultiVehicleConfig& cfg);
 
-    struct FutureA1Commitment {
-        int owner_id = -1;
-        int owner_path_gen = -1;
-        double predicted_a1_arrival_time = -1.0;
-        double predicted_to_b_time = -1.0;
-
-        bool valid() const {
-            return owner_id >= 0 && owner_path_gen >= 0 &&
-                   predicted_a1_arrival_time >= 0.0 &&
-                   predicted_to_b_time >= predicted_a1_arrival_time;
-        }
-    };
+    using FutureA1Commitment = A1Coordinator::FutureA1Commitment;
+    using DepartureClusterCommitment =
+        A1Coordinator::DepartureClusterCommitment;
+    using A1ArrivalKinematics = A1Coordinator::ArrivalKinematics;
+    using A1ServiceMetrics = A1Coordinator::ServiceMetrics;
+    using DepartureTransactionIdentity =
+        A1Coordinator::DepartureTransactionIdentity;
 
     void setFutureA1Commitment(const FutureA1Commitment& commitment) {
-        if (commitment.owner_id != future_a1_admission_log_owner_id_ ||
-            commitment.owner_path_gen !=
-                future_a1_admission_log_owner_path_gen_) {
-            future_a1_admission_logged_.clear();
-            future_a1_admission_log_owner_id_ = commitment.owner_id;
-            future_a1_admission_log_owner_path_gen_ =
-                commitment.owner_path_gen;
-        }
-        future_a1_commitment_ = commitment;
+        a1_coordinator_.setFutureA1Commitment(commitment);
     }
     void clearFutureA1Commitment() {
-        future_a1_commitment_ = FutureA1Commitment{};
+        a1_coordinator_.clearFutureA1Commitment();
+    }
+    void refreshA1PlanningContext(
+        const std::vector<VehicleAgent>& vehicles, double horizon, double now,
+        const A1ArrivalKinematics& kinematics) {
+        a1_coordinator_.refreshPlanningContext(vehicles, horizon, now,
+                                               kinematics);
     }
 
     void setCoordLogSink(const std::function<void(const std::string&)>& sink) {
         coord_log_sink_ = sink;
+        a1_coordinator_.setCoordLogSink(sink);
     }
     // Diagnostic metadata only. It never participates in a rule decision.
     void setDebugLogContext(const std::string& source, uint64_t plan_id,
                             int frame_id, int rollout_step) {
         if (source != debug_log_source_ || plan_id != debug_log_plan_id_) {
             pairwise_conflict_logs_.clear();
-            a1_decision_logs_.clear();
         }
         debug_log_source_ = source;
         debug_log_plan_id_ = plan_id;
         debug_log_frame_id_ = frame_id;
         debug_log_rollout_step_ = rollout_step;
+        a1_coordinator_.setDebugLogContext(source, plan_id, frame_id,
+                                           rollout_step);
     }
 
     // Reservation for one visible spatiotemporal conflict event. Arc ranges
@@ -165,33 +160,6 @@ public:
         bool aabb_valid = false;
     };
 
-    // Multi-zone A1 departure transaction. Unlike ConflictReservation, this
-    // freezes one transitive future A1->B conflict cluster as soon as the
-    // locked service owner's prepared dropoff path is known. The frozen fence
-    // remains active through TO_A1, PICKUP_DWELL and the N->N+1 TO_B handoff.
-    struct DepartureClusterCommitment {
-        int owner_id = -1;
-        // Path generation of the B->A1 service leg that owns this transaction.
-        int transaction_owner_path_gen = -1;
-        // Frozen A1->B generation assigned by activatePreparedDropoffLeg().
-        int owner_path_gen = -1;
-        int other_id = -1;
-        int other_path_gen = -1;
-        PathTrack frozen_owner_track;
-        std::vector<size_t> seed_indices;
-        std::vector<size_t> cluster_indices;
-        std::vector<FutureA1ConflictInterval> intervals;
-        double waiter_stop_boundary_s = 0.0;
-        double waiter_stop_s = 0.0;
-        double owner_release_exit_s = 0.0;
-        double other_release_exit_s = 0.0;
-        bool active = false;
-        bool handed_off_from_future = false;
-        bool handoff_already_inside = false;
-        bool hold_logged = false;
-        bool invariant_violation_logged = false;
-    };
-
     // 接入资源地图(Phase 2:资源仲裁需要它把路径映射到资源占用)。
     void setResourceMap(const TrafficResourceMap* m) { resmap_ = m; }
 
@@ -211,8 +179,7 @@ public:
     // 前瞻仿真用:快照/恢复跨周期持久状态,使「克隆-空跑」忠实复现真实协调(确定性⇒预测准)。
     struct SimSnapshot {
         std::map<std::pair<int, int>, ConflictReservation> reservations;
-        std::map<std::pair<int, int>, DepartureClusterCommitment>
-            departure_clusters;
+        A1Coordinator::Snapshot a1;
         std::set<std::pair<int, int>> following_pairs;
         ResourceTokenTable tokens;
         // conflicts_ is frame output, but sandbox rollout calls decide() and
@@ -226,7 +193,18 @@ public:
     // Read-only stress-test diagnostics. This exposes the current commitment
     // without creating, changing, or releasing any coordination state.
     const FutureA1Commitment& futureA1Commitment() const {
-        return future_a1_commitment_;
+        return a1_coordinator_.futureA1Commitment();
+    }
+    const A1ServiceMetrics& a1ServiceMetrics() const {
+        return a1_coordinator_.serviceMetrics();
+    }
+    std::vector<DepartureTransactionIdentity>
+    a1DepartureTransactionIdentity() const {
+        return a1_coordinator_.departureTransactionIdentity();
+    }
+    const std::map<std::pair<int, int>, DepartureClusterCommitment>&
+    a1DepartureClusters() const {
+        return a1_coordinator_.departureClusters();
     }
     const std::vector<ConflictMarker>& conflicts() const { return conflicts_; }
     // RViz-only resource diagnostics. This reads the current static conflict
@@ -279,12 +257,7 @@ public:
         unsigned long long reservation_create_other = 0;
     };
 
-    struct A1LaunchAdmission {
-        bool departure_resource_conflict = false;
-        bool actual_occupancy_priority = false;
-        bool owner_uses_pending_preview = false;
-        size_t protected_zone_count = 0;
-    };
+    using A1LaunchAdmission = A1Coordinator::A1LaunchAdmission;
 
     // Read-only resource check for a vehicle that is still parked at B and is
     // considering a TO_A1 launch. Service-owner identity alone is never a
@@ -358,19 +331,6 @@ public:
 
 private:
     using ConflictZone = PotentialConflictZone;
-
-    struct FutureA1ZoneSelection {
-        std::vector<ConflictZone> normalized_zones;
-        std::vector<size_t> seed_indices;
-        std::vector<size_t> protected_indices;
-        int upstream_index = -1;
-        bool other_already_inside = false;
-    };
-
-    FutureA1ZoneSelection selectFutureA1ProtectedZones(
-        const std::vector<ConflictZone>& canonical_zones,
-        bool preview_is_lo, double protected_until,
-        double other_path_s) const;
 
     // One-cycle longitudinal hint. It is intentionally separate from
     // VehicleAgent::requested_action because following is not an arbitration
@@ -456,15 +416,12 @@ private:
     std::vector<ConflictMarker> conflicts_;
     // Diagnostic de-duplication only: one pair/holder event per plan context.
     std::set<std::tuple<int, int, int>> pairwise_conflict_logs_;
-    std::set<std::tuple<int, int, int, int>> a1_decision_logs_;
     bool shouldLogA1Decision(const VehicleAgent& vehicle, int blocker_id);
 
     // Stage 3.1: reservations are retained only for A1 service transactions.
     // Ordinary-road pairs use rolling motion actions without cross-period
     // holder/waiter ownership.
     std::map<std::pair<int, int>, ConflictReservation> conflict_reservations_;
-    std::map<std::pair<int, int>, DepartureClusterCommitment>
-        departure_cluster_commitments_;
 
     // 每周期重算的唯一有向跟车对，仅作诊断/纵向建议依据。
     // pairwise timed OBB、reservation 和 holder 仲裁不再使用它作跳过条件。
@@ -498,13 +455,6 @@ private:
             display_overlap_polygons;
     };
     mutable std::map<std::pair<int, int>, ConflictCacheEntry> conflict_cache_;
-    mutable std::map<std::pair<int, int>, ConflictCacheEntry>
-        future_a1_conflict_cache_;
-
-    FutureA1Commitment future_a1_commitment_;
-    std::set<std::pair<int, int>> future_a1_admission_logged_;
-    int future_a1_admission_log_owner_id_ = -1;
-    int future_a1_admission_log_owner_path_gen_ = -1;
 
     // Phase 2 资源模型:资源地图(只读)+ 资源令牌表(跨周期持久,§11.10)。
     const TrafficResourceMap* resmap_ = nullptr;
@@ -519,6 +469,7 @@ private:
     DynamicSpeedMetrics dynamic_speed_metrics_;
     RollingDynamicDecision last_rolling_dynamic_decision_;
     double now_ = 0.0;  // 内部仿真时钟(每 decide 累加 dt),供令牌防抖/超时用
+    A1Coordinator a1_coordinator_;
 };
 
 }  // namespace multi_vehicle
