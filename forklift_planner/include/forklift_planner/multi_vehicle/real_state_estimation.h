@@ -25,18 +25,39 @@ inline double realProjectionAngleError(double a, double b) {
     return std::abs(std::atan2(std::sin(a - b), std::cos(a - b)));
 }
 
+inline double signedPathMotionDirection(const PathTrack& track, double path_s,
+                                        int progress_direction,
+                                        double cusp_look_distance = 0.10) {
+    if (track.empty()) return progress_direction < 0 ? -1.0 : 1.0;
+    const double s = std::min(track.length(), std::max(0.0, path_s));
+    bool reverse_segment = track.typeAtS(s) == WpType::REVERSE;
+    if (progress_direction >= 0) {
+        const double look_ahead = std::min(
+            track.length(), s + cusp_look_distance);
+        reverse_segment = reverse_segment ||
+                          track.typeAtS(look_ahead) == WpType::REVERSE;
+    }
+    const double increasing_s_sign = reverse_segment ? -1.0 : 1.0;
+    return progress_direction < 0 ? -increasing_s_sign : increasing_s_sign;
+}
+
 inline RealProjectionResult selectRealProjection(
     const PathTrack& track, double x, double y, double body_yaw,
     double previous_s, double current_speed, double dt,
     double search_s_min, double search_s_max,
     bool measured_motion_heading_valid = false,
     double measured_motion_heading = 0.0,
-    double distance_slack = 0.08) {
+    double distance_slack = 0.08,
+    int progress_direction = 1) {
     RealProjectionResult result;
-    const double lo = std::max(previous_s, search_s_min);
+    const double lo = progress_direction < 0
+        ? std::min(previous_s, search_s_min)
+        : std::max(previous_s, search_s_min);
     const double hi = std::max(lo, search_s_max);
     const double expected_s = std::min(
-        hi, std::max(lo, previous_s + std::max(0.0, current_speed) * dt));
+        hi, std::max(lo, previous_s +
+            (progress_direction < 0 ? -1.0 : 1.0) *
+            std::max(0.0, current_speed) * dt));
 
     struct Candidate {
         double s;
@@ -49,10 +70,12 @@ inline RealProjectionResult selectRealProjection(
         const RoughWp pose = track.poseAtS(s);
         const bool reverse = track.typeAtS(s) == WpType::REVERSE;
         const double path_motion_heading =
-            pose.theta + (reverse ? M_PI : 0.0);
+            pose.theta + (reverse ? M_PI : 0.0) +
+            (progress_direction < 0 ? M_PI : 0.0);
         const double measured_heading = measured_motion_heading_valid
             ? measured_motion_heading
-            : body_yaw + (reverse ? M_PI : 0.0);
+            : body_yaw + (reverse ? M_PI : 0.0) +
+              (progress_direction < 0 ? M_PI : 0.0);
         const double xy = std::hypot(pose.x - x, pose.y - y);
         candidates.push_back(Candidate{
             s, xy,
@@ -107,11 +130,13 @@ public:
 
     ArcLengthSpeedResult update(double timestamp, double path_s,
                                 double previous_path_s, double dt,
-                                double max_speed) {
+                                double max_speed,
+                                int progress_direction = 1) {
         ArcLengthSpeedResult result;
         if (dt > 1e-9) {
-            result.raw_single_step_speed = std::max(
-                0.0, (path_s - previous_path_s) / dt);
+            result.raw_single_step_speed = std::max(0.0,
+                (progress_direction < 0 ? previous_path_s - path_s
+                                        : path_s - previous_path_s) / dt);
         }
         samples_.emplace_back(timestamp, path_s);
         while (samples_.size() > 1 &&
@@ -123,8 +148,10 @@ public:
             result.window_duration =
                 samples_.back().first - samples_.front().first;
             if (result.window_duration > 1e-9) {
-                const double ds = std::max(
-                    0.0, samples_.back().second - samples_.front().second);
+                const double signed_ds = samples_.back().second -
+                                         samples_.front().second;
+                const double ds = std::max(0.0,
+                    progress_direction < 0 ? -signed_ds : signed_ds);
                 last_speed_ = std::max(
                     0.0, std::min(max_speed, ds / result.window_duration));
             }

@@ -60,9 +60,6 @@ bool sameControlState(const VehicleAgent& lhs, const VehicleAgent& rhs) {
            near(lhs.ttc_stop_hold_remaining,
                 rhs.ttc_stop_hold_remaining) &&
            near(lhs.wait_time, rhs.wait_time) &&
-           near(lhs.cycle_break_immunity, rhs.cycle_break_immunity) &&
-           lhs.deadlock_breaker == rhs.deadlock_breaker &&
-           near(lhs.deadlock_breaker_hold, rhs.deadlock_breaker_hold) &&
            near(lhs.dwell_remaining, rhs.dwell_remaining) &&
            near(lhs.path_s, rhs.path_s) &&
            near(lhs.current_speed, rhs.current_speed) &&
@@ -265,8 +262,6 @@ int main() {
     engine.setFutureA1Commitment(future);
     crossing_a.blocker_id = 99;
     crossing_a.wait_time = 4.0;
-    crossing_a.deadlock_breaker = true;
-    crossing_a.deadlock_breaker_hold = 1.5;
     crossing_a.reason = "sentinel";
     const VehicleAgent before_vehicle = crossing_a;
     const RuleEngine::SimSnapshot before_state = engine.snapshot();

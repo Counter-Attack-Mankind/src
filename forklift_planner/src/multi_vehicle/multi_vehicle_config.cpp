@@ -108,14 +108,16 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     nh.param(ns + "action_hold_time", c.action_hold_time, c.action_hold_time);
     nh.param(ns + "enable_priority_tiebreak", c.enable_priority_tiebreak,
              c.enable_priority_tiebreak);
-    nh.param(ns + "enable_stall_release", c.enable_stall_release,
-             c.enable_stall_release);
-    nh.param(ns + "enable_deadlock_reverse", c.enable_deadlock_reverse,
-             c.enable_deadlock_reverse);
-    nh.param(ns + "enable_cycle_break", c.enable_cycle_break,
-             c.enable_cycle_break);
-    nh.param(ns + "enable_deadlock_recovery", c.enable_deadlock_recovery,
-             c.enable_deadlock_recovery);
+    nh.param(ns + "deadlock_enabled", c.deadlock_enabled,
+             c.deadlock_enabled);
+    nh.param(ns + "deadlock_confirm_time", c.deadlock_confirm_time,
+             c.deadlock_confirm_time);
+    nh.param(ns + "deadlock_retreat_search_step",
+             c.deadlock_retreat_search_step,
+             c.deadlock_retreat_search_step);
+    nh.param(ns + "deadlock_retreat_clearance",
+             c.deadlock_retreat_clearance,
+             c.deadlock_retreat_clearance);
     nh.param(ns + "simple_forward_demo", c.simple_forward_demo, c.simple_forward_demo);
     nh.param(ns + "use_a1_cycle", c.use_a1_cycle, c.use_a1_cycle);
     nh.param(ns + "a1_cycle_catalog_file", c.a1_cycle_catalog_file,
@@ -180,6 +182,11 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     c.rolling_horizon = std::max(0.1, c.rolling_horizon);
     c.rolling_refresh_period = std::max(0.1, c.rolling_refresh_period);
     c.path_validation_step = std::max(0.005, c.path_validation_step);
+    c.deadlock_confirm_time = std::max(0.1, c.deadlock_confirm_time);
+    c.deadlock_retreat_search_step =
+        std::max(0.005, c.deadlock_retreat_search_step);
+    c.deadlock_retreat_clearance =
+        std::max(0.0, c.deadlock_retreat_clearance);
     return c;
 }
 

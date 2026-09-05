@@ -118,10 +118,6 @@ int main() {
         return fail("slot dependency prerequisite lost precedence");
     }
     priority_a.target_slot = 11;
-    priority_b.deadlock_breaker = true;
-    if (priority_engine.priorityWinner(priority_a, priority_b) != priority_b.id) {
-        return fail("deadlock-breaker prerequisite lost precedence");
-    }
 
     // Slot departure admission gives an already ACTIVE road vehicle priority
     // only when synchronized OBB overlap occurs before the candidate clears
@@ -182,6 +178,7 @@ int main() {
     std::vector<VehicleAgent> far{
         crossingVehicle(0, 2.50, false),
         crossingVehicle(1, 2.90, true)};
+    far[1].path_s = 0.40;
     far_engine.decide(far, 0.1, 15.0);
     if (far_engine.dynamicSpeedMetrics().far_decisions == 0 ||
         far[0].requested_action != VehicleAction::NOMINAL ||
@@ -194,6 +191,7 @@ int main() {
     std::vector<VehicleAgent> mid{
         crossingVehicle(0, 1.50, false),
         crossingVehicle(1, 1.90, true)};
+    mid[1].path_s = 0.40;
     mid_engine.decide(mid, 0.1, 15.0);
     if (mid_engine.dynamicSpeedMetrics().mid_decisions == 0 ||
         !hasDynamicReason(mid, VehicleAction::YIELD) ||
@@ -203,8 +201,9 @@ int main() {
 
     RuleEngine near_engine(map_param, config);
     std::vector<VehicleAgent> near{
-        crossingVehicle(0, 0.30, false),
-        crossingVehicle(1, 0.79, true)};
+        crossingVehicle(0, 0.80, false),
+        crossingVehicle(1, 1.05, true)};
+    near[1].path_s = 0.25;
     near_engine.decide(near, 0.1, 15.0);
     if (near_engine.dynamicSpeedMetrics().near_decisions == 0 ||
         !hasDynamicReason(near, VehicleAction::CREEP) ||
@@ -326,6 +325,7 @@ int main() {
     std::vector<VehicleAgent> reserved{
         crossingVehicle(0, 0.30, false),
         crossingVehicle(1, 0.70, true)};
+    reserved[1].path_s = 0.40;
     RuleEngine::SimSnapshot reservation_state;
     RuleEngine::ConflictReservation reservation;
     reservation.owner_id = 0;
@@ -351,6 +351,7 @@ int main() {
     std::vector<VehicleAgent> departure_flag{
         crossingVehicle(0, 0.30, false),
         crossingVehicle(1, 0.70, true)};
+    departure_flag[1].path_s = 0.40;
     departure_flag[0].mission_phase = MissionPhase::TO_B;
     departure_flag[1].mission_phase = MissionPhase::TO_B;
     departure_flag[0].a1_departure_committed = true;
@@ -368,6 +369,7 @@ int main() {
     std::vector<VehicleAgent> identity{
         crossingVehicle(0, 1.50, false),
         crossingVehicle(1, 1.90, true)};
+    identity[1].path_s = 0.40;
     identity[0].pending_dropoff_valid = true;
     identity[0].pending_dropoff_track.set(
         RoughPath{wp(10.0, 10.0, 0.0), wp(12.0, 10.0, 0.0)});
@@ -391,6 +393,7 @@ int main() {
     std::vector<VehicleAgent> active_cluster{
         crossingVehicle(0, 0.30, false),
         crossingVehicle(1, 0.70, true)};
+    active_cluster[1].path_s = 0.40;
     active_cluster[0].mission_phase = MissionPhase::TO_B;
     RuleEngine::SimSnapshot active_state;
     RuleEngine::DepartureClusterCommitment active_commitment;
@@ -519,6 +522,7 @@ int main() {
     std::vector<VehicleAgent> recovery{
         crossingVehicle(0, 1.50, false),
         crossingVehicle(1, 1.90, true)};
+    recovery[1].path_s = 0.40;
     recovery_engine.decide(recovery, 0.1, 15.0);
     const auto prefix_a = predictTrajectory(
         recovery[0], map_param, config, VehicleAction::NOMINAL, 15.0);

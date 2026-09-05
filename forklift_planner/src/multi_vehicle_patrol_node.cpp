@@ -218,9 +218,6 @@ private:
         double wait_time = 0.0;
         double action_hold_remaining = 0.0;
         double ttc_stop_hold_remaining = 0.0;
-        double cycle_break_immunity = 0.0;
-        bool deadlock_breaker = false;
-        double deadlock_breaker_hold = 0.0;
         std::string reason;
     };
 
@@ -238,6 +235,8 @@ private:
         std::tuple<int, int, int, int, bool, int>;
     using DepartureTransactionIdentity =
         std::tuple<int, int, int, int, int, int, int, bool>;
+    using RecoveryIdentity =
+        std::tuple<int, int, int, int, int, double, double>;
 
     struct ExecutedRollingDecisionMetrics {
         unsigned long long far_periods = 0;
@@ -263,7 +262,6 @@ private:
         unsigned long long reservation_create_terminal = 0;
         unsigned long long reservation_create_already_inside = 0;
         unsigned long long reservation_create_braking_safety = 0;
-        unsigned long long reservation_create_deadlock = 0;
         unsigned long long reservation_create_multi_vehicle = 0;
         unsigned long long reservation_create_other = 0;
     };
@@ -710,52 +708,6 @@ private:
         return p;
     }
 
-    // 前瞻预测(集中式全信息+确定性):克隆全局状态,复用真实 updateDwellAndTasks+decide+
-    // advanceVehicles 闭环空跑 H 拍(预测检查被 sim_mode_ 屏蔽,不递归),若 H 内出现「持续闭环
-    // 死锁」(findDeadlockMembers 非空,wait≥kWait 的全停闭环)即返回 true。跑完精确还原,对真实零影响。
-    bool simPredictsDeadlock() {
-        const double dt = 1.0 / pp_.update_rate;
-        constexpr int H = 400;          // 前瞻 ~40s
-        constexpr double kWait = 10.0;  // 全停闭环持续此秒数 = 真死锁
-        const std::vector<VehicleAgent> sa = agents_;
-        const std::vector<bool> sv = visited_slots_;
-        const std::string previous_log_source = coord_log_source_;
-        const uint64_t previous_log_plan = coord_log_plan_id_;
-        const int previous_log_frame = coord_log_frame_id_;
-        const int previous_rollout_step = coord_log_rollout_step_;
-        const uint64_t rollout_plan_id = ++rollout_log_id_;
-        setCoordLogContext("ROLLOUT", rollout_plan_id, 0, 0);
-        const auto sr = rule_engine_->snapshot();
-        const auto sl = allocator_->snapshot();
-        const bool prev = sim_mode_;
-        sim_mode_ = true;
-        bool dead = false;
-        for (int s = 0; s < H && !dead; ++s) {
-            setCoordLogContext("ROLLOUT", rollout_plan_id, s, s + 1);
-            updateDwellAndTasks(dt);
-            rule_engine_->decide(agents_, dt);
-            advanceVehicles(dt);
-            if (!findDeadlockMembers(kWait).empty()) dead = true;
-        }
-        agents_ = sa;
-        visited_slots_ = sv;
-        coord_log_suppressed_ = true;
-        rule_engine_->restore(sr);
-        allocator_->restore(sl);
-        coord_log_suppressed_ = false;
-        sim_mode_ = prev;
-        setCoordLogContext(previous_log_source, previous_log_plan,
-                           previous_log_frame, previous_rollout_step);
-        return dead;
-    }
-
-    // ───────── AD 滚动时域:世界模型推演 → 有限时域时间参数化轨迹 ─────────
-    // 零自由度=全局确定性:从当前真实状态(/object 位置 + 动捕差分速度,已在 agents_ 里)出发,
-    // 复用真实 updateDwellAndTasks+decide+advanceVehicles 精确前推 horizon 秒,逐拍记录每车
-    // (x,y,yaw,带符号速度,time)。这条轨迹运动学完备(模型自带曲率限速/加减速/停止/倒车换向过零),
-    // 位置序列隐含方向→控制器纯跟踪即可,不需 coord_speed 符号/typeAtS 那套。每周期刷新=滚动时域。
-    // hold[i]=true 表示该车整段不动(静止特例)→ 控制器 idle 不控制。
-
     void rollWorldModel(double horizon, std::vector<sandbox_msgs::Trajectory>& out,
                         std::vector<bool>& hold,
                         std::vector<SimPlanFrame>* plan_frames = nullptr,
@@ -801,18 +753,15 @@ private:
                 // 几何判前进/倒车(用户判据):存的航向(=车头)与路径切向(=前进方向)反向→倒车。
                 // 不靠 typeAtS 标签(可能没标对)。前进段速度取正、倒车段取负——就这么简单。
                 
-                //====判断是否倒车=====
-                bool rev = false;
-                if (!v.track.empty()) {
-                    const double L = v.track.length(), ds = 0.05;
-                    const double s = std::min(std::max(v.path_s, 0.0), L);
-                    const auto pa = v.track.poseAtS(std::max(0.0, s - ds));
-                    const auto pc = v.track.poseAtS(std::min(L, s + ds));
-                    rev = std::cos(p.theta - std::atan2(pc.y - pa.y, pc.x - pa.x)) < 0.0;
-                }
                 sandbox_msgs::TrajectoryPoint tp;
                 tp.x = p.x; tp.y = p.y; tp.yaw = p.theta;                          // 车头朝向
-                tp.velocity = (rev ? -1.0 : 1.0) * std::max(0.0, v.current_speed); // 前进+/倒车-
+                const bool retreat =
+                    rule_engine_->recoveryDirective().motionFor(v.id) ==
+                    forklift_planner::multi_vehicle::RecoveryMotion::RETREAT;
+                const double motion_sign =
+                    forklift_planner::multi_vehicle::signedPathMotionDirection(
+                        v.track, v.path_s, retreat ? -1 : 1);
+                tp.velocity = motion_sign * std::max(0.0, v.current_speed);
                 tp.time = s * dt;
                 if (path_gen_cut_indices != nullptr &&
                     (*path_gen_cut_indices)[i] ==
@@ -879,9 +828,6 @@ private:
                     d.action_hold_remaining = v.action_hold_remaining;
                     d.ttc_stop_hold_remaining =
                         v.ttc_stop_hold_remaining;
-                    d.cycle_break_immunity = v.cycle_break_immunity;
-                    d.deadlock_breaker = v.deadlock_breaker;
-                    d.deadlock_breaker_hold = v.deadlock_breaker_hold;
                     d.reason = v.reason;
                     frame.agents.push_back(std::move(d));
                 }
@@ -926,10 +872,20 @@ private:
         return rule_engine_->a1DepartureTransactionIdentity();
     }
 
+    RecoveryIdentity captureRecoveryIdentity() const {
+        const auto& recovery = rule_engine_->recoveryDirective();
+        return std::make_tuple(
+            static_cast<int>(recovery.phase), recovery.retreat_vehicle_id,
+            recovery.pass_vehicle_id, recovery.retreat_path_gen,
+            recovery.pass_path_gen, recovery.retreat_target_s,
+            recovery.pass_clear_s);
+    }
+
     void rememberRealPlanIdentity() {
         real_plan_agents_ = captureRealPlanAgentIdentity();
         real_plan_departure_transactions_ =
             captureDepartureTransactionIdentity();
+        real_plan_recovery_ = captureRecoveryIdentity();
     }
 
     bool realPlanNeedsRefresh() const {
@@ -949,6 +905,7 @@ private:
             }
         }
         if (captureRealPlanAgentIdentity() != real_plan_agents_) return true;
+        if (captureRecoveryIdentity() != real_plan_recovery_) return true;
         return captureDepartureTransactionIdentity() !=
                real_plan_departure_transactions_;
     }
@@ -1110,8 +1067,6 @@ private:
                 } else if (reason == "braking_safety") {
                     ++executed_rolling_metrics_.
                         reservation_create_braking_safety;
-                } else if (reason == "deadlock_breaker") {
-                    ++executed_rolling_metrics_.reservation_create_deadlock;
                 } else if (reason == "multi_vehicle_legacy") {
                     ++executed_rolling_metrics_.
                         reservation_create_multi_vehicle;
@@ -1130,7 +1085,7 @@ private:
                 ++executed_rolling_metrics_.reservation_deletes;
             }
         }
-        rule_engine_->restore(frame.rule_state);
+        rule_engine_->restore(frame.rule_state, false);
         for (size_t i = 0; i < agents_.size(); ++i) {
             VehicleAgent& v = agents_[i];
             const SimPlannedAgentDecision& d = frame.agents[i];
@@ -1140,10 +1095,14 @@ private:
             v.wait_time = d.wait_time;
             v.action_hold_remaining = d.action_hold_remaining;
             v.ttc_stop_hold_remaining = d.ttc_stop_hold_remaining;
-            v.cycle_break_immunity = d.cycle_break_immunity;
-            v.deadlock_breaker = d.deadlock_breaker;
-            v.deadlock_breaker_hold = d.deadlock_breaker_hold;
             v.reason = d.reason;
+        }
+        const RecoveryIdentity recovery_before = captureRecoveryIdentity();
+        const double live_dt = 1.0 / pp_.update_rate;
+        rule_engine_->observeDeadlock(agents_, live_dt, true);
+        rule_engine_->applyRecoveryDirectiveToOutput(agents_);
+        if (captureRecoveryIdentity() != recovery_before) {
+            force_horizon_refresh_ = true;
         }
         if (sim_plan_cursor_ == 0) {
             const auto& decision = frame.rolling_dynamic_decision;
@@ -1750,28 +1709,8 @@ private:
                 }
 
                 //******** 4.2 若车已过睡眠时间，并且为不间断跑，则切换速度，并派发任务 ******/
-                const VehicleAgent before_task = v;
                 v.loaded = !v.loaded;
                 allocator_->assignNextTask(v, agents_);
-                
-                // 前瞻预测性避免("提前预料到就避免"):若这次发车会在 H 内导致持续死锁,就**错峰**
-                // ——撤销发车、在车位再等一会(不堵路),让别车先过那段窄区,稍后再试。仅在真预测到
-                // 死锁时才扣(精准,非广撒网);连扣上限防极端饥饿。整块仅真实模式执行(sim 内不递归)。
-                if (!sim_mode_ && v.mode == VehicleMode::ACTIVE) {
-                    if (predict_holds_[v.id] < 6 && simPredictsDeadlock()) {
-                        const int hold_id = v.id;
-                        v = before_task;
-                        v.mode = VehicleMode::DWELL;
-                        v.dwell_remaining = 2.0;
-                        v.action = VehicleAction::STOP;
-                        v.requested_action = VehicleAction::STOP;
-                        v.current_speed = 0.0;
-                        v.reason = "predict_hold";
-                        ++predict_holds_[hold_id];
-                    } else {
-                        predict_holds_[v.id] = 0;      // 真发车了 → 清零连扣计数
-                    }
-                }
             }
         }
     }
@@ -1852,11 +1791,31 @@ private:
             next_speed[i] = v.current_speed;
             if (!v.active()) continue;
 
+            const auto recovery_motion =
+                rule_engine_->recoveryDirective().motionFor(v.id);
+            if (recovery_motion ==
+                forklift_planner::multi_vehicle::RecoveryMotion::HOLD) {
+                next_speed[i] = 0.0;
+                continue;
+            }
+
             // 规划速度=动作档,再被曲率限速卡住(与实车 coord_speed 同一套,sim 才能真实验证)。
-            const double desired_speed = std::min(rule_engine_->speedForAction(v.action),
-                                                  curvatureSpeed(v));
+            const VehicleAction motion_action =
+                recovery_motion ==
+                        forklift_planner::multi_vehicle::RecoveryMotion::RETREAT
+                    ? VehicleAction::CREEP : v.action;
+            const double desired_speed = std::min(
+                rule_engine_->speedForAction(motion_action), curvatureSpeed(v));
             next_speed[i] = limitedSpeed(v.current_speed, desired_speed, dt);
-            next_s[i] = std::min(v.track.length(), v.path_s + next_speed[i] * dt);
+            if (recovery_motion ==
+                forklift_planner::multi_vehicle::RecoveryMotion::RETREAT) {
+                next_s[i] = std::max(
+                    rule_engine_->recoveryDirective().retreat_target_s,
+                    v.path_s - next_speed[i] * dt);
+            } else {
+                next_s[i] = std::min(v.track.length(),
+                                     v.path_s + next_speed[i] * dt);
+            }
             planned_s[i] = next_s[i];
         }
 
@@ -1902,7 +1861,11 @@ private:
         auto tryClearBlocker = [&](size_t idx, int blocker_id) {
             VehicleAgent& v = agents_[idx];
             if (!v.active()) return false;
-            if (next_s[idx] > v.path_s + 1e-9) return false;
+            if (rule_engine_->recoveryDirective().motionFor(v.id) !=
+                forklift_planner::multi_vehicle::RecoveryMotion::NORMAL) {
+                return false;
+            }
+            if (std::abs(next_s[idx] - v.path_s) > 1e-9) return false;
 
             const double creep_speed =
                 limitedSpeed(v.current_speed,
@@ -1965,10 +1928,10 @@ private:
                     } else if (!i_active && j_active) {
                         changed = blockVehicle(j) || changed;
                     } else if (i_active && j_active) {
-                        const bool i_moves =
-                            next_s[i] > agents_[i].path_s + 1e-9;
-                        const bool j_moves =
-                            next_s[j] > agents_[j].path_s + 1e-9;
+                        const bool i_moves = std::abs(
+                            next_s[i] - agents_[i].path_s) > 1e-9;
+                        const bool j_moves = std::abs(
+                            next_s[j] - agents_[j].path_s) > 1e-9;
                         const bool i_only_safe =
                             i_moves &&
                             !overlapsAt(i, next_s[i], j, agents_[j].path_s);
@@ -2061,124 +2024,6 @@ private:
 
         resolvePlannedOverlaps();
 
-        bool any_active_motion = false;
-        bool any_blocked_active = false;
-        for (size_t i = 0; i < agents_.size(); ++i) {
-            if (!agents_[i].active()) continue;
-            any_blocked_active = any_blocked_active || blocked[i];
-            if (!blocked[i] && planned_s[i] > agents_[i].path_s + 1e-9) {
-                any_active_motion = true;
-            }
-        }
-
-        if (cfg_.enable_stall_release &&
-            (!any_active_motion || any_blocked_active)) {
-            // 真实开车原则(规格§15)：只往「确实空着」的地方挪——前方若有别人的车身
-            // (含安全余量)就老实等，绝不往里蹭。故每次轻推都先用 conflict_margin 校验
-            // 候选车身是否清空；不清空就不推。这样既能放走"前方其实空、只是过度谨慎"
-            // 的车(恢复流动)，又不会把车顶进别人(避免 stall_release 蹭出 V1↔V3 那种
-            // 残留重叠 → hard_collision_guard 反复触发)。真·僵死留给 deadlock_reverse。
-            const double cm = cfg_.conflict_margin * 0.5;
-            auto clearAheadWithMargin = [&](size_t idx, double cand_s) {
-                const auto me = forklift_planner::multi_vehicle::makeBody(
-                    poseForCollision(agents_[idx], cand_s), mp_, cm);
-                for (size_t k = 0; k < agents_.size(); ++k) {
-                    if (k == idx) continue;
-                    if (agents_[k].mode != VehicleMode::ACTIVE &&
-                        agents_[k].mode != VehicleMode::DWELL) {
-                        continue;
-                    }
-                    const auto other = forklift_planner::multi_vehicle::makeBody(
-                        poseForCollision(agents_[k], plannedS(k)), mp_, cm);
-                    if (forklift_planner::multi_vehicle::overlaps(me, other)) {
-                        return false;
-                    }
-                }
-                return true;
-            };
-            for (size_t i = 0; i < agents_.size(); ++i) {
-                VehicleAgent& v = agents_[i];
-                if (!v.active()) continue;
-                if (!blocked[i] && planned_s[i] > v.path_s + 1e-9) continue;
-                const double creep_speed =
-                    limitedSpeed(v.current_speed,
-                                 rule_engine_->speedForAction(VehicleAction::CREEP),
-                                 dt);
-                const double candidate_s =
-                    std::min(v.track.length(), v.path_s + creep_speed * dt);
-                if (candidate_s <= v.path_s + 1e-9) continue;
-                // 只往清空的空间挪；前方被占(含余量)则不推，老实等。
-                if (!clearAheadWithMargin(i, candidate_s)) continue;
-                blocked[i] = false;
-                next_speed[i] = creep_speed;
-                next_s[i] = candidate_s;
-                planned_s[i] = candidate_s;
-                v.action = VehicleAction::CREEP;
-                v.requested_action = VehicleAction::CREEP;
-                v.reason = "global_stall_release";
-            }
-            resolvePlannedOverlaps();
-        }
-
-        if (cfg_.enable_deadlock_reverse) {
-            auto motionHeading = [](const VehicleAgent& v) {
-                constexpr double kPi = 3.14159265358979323846;
-                double h = v.track.poseAtS(v.path_s).theta;
-                if (v.track.typeAtS(v.path_s) == WpType::REVERSE) h += kPi;
-                return h;
-            };
-            auto forwardBlocker = [&](size_t idx) -> int {
-                const VehicleAgent& v = agents_[idx];
-                const double fwd_s = std::min(
-                    v.track.length(),
-                    v.path_s + rule_engine_->speedForAction(VehicleAction::CREEP) * dt);
-                for (size_t k = 0; k < agents_.size(); ++k) {
-                    if (k == idx) continue;
-                    if (agents_[k].mode != VehicleMode::ACTIVE &&
-                        agents_[k].mode != VehicleMode::DWELL) {
-                        continue;
-                    }
-                    if (overlapsAt(idx, fwd_s, k, plannedS(k))) {
-                        return static_cast<int>(k);
-                    }
-                }
-                return -1;
-            };
-
-            constexpr double kReverseWait = 3.0;  // s stuck before backing out
-            constexpr double kHeadOnDot = -0.5;   // headings nearly opposite
-            bool any_reversed = false;
-            for (size_t i = 0; i < agents_.size(); ++i) {
-                VehicleAgent& v = agents_[i];
-                if (!v.active() || v.wait_time < kReverseWait) continue;
-                const int bk = forwardBlocker(i);
-                if (bk < 0) continue;
-                const VehicleAgent& b = agents_[bk];
-                if (b.active() && planned_s[bk] > b.path_s + 1e-9) continue;
-                const double hv = motionHeading(v);
-                const double hb = motionHeading(b);
-                const double dot = std::cos(hv) * std::cos(hb) +
-                                   std::sin(hv) * std::sin(hb);
-                if (dot > kHeadOnDot) continue;
-                if (rule_engine_->priorityWinner(v, b) == v.id) continue;
-                const double rev_speed =
-                    rule_engine_->speedForAction(VehicleAction::CREEP);
-                const double candidate_s =
-                    std::max(0.0, v.path_s - rev_speed * dt);
-                if (candidate_s >= v.path_s - 1e-9) continue;  // at path start
-                if (!canPlace(i, candidate_s)) continue;       // someone behind
-                blocked[i] = false;
-                next_speed[i] = 0.0;
-                next_s[i] = candidate_s;
-                planned_s[i] = candidate_s;
-                v.action = VehicleAction::CREEP;
-                v.requested_action = VehicleAction::CREEP;
-                v.reason = "deadlock_reverse_V" + std::to_string(bk);
-                any_reversed = true;
-            }
-            if (any_reversed) resolvePlannedOverlaps();
-        }
-
         for (size_t i = 0; i < agents_.size(); ++i) {
             VehicleAgent& v = agents_[i];
             if (!v.active()) continue;
@@ -2188,8 +2033,8 @@ private:
                 v.action = VehicleAction::STOP;
                 v.requested_action = VehicleAction::STOP;
                 v.reason = "hard_collision_guard";
-                // §9 完整性:把"被谁的车身物理挡住"也回填为等待边,供 RuleEngine 的
-                // 等待图(resolveDeadlock)检测环。否则硬护栏导致的互堵看不见、破不了。
+                // Keep the physical blocker edge for diagnostics and for the
+                // next live two-vehicle deadlock observation.
                 const double fwd_s = std::min(
                     v.track.length(),
                     v.path_s + rule_engine_->speedForAction(VehicleAction::CREEP) * dt);
@@ -2536,7 +2381,10 @@ private:
                 marker_pub_->setRollingDecision(
                     rule_engine_->lastRollingDynamicDecision());
             }
-            if (tick_count_ % 5 == 0) runDeadlockRecovery();        //5*0.1=0.5s进行一次死锁检测
+            if (captureRecoveryIdentity() != real_plan_recovery_) {
+                publishHorizon();
+                force_horizon_refresh_ = false;
+            }
             updateSnapshotWedgeTrigger();
             publishRealOutputs(dt);
             marker_pub_->publish(
@@ -2588,7 +2436,6 @@ private:
 
 
         //4. 仿真模式---一次性触发完成
-        if (tick_count_ % 5 == 0) runDeadlockRecovery();
         updateSnapshotWedgeTrigger();
 
         if (rb_one_shot_traj_) {    
@@ -2884,15 +2731,27 @@ private:
             }
             const auto speed_identity = std::make_tuple(
                 v.path_gen, static_cast<int>(v.mission_phase),
-                static_cast<int>(v.leg_target));
+                static_cast<int>(v.leg_target) + 10 * static_cast<int>(
+                    rule_engine_->recoveryDirective().motionFor(v.id)));
             if (rb_speed_identity_[i] != speed_identity) {
                 rb_speed_windows_[i].clear(0.0);
                 rb_speed_identity_[i] = speed_identity;
                 rb_motion_pose_valid_[i] = false;
             }
             const double previous_path_s = rb_prev_path_s_[i];
-            const double lo = std::max(0.0, rb_prev_path_s_[i] - 0.10);
-            const double hi = std::min(v.track.length(), rb_prev_path_s_[i] + 0.50);
+            const auto recovery_motion =
+                rule_engine_->recoveryDirective().motionFor(v.id);
+            const int progress_direction =
+                recovery_motion ==
+                    forklift_planner::multi_vehicle::RecoveryMotion::RETREAT
+                    ? -1 : 1;
+            const double lo = progress_direction < 0
+                ? std::max(rule_engine_->recoveryDirective().retreat_target_s,
+                           rb_prev_path_s_[i] - 0.50)
+                : std::max(0.0, rb_prev_path_s_[i] - 0.10);
+            const double hi = progress_direction < 0
+                ? rb_prev_path_s_[i]
+                : std::min(v.track.length(), rb_prev_path_s_[i] + 0.50);
             bool motion_heading_valid = false;
             double motion_heading = 0.0;
             if (rb_motion_pose_valid_[i]) {
@@ -2907,11 +2766,13 @@ private:
                 forklift_planner::multi_vehicle::selectRealProjection(
                     v.track, real_x_[i], real_y_[i], real_yaw_[i],
                     previous_path_s, v.current_speed, dt, lo, hi,
-                    motion_heading_valid, motion_heading);
+                    motion_heading_valid, motion_heading, 0.08,
+                    progress_direction);
             const double new_s = projection.path_s;
             const double sample_time = ros::Time::now().toSec();
             const auto speed = rb_speed_windows_[i].update(
-                sample_time, new_s, previous_path_s, dt, cfg_.max_speed);
+                sample_time, new_s, previous_path_s, dt, cfg_.max_speed,
+                progress_direction);
             v.current_speed = speed.window_speed;
             v.path_s = new_s;
             rb_prev_path_s_[i] = new_s;
@@ -2921,7 +2782,8 @@ private:
             logRealProjectionSample(i, previous_path_s, new_s, lo, hi,
                                     speed, projection);
             // 到库→DWELL —— 复刻 advanceVehicles 705-714(实车容差 cfg_.real_arrive_tol)
-            if (v.path_s >= v.track.length() - cfg_.real_arrive_tol) {
+            if (progress_direction > 0 &&
+                v.path_s >= v.track.length() - cfg_.real_arrive_tol) {
                 // 关键(联动 rule_engine):sim 里 DWELL 车 path_s≈length,故其碰撞足迹
                 // poseAtS(path_s)=槽位;rule_engine 73/85/737/742 处直接用 poseAtS(path_s)
                 // 算静止车足迹(没套 DWELL?length:path_s)。实车若停在 length-5cm,这些足迹
@@ -3015,20 +2877,26 @@ private:
             VehicleAgent& v = agents_[i];
             // 注:几何 /traj 已由 publishHorizon(滚动时域时间参数化轨迹)发布,这里不再发 /traj。
             // 速度幅值=协调动作档,再被曲率限速卡住(规划侧运动学:弯道降速)。方向=路径段(倒车负)。STOP→0。
-            double mag = rule_engine_->speedForAction(v.action);
+            const auto recovery_motion =
+                rule_engine_->recoveryDirective().motionFor(v.id);
+            const VehicleAction motion_action =
+                recovery_motion ==
+                        forklift_planner::multi_vehicle::RecoveryMotion::RETREAT
+                    ? VehicleAction::CREEP : v.action;
+            double mag = recovery_motion ==
+                    forklift_planner::multi_vehicle::RecoveryMotion::HOLD
+                ? 0.0 : rule_engine_->speedForAction(motion_action);
             mag = std::min(mag, curvatureSpeed(v));   // 曲率限速(lat_accel_max,0=关)
             // 方向:当前段倒车,或【前方一小段即将进入倒车段】→ 负(倒车)。后者关键:realAdvance 的
             // path_s 单调只增,前进逼近 FORWARD→REVERSE 的 cusp 时,path_s 越不过 cusp(前进会冲偏、
             // 投影卡在 cusp)→ 若只看 typeAtS(path_s) 永远 FORWARD → 车冲过该倒车处不倒(sim 积分不暴露)。
             // 故前瞻 0.10m:逼近 cusp 即提前给负速度,车减速→cusp 停→倒入倒车段→path_s 越过,死锁解开。
-            double dir = 1.0;
-            if (!v.track.empty()) {
-                const double look_ahead = 0.10;  // m
-                const bool rev = v.track.typeAtS(v.path_s) == WpType::REVERSE ||
-                                 v.track.typeAtS(std::min(v.path_s + look_ahead, v.track.length()))
-                                     == WpType::REVERSE;
-                if (rev) dir = -1.0;
-            }
+            const int progress_direction = recovery_motion ==
+                    forklift_planner::multi_vehicle::RecoveryMotion::RETREAT
+                ? -1 : 1;
+            const double dir =
+                forklift_planner::multi_vehicle::signedPathMotionDirection(
+                    v.track, v.path_s, progress_direction);
             double target = dir * mag;
             // 动捕看门狗:该车位姿失联(>0.5s)→ 强制目标速度 0。否则控制器拿陈旧位姿
             // 盲走、底盘又无超时 → 跑飞。只压这一辆的输出速度,协调逻辑/其它车不受影响
@@ -3058,14 +2926,14 @@ private:
             sp.data = rb_cmd_speed_[i];
             speed_pubs_[i].publish(sp);
 
-            // 只读协调状态。格式 "mode,action,blk,brk,wait,slot->tgt,flag,seg,s/len" 供 logger 落列。
+            // 只读协调状态。格式 "mode,action,blk,wait,slot->tgt,flag,seg,s/len" 供 logger 落列。
             // seg=当前路径段方向(FWD/REV,来自 typeAtS(path_s));s/len=路径进度——排查"该倒车却前进"。
             const char* seg = (dir < 0.0) ? "REV" : "FWD";
             const double len = v.track.empty() ? 0.0 : v.track.length();
             char buf[140];
-            std::snprintf(buf, sizeof(buf), "%s,%s,%d,%d,%.1f,%d->%d,%s,%s,%.2f/%.2f",
+            std::snprintf(buf, sizeof(buf), "%s,%s,%d,%.1f,%d->%d,%s,%s,%.2f/%.2f",
                           modeName(v.mode), actionName(v.action), v.blocker_id,
-                          v.deadlock_breaker ? 1 : 0, v.wait_time,
+                          v.wait_time,
                           v.current_slot, v.target_slot, flag, seg, v.path_s, len);
             std_msgs::String st;
             st.data = buf;
@@ -3154,7 +3022,6 @@ private:
     std::string snapshot_trigger_topic_;
     bool snapshot_wedge_active_ = false;
     unsigned long long snapshot_last_trigger_tick_ = 0;
-    std::set<std::string> snapshot_deadlock_signatures_;
     ros::Subscriber start_sub_, estop_sub_;             // /rb_start(Enter开跑) /estop(空格急停切换)
     bool rb_started_ = false;                           // 摆位完成、按Enter后才推进
     bool rb_estop_ = false;                             // 操作员急停:true=全车瞬时停
@@ -3180,6 +3047,7 @@ private:
     std::vector<RealPlanAgentIdentity> real_plan_agents_;
     std::vector<DepartureTransactionIdentity>
         real_plan_departure_transactions_;
+    RecoveryIdentity real_plan_recovery_{};
     A1LaunchMetrics a1_launch_metrics_;
     std::map<int, A1LaunchHoldState> a1_launch_holds_;
     ExecutedRollingDecisionMetrics executed_rolling_metrics_;
@@ -3221,13 +3089,7 @@ private:
     unsigned long long hard_guard_events_ = 0;        // 硬护栏触发(碰撞)累计次数
     unsigned long long first_guard_tick_ = 0;         // 首次碰撞所在 tick(0=从未)
     std::set<std::pair<int, int>> hard_guard_pairs_;  // 涉及碰撞的车对
-    unsigned long long deadlock_ticks_ = 0;           // 检测到持续死锁环的拍数累计
-    unsigned long long deadlock_recoveries_ = 0;      // 成功重规划脱困次数
     bool sim_mode_ = false;                           // 前瞻仿真中:屏蔽计数/日志副作用
-    std::map<int, int> predict_holds_;                // 车id→连续"预测性错峰扣车"次数(防极端饥饿)
-    bool deadlock_logged_ = false;                    // 首次死锁是否已详打
-    std::set<std::set<int>> dumped_clusters_;         // 已详打过的死锁簇(按成员集去重,编目用)
-    std::map<int, double> last_replan_t_;             // 车id→上次重规划 sim_t(冷却用)
 
 public:
     void recordDebugTimelineTick() {
@@ -3318,11 +3180,6 @@ public:
         message.data = text.str();
         snapshot_trigger_pub_.publish(message);
         snapshot_last_trigger_tick_ = tick_count_;
-        // A formal cycle is also a wedge. Mark the wedge as already captured so
-        // the next tick cannot archive the same scene again as FIRST-WEDGE.
-        if (event.rfind("DEADLOCK_", 0) == 0) {
-            snapshot_wedge_active_ = true;
-        }
         ROS_WARN("[RVIZ-SNAPSHOT] trigger requested: %s", message.data.c_str());
     }
 
@@ -3344,10 +3201,10 @@ public:
     std::string vehLine(const VehicleAgent& v) const {
         char buf[256];
         snprintf(buf, sizeof(buf),
-                 "  V%d mode=%d act=%d reason=%s blk=%d brkr=%d task=%d slot=%d->%d "
+                 "  V%d mode=%d act=%d reason=%s blk=%d task=%d slot=%d->%d "
                  "s=%.3f/%.3f rem=%.3f spd=%.3f wait=%.1f gen=%d",
                  v.id, (int)v.mode, (int)v.action, v.reason.c_str(), v.blocker_id,
-                 (int)v.deadlock_breaker, v.task_count, v.current_slot,
+                 v.task_count, v.current_slot,
                  v.target_slot, v.path_s, v.track.length(), v.remainingS(),
                  v.current_speed, v.wait_time, v.path_gen);
         return buf;
@@ -3371,91 +3228,8 @@ public:
 
     // 死锁看门狗(C-第1步):跟 blocker_id 等待图找一个「持续死锁环」——环内每辆都
     // ACTIVE+STOP 且 wait_time≥min_wait(确为持续、非瞬时)。返回环成员 id(按链序),无则空。
-    std::vector<int> findDeadlockCycle(double min_wait) const {
-        auto idxOf = [&](int id) -> int {
-            for (size_t i = 0; i < agents_.size(); ++i)
-                if (agents_[i].id == id) return static_cast<int>(i);
-            return -1;
-        };
-        for (const VehicleAgent& v0 : agents_) {
-            if (v0.mode != VehicleMode::ACTIVE) continue;
-            std::vector<int> path;
-            int cur = v0.id;
-            while (cur >= 0) {
-                auto it = std::find(path.begin(), path.end(), cur);
-                if (it != path.end()) {  // 链绕回 → 环 = [it, end)
-                    std::vector<int> cyc(it, path.end());
-                    bool all_stuck = cyc.size() >= 2;
-                    for (int cid : cyc) {
-                        int k = idxOf(cid);
-                        if (k < 0 || agents_[k].wait_time < min_wait) { all_stuck = false; break; }
-                    }
-                    return all_stuck ? cyc : std::vector<int>{};
-                }
-                path.push_back(cur);
-                int k = idxOf(cur);
-                if (k < 0 || agents_[k].mode != VehicleMode::ACTIVE ||
-                    agents_[k].action != VehicleAction::STOP)
-                    break;
-                cur = agents_[k].blocker_id;
-            }
-        }
-        return {};
-    }
-
     // 死锁恢复(C):检测「所有」持续环的成员 → 选其中等待最久(最该救)且不在冷却期的车,
     // 从当前位姿重规划到空库位脱困。不倒车、不强推。冷却防止反复重规划同一辆(churn)。
-    void runDeadlockRecovery() {
-        constexpr double kDeadlockWait = 25.0;  // 持续卡 >此秒数才算真死锁
-        constexpr double kCooldown = 8.0;       // 同一辆两次重规划的最小间隔(给它时间驶离)
-        const std::set<int> members = findDeadlockMembers(kDeadlockWait);
-        if (members.empty()) return;
-        std::string snapshot_signature;
-        for (int id : members) {
-            if (!snapshot_signature.empty()) snapshot_signature += "-";
-            snapshot_signature += "V" + std::to_string(id);
-        }
-        if (snapshot_deadlock_signatures_.insert(snapshot_signature).second) {
-            requestDebugSnapshot("DEADLOCK_" + snapshot_signature);
-        }
-        ++deadlock_ticks_;
-        // 选等待最久、且不在冷却期的成员当受害车。
-        int victim = -1;
-        double worst_wait = -1.0;
-        for (int id : members) {
-            const VehicleAgent* a = agentById_c(id);
-            if (!a) continue;
-            auto it = last_replan_t_.find(id);
-            if (it != last_replan_t_.end() && sim_time_ - it->second < kCooldown) continue;
-            if (a->wait_time > worst_wait) { worst_wait = a->wait_time; victim = id; }
-        }
-        if (victim < 0) return;  // 全在冷却 → 等下一拍
-        if (!deadlock_logged_) {
-            deadlock_logged_ = true;
-            std::string ms;
-            for (int id : members) ms += "V" + std::to_string(id) + " ";
-            ROS_ERROR("[DEADLOCK] @tick=%llu sim_t=%.1fs 环成员=[%s] 首个受害车=V%d",
-                      tick_count_, sim_time_, ms.c_str(), victim);
-        }
-        // 编目:每种不同的死锁簇(按成员集去重)各全面 dump 一次,catalog 出"到底几种特例"。
-        if (dumped_clusters_.size() < 15 && dumped_clusters_.insert(members).second) {
-            ROS_ERROR("[CLUSTER-CATALOG] 第 %zu 种 @tick=%llu sim_t=%.1fs",
-                      dumped_clusters_.size(), tick_count_, sim_time_);
-            dumpDeadlockCluster(members);
-        }
-        // 重规划脱困整套停用(enable_deadlock_recovery=false)。看门狗保留
-        // 为纯检测(上方 deadlock_ticks 计数 + 首环日志),不再执行任何重规划/脱困动作。
-        if (!cfg_.enable_deadlock_recovery) return;
-        VehicleAgent* v = agentById(victim);
-        if (!v) return;
-        // 冷却按「尝试」记,而非仅「成功」记:换货位失败(当时清不出逃逸位)时,也冷却 8s 再试,
-        // 别每 5 拍就对一堆候选位重算路径(实测那是 24.8 万条 clothoid 警告 + 大量 CPU 空转的根因)。
-        last_replan_t_[victim] = sim_time_;
-        if (allocator_->replanFromPose(*v, agents_)) {
-            ++deadlock_recoveries_;
-        }
-    }
-
     const VehicleAgent* agentById_c(int id) const {
         for (const VehicleAgent& v : agents_) if (v.id == id) return &v;
         return nullptr;
@@ -3463,45 +3237,6 @@ public:
 
     // 一次性全面 dump 首个持续死锁簇:每个成员的路径要点 + 簇内两两冲突几何(same_dir 决定
     // 对向/同向 → 判定单向环流能否治)。只打一次,只读。用于源头修复的精确诊断。
-    void dumpDeadlockCluster(const std::set<int>& members) {
-        ROS_ERROR("[CLUSTER-DUMP] ===== 死锁簇 %zu 车,逐车路径 + 两两冲突几何 =====",
-                  members.size());
-        // 1) 每个成员:槽位、当前位姿/进度、路径起讫 + 等弧长 11 点折线。
-        for (int id : members) {
-            const VehicleAgent* a = agentById_c(id);
-            if (!a || a->track.empty()) continue;
-            const double L = a->track.length();
-            const RoughWp cur = a->track.poseAtS(a->path_s);
-            const RoughWp p0 = a->track.poseAtS(0.0);
-            const RoughWp pe = a->track.poseAtS(L);
-            ROS_ERROR("[CLUSTER-DUMP] V%d slot=%d->%d mode=%d act=%d reason=%s blk=%d "
-                      "s=%.3f/%.3f cur(%.2f,%.2f,%.0fdeg) start(%.2f,%.2f) end(%.2f,%.2f)",
-                      id, a->current_slot, a->target_slot, (int)a->mode, (int)a->action,
-                      a->reason.c_str(), a->blocker_id, a->path_s, L,
-                      cur.x, cur.y, cur.theta * 180.0 / M_PI, p0.x, p0.y, pe.x, pe.y);
-            std::string poly;
-            for (int k = 0; k <= 10; ++k) {
-                const RoughWp p = a->track.poseAtS(L * k / 10.0);
-                char buf[48];
-                snprintf(buf, sizeof(buf), "(%.2f,%.2f%s)", p.x, p.y,
-                         a->track.typeAtS(L * k / 10.0) == WpType::REVERSE ? "R" : "");
-                poly += buf;
-                if (k < 10) poly += "->";
-            }
-            ROS_ERROR("[CLUSTER-DUMP]   V%d path: %s", id, poly.c_str());
-        }
-        // 2) 簇内每对成员的冲突几何(same_dir / 物理坐标 / committed)。
-        std::vector<int> ids(members.begin(), members.end());
-        for (size_t i = 0; i < ids.size(); ++i) {
-            for (size_t j = i + 1; j < ids.size(); ++j) {
-                const VehicleAgent* a = agentById_c(ids[i]);
-                const VehicleAgent* b = agentById_c(ids[j]);
-                if (a && b) rule_engine_->debugDumpConflict(*a, *b);
-            }
-        }
-        ROS_ERROR("[CLUSTER-DUMP] ===== 簇 dump 结束 =====");
-    }
-
     // 持久 onset 文件:把关键现场同时写到统一的 debug_log_dir。
     // 长测排错专用——只在出问题那一刻写,故文件小、不刷屏。
     void onsetLog(const std::string& s) {
@@ -3615,8 +3350,7 @@ public:
     void writeStressResult(const std::string& status,
                            const std::string& failure_type,
                            const std::vector<double>& max_wait,
-                           unsigned long long wedge_episodes,
-                           unsigned long long reciprocal_cycles) const {
+                           unsigned long long wedge_episodes) const {
         if (stress_result_file_.empty()) return;
         ensureParentDirectory(stress_result_file_);
         std::ofstream out(stress_result_file_, std::ios::trunc);
@@ -3632,9 +3366,6 @@ public:
             << "\nticks=" << tick_count_
             << "\nsim_time_s=" << std::fixed << std::setprecision(3) << sim_time_
             << "\nhard_guard_events=" << hard_guard_events_
-            << "\ndeadlock_ticks=" << deadlock_ticks_
-            << "\ndeadlock_recoveries=" << deadlock_recoveries_
-            << "\nreciprocal_cycle_events=" << reciprocal_cycles
             << "\nwedge_episodes=" << wedge_episodes << "\n";
         for (size_t i = 0; i < agents_.size(); ++i) {
             out << "V" << agents_[i].id << "_tasks=" << agents_[i].task_count
@@ -3664,39 +3395,6 @@ public:
     }
 
     // 找「所有」持续死锁环的成员并集:对每辆车跟 blocker 链,若绕回自身则其环成员全部入集。
-    std::set<int> findDeadlockMembers(double min_wait) const {
-        auto idxOf = [&](int id) -> int {
-            for (size_t i = 0; i < agents_.size(); ++i)
-                if (agents_[i].id == id) return static_cast<int>(i);
-            return -1;
-        };
-        std::set<int> members;
-        for (const VehicleAgent& v0 : agents_) {
-            if (v0.mode != VehicleMode::ACTIVE) continue;
-            std::vector<int> path;
-            int cur = v0.id;
-            while (cur >= 0) {
-                auto it = std::find(path.begin(), path.end(), cur);
-                if (it != path.end()) {  // 绕回 → 环 = [it, end)
-                    bool all_stuck = (path.end() - it) >= 2;
-                    for (auto p = it; p != path.end(); ++p) {
-                        int k = idxOf(*p);
-                        if (k < 0 || agents_[k].wait_time < min_wait) { all_stuck = false; break; }
-                    }
-                    if (all_stuck) for (auto p = it; p != path.end(); ++p) members.insert(*p);
-                    break;
-                }
-                path.push_back(cur);
-                int k = idxOf(cur);
-                if (k < 0 || agents_[k].mode != VehicleMode::ACTIVE ||
-                    agents_[k].action != VehicleAction::STOP)
-                    break;
-                cur = agents_[k].blocker_id;
-            }
-        }
-        return members;
-    }
-
     // 批处理模式:紧凑循环跑 ticks 拍(跳过 marker)。维护近 N 拍环形历史;首次碰撞那拍
     // dump 全队历史+碰撞对几何,并对其后 kPost 拍逐拍详打;结尾 dump 永久楔死现场。
     bool runBatch(unsigned long long ticks) {
@@ -3710,7 +3408,6 @@ public:
         std::deque<std::string> hist;
         bool first_dumped = false;
         bool wedge_dumped = false;
-        bool multiwedge_dumped = false;
         unsigned long long verbose_until = 0;
         const size_t stress_ring_limit = std::max<size_t>(
             1, static_cast<size_t>(std::ceil(120.0 * pp_.update_rate)));
@@ -3735,13 +3432,12 @@ public:
         }
         bool wedge_active = false;
         unsigned long long wedge_episodes = 0;
-        unsigned long long reciprocal_cycles = 0;
         unsigned long long completed_ticks = 0;
 
         auto fail_stress = [&](const std::string& failure_type) {
             writeStressFailure(failure_type, stress_ring);
             writeStressResult("FAIL", failure_type, max_wait_by_vehicle,
-                              wedge_episodes, reciprocal_cycles);
+                              wedge_episodes);
             ROS_ERROR("[stress] FAIL seed=%d type=%s tick=%llu sim_t=%.3f",
                       cfg_.random_seed, failure_type.c_str(), tick_count_,
                       sim_time_);
@@ -3828,20 +3524,6 @@ public:
 
                 if (new_collision) return fail_stress("HARD_GUARD");
 
-                if (agents_.size() == 2 &&
-                    agents_[0].action == VehicleAction::STOP &&
-                    agents_[1].action == VehicleAction::STOP &&
-                    agents_[0].blocker_id == agents_[1].id &&
-                    agents_[1].blocker_id == agents_[0].id) {
-                    ++reciprocal_cycles;
-                    return fail_stress("RECIPROCAL_WAIT_CYCLE");
-                }
-
-                const std::set<int> formal_deadlock = findDeadlockMembers(25.0);
-                if (!formal_deadlock.empty()) {
-                    return fail_stress("FORMAL_DEADLOCK");
-                }
-
                 for (size_t i = 0; i < agents_.size(); ++i) {
                     if (agents_[i].mode == VehicleMode::ACTIVE &&
                         sim_time_ - last_progress_time[i] >=
@@ -3867,44 +3549,12 @@ public:
                 onsetLog("[FIRST-COLLISION] @tick=" + std::to_string(tick_count_) +
                          " sim_t=" + std::to_string((long long)sim_time_) +
                          "s 涉及对=[" + cp + "]");
-                // churn 信号:每个涉事车「距上次脱困重规划多久」——刚被重规划(Δt 很小)= 很可能
-                // 是 recovery 把它重置成与他车重叠的新 track 撞出来的。
-                for (const auto& q : hard_guard_pairs_) {
-                    for (int id : {q.first, q.second}) {
-                        auto it = last_replan_t_.find(id);
-                        const double dt_re = (it == last_replan_t_.end())
-                            ? -1.0 : (sim_time_ - it->second);
-                        const VehicleAgent* a = agentById_c(id);
-                        onsetLog("[FIRST-COLLISION]   V" + std::to_string(id) +
-                                 " 距上次脱困=" + (dt_re < 0 ? std::string("从未") :
-                                     std::to_string((long long)dt_re) + "s") +
-                                 " gen=" + std::to_string(a ? a->path_gen : -1) +
-                                 " slot=" + std::to_string(a ? a->current_slot : -1) +
-                                 "->" + std::to_string(a ? a->target_slot : -1));
-                    }
-                }
                 onsetDumpHist("FIRST-COLLISION 前 " + std::to_string(hist.size()) +
                               " 拍历史(看 gen 是否刚跳变=刚被脱困重置)", hist);
                 ROS_WARN("[HIST] ====== 碰撞前 %zu 拍全队历史 ======", hist.size());
                 for (const std::string& snap : hist) ROS_WARN("[HIST]\n%s", snap.c_str());
                 ROS_WARN("[HIST] ====== 碰撞对冲突几何 ======");
                 for (const auto& q : hard_guard_pairs_) dumpPair(q.first, q.second);
-            }
-
-            // 多车紧楔 onset(24h 杀手):≥3 车持续闭环(wait≥15s)首次出现 → 一次性 dump 到
-            // 持久文件 + 历史。这是 B(40s前瞻)够不着、recovery 治不了的那类,要抓它怎么形成的。
-            if (!stress_quiet_ && !multiwedge_dumped) {
-                const std::set<int> mw3 = findDeadlockMembers(15.0);
-                if (mw3.size() >= 3) {
-                    multiwedge_dumped = true;
-                    std::string ms;
-                    for (int id : mw3) ms += "V" + std::to_string(id) + " ";
-                    onsetLog("[MULTIWEDGE] @tick=" + std::to_string(tick_count_) +
-                             " sim_t=" + std::to_string((long long)sim_time_) +
-                             "s ≥3车紧楔首现 成员=[" + ms + "]");
-                    onsetDumpHist("MULTIWEDGE 前 " + std::to_string(hist.size()) + " 拍历史", hist);
-                    dumpDeadlockCluster(mw3);
-                }
             }
 
             // 楔死现场一次性诊断:任一车 wait 首次超阈值 → 回放历史 + 全队 + 卡死车几何。
@@ -3929,8 +3579,6 @@ public:
                 for (const auto& q : hard_guard_pairs_) dumpPair(q.first, q.second);
             }
 
-            // 死锁看门狗(C):检测持续环 → 受害车从当前位姿重规划脱困。每 5 拍查一次。
-            if (k % 5 == 0) runDeadlockRecovery();
             updateSnapshotWedgeTrigger();
 
             if (!stress_quiet_ && (k + 1) % progress == 0) {
@@ -3945,7 +3593,7 @@ public:
 
         if (stress_watchdog_enabled_) {
             writeStressResult("PASS", "", max_wait_by_vehicle,
-                              wedge_episodes, reciprocal_cycles);
+                              wedge_episodes);
             ROS_WARN("[stress] PASS seed=%d ticks=%llu sim_t=%.3f",
                      cfg_.random_seed, tick_count_, sim_time_);
             return false;
@@ -3968,11 +3616,9 @@ public:
             pairs += "V" + std::to_string(p.first) + "-V" +
                      std::to_string(p.second) + " ";
         ROS_WARN("[batch] ==== 汇总: ticks=%llu sim_t=%.0fs | 碰撞(hard_guard)事件=%llu "
-                 "首次@tick=%llu 涉及对=[%s] | 死锁检出拍=%llu 重规划脱困=%llu | "
-                 "最大wait=%.1fs(V%d) ====",
+                 "首次@tick=%llu 涉及对=[%s] | 最大wait=%.1fs(V%d) ====",
                  tick_count_, sim_time_, hard_guard_events_, first_guard_tick_,
-                 pairs.c_str(), deadlock_ticks_, deadlock_recoveries_, max_wait,
-                 stuck_id);
+                 pairs.c_str(), max_wait, stuck_id);
         for (size_t i = 0; i < agents_.size(); ++i) {
             const double active_seconds = std::accumulate(
                 action_seconds[i].begin(), action_seconds[i].end(), 0.0);
@@ -4018,7 +3664,7 @@ public:
                  "reservation_create=%llu reservation_update=%llu "
                  "reservation_delete=%llu ordinary_create=%llu "
                  "a1_create=%llu terminal_create=%llu inside_create=%llu "
-                 "braking_create=%llu deadlock_create=%llu "
+                 "braking_create=%llu "
                  "multi_vehicle_create=%llu other_create=%llu "
                  "duplicate_pair_authority=%llu",
                  dynamic.baseline_conflicts, dynamic.crossing_conflicts,
@@ -4050,7 +3696,6 @@ public:
                  dynamic.reservation_create_terminal,
                  dynamic.reservation_create_already_inside,
                  dynamic.reservation_create_braking_safety,
-                 dynamic.reservation_create_deadlock,
                  dynamic.reservation_create_multi_vehicle,
                  dynamic.reservation_create_other,
                  dynamic.duplicate_pair_authority_overrides);
@@ -4069,7 +3714,7 @@ public:
                  "reservation_delete=%llu existing_reservation=%llu "
                  "ordinary_create=%llu a1_create=%llu terminal_create=%llu "
                  "inside_create=%llu braking_create=%llu "
-                 "deadlock_create=%llu multi_vehicle_create=%llu "
+                 "multi_vehicle_create=%llu "
                  "other_create=%llu",
                  executed.far_periods, executed.mid_periods,
                  executed.near_periods, executed.legacy_periods,
@@ -4103,7 +3748,6 @@ public:
                  executed.reservation_create_terminal,
                  executed.reservation_create_already_inside,
                  executed.reservation_create_braking_safety,
-                 executed.reservation_create_deadlock,
                  executed.reservation_create_multi_vehicle,
                  executed.reservation_create_other);
         const auto& a1_service_metrics = rule_engine_->a1ServiceMetrics();
@@ -4141,10 +3785,8 @@ public:
                  a1_launch_metrics_.released_after_hold,
                  max_launch_hold, a1_launch_holds_.size());
         ROS_WARN("[BATCH_RUNTIME] requested_ticks=%llu completed_ticks=%llu "
-                 "real_sim_t=%.1f dt=%.3f wedge_episodes=%llu "
-                 "reciprocal_stop_cycles=%llu",
-                 ticks, completed_ticks, sim_time_, dt, wedge_episodes,
-                 reciprocal_cycles);
+                 "real_sim_t=%.1f dt=%.3f wedge_episodes=%llu",
+                 ticks, completed_ticks, sim_time_, dt, wedge_episodes);
         return hard_guard_events_ > 0;
     }
     bool batchMode() const { return cfg_batch_ticks_ > 0; }

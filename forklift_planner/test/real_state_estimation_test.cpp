@@ -16,6 +16,7 @@ int main() {
     using forklift_planner::multi_vehicle::ArcLengthSpeedWindow;
     using forklift_planner::multi_vehicle::PathTrack;
     using forklift_planner::multi_vehicle::selectRealProjection;
+    using forklift_planner::multi_vehicle::signedPathMotionDirection;
 
     ArcLengthSpeedWindow speed_window(0.4);
     const double samples[] = {0.00, 0.01, 0.01, 0.03, 0.04};
@@ -54,6 +55,42 @@ int main() {
         projection.selected_heading_error > 0.1 ||
         projection.candidate_count < 2) {
         return fail("projection selected the closer opposite-motion branch");
+    }
+
+    RoughPath retreat_path{
+        RoughWp{0.0, 0.0, 0.0, WpType::FORWARD},
+        RoughWp{1.0, 0.0, 0.0, WpType::FORWARD},
+    };
+    PathTrack retreat_track;
+    retreat_track.set(retreat_path);
+    const auto retreat_projection = selectRealProjection(
+        retreat_track, 0.70, 0.0, 0.0, 0.80, 0.10, 0.1,
+        0.30, 0.80, true, M_PI, 0.08, -1);
+    if (retreat_projection.path_s >= 0.80 - 1e-9) {
+        return fail("decreasing-s projection remained monotonic-forward");
+    }
+    ArcLengthSpeedWindow retreat_speed_window(0.4);
+    retreat_speed_window.update(0.0, 0.80, 0.80, 0.1, 0.26, -1);
+    const auto retreat_speed = retreat_speed_window.update(
+        0.1, 0.70, 0.80, 0.1, 0.26, -1);
+    if (retreat_speed.raw_single_step_speed <= 0.0 ||
+        retreat_speed.window_speed <= 0.0) {
+        return fail("decreasing-s motion did not produce positive speed magnitude");
+    }
+
+    RoughPath cusp_path{
+        RoughWp{0.0, 0.0, 0.0, WpType::FORWARD},
+        RoughWp{1.0, 0.0, 0.0, WpType::FORWARD},
+        RoughWp{1.2, 0.0, 0.0, WpType::REVERSE},
+        RoughWp{0.2, 0.0, 0.0, WpType::REVERSE},
+    };
+    PathTrack cusp_track;
+    cusp_track.set(cusp_path);
+    if (signedPathMotionDirection(cusp_track, 1.00, -1) >= 0.0) {
+        return fail("FORWARD-side retreat used the normal cusp look-ahead sign");
+    }
+    if (signedPathMotionDirection(cusp_track, 1.20, -1) <= 0.0) {
+        return fail("REVERSE-side retreat did not invert segment motion sign");
     }
 
     std::cout << "real_state_estimation_test: PASS\n";

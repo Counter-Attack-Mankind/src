@@ -30,7 +30,8 @@ RuleEngine::RuleEngine(const MapParam& mp, const MultiVehicleConfig& cfg)
               },
               [this](const VehicleAgent& a, const VehicleAgent& b) {
                   return unifiedPriority(a, b);
-              }}) {}
+              }}),
+      deadlock_manager_(mp, cfg) {}
 
 bool RuleEngine::shouldLogA1Decision(const VehicleAgent& vehicle,
                                      int blocker_id) {
@@ -146,10 +147,11 @@ void logA1Decision(const std::function<void(const std::string&)>& sink,
 
 RuleEngine::SimSnapshot RuleEngine::snapshot() const {
     return SimSnapshot{conflict_reservations_, a1_coordinator_.snapshot(),
-                       following_pairs_, tokens_, conflicts_, now_};
+                       following_pairs_, tokens_, conflicts_,
+                       deadlock_manager_.snapshot(), now_};
 }
 
-void RuleEngine::restore(const SimSnapshot& s) {
+void RuleEngine::restore(const SimSnapshot& s, bool restore_deadlock) {
     for (const auto& current : conflict_reservations_) {
         if (s.reservations.count(current.first) == 0) {
             logConflictReservation(coord_log_sink_, current.first, "delete",
@@ -171,6 +173,7 @@ void RuleEngine::restore(const SimSnapshot& s) {
     following_pairs_ = s.following_pairs;
     tokens_ = s.tokens;
     conflicts_ = s.conflicts;
+    if (restore_deadlock) deadlock_manager_.restore(s.deadlock);
     now_ = s.now;
 }
 
@@ -196,10 +199,6 @@ double RuleEngine::speedForAction(VehicleAction action) const {
 int RuleEngine::priorityWinner(const VehicleAgent& a,
                                const VehicleAgent& b) const {
     if (!cfg_.enable_priority_tiebreak) return -1;
-
-    // §9 破环车临时最高优先级:跨层一致——pairwise 也必须让破环车赢,否则它在资源层
-    // 赢了令牌、却被 pairwise 摁住,环还是破不了。
-    if (a.deadlock_breaker != b.deadlock_breaker) return a.deadlock_breaker ? a.id : b.id;
 
     // 资源前置约束(非任意优先级,§4/§6/§7):若一车要去的目标库位正被另一车占着
     // (a.target==b.current),占用者必须先清出该位、入库者让行——否则入库者抢先开到
@@ -1018,7 +1017,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
     };
     auto brakeBefore = [&](VehicleAgent& v, double conflict_enter_s,
                            int other_id) {
-        if (v.deadlock_breaker) return;
         const double stop_s = std::max(0.0, conflict_enter_s - kStopBuffer);
         const double distance = stop_s - v.path_s;
         const double speed = std::max(0.0, v.current_speed);
@@ -1135,6 +1133,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         for (size_t j = i + 1; j < vehicles.size(); ++j) {
             VehicleAgent& b = vehicles[j];
             if (!b.active() || predictions[j].empty()) continue;
+            if (deadlock_manager_.passOverride(a.id, b.id)) continue;
 
             const std::pair<int, int> key{std::min(a.id, b.id),
                                           std::max(a.id, b.id)};
@@ -2253,7 +2252,6 @@ void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles,
     };
     for (VehicleAgent& v : vehicles) {
         if (!v.active()) continue;
-        if (v.deadlock_breaker) continue;  // 破环车豁免:它正被授权冲出环
         if (v.requested_action == VehicleAction::STOP) continue;
         // 前探距离必须足够远,让车「早早停在冲突区外、留出间隙」,而不是冲到贴上才刹
         // (低速时 brake_dist 极小,只算它会一直蹭到接触才停=楔死)。故在刹车距离之外
@@ -2333,11 +2331,6 @@ void RuleEngine::applyRequestedActions(std::vector<VehicleAgent>& vehicles,
             continue;
         }
 
-        // 死锁打破豁免倒计时：豁免期内不允许规则层将车辆降为 STOP
-        if (v.cycle_break_immunity > 0.0) {
-            v.cycle_break_immunity = std::max(0.0, v.cycle_break_immunity - dt);
-        }
-
         const VehicleAction prev = v.action;            // last cycle's output
         VehicleAction req = v.requested_action;         // this cycle's rules
 
@@ -2347,44 +2340,6 @@ void RuleEngine::applyRequestedActions(std::vector<VehicleAgent>& vehicles,
             v.ttc_stop_hold_remaining = std::max(
                 0.0, v.ttc_stop_hold_remaining - dt);
             if (v.reason == "clear") v.reason = "ttc_stop_hold";
-        }
-
-        // 死锁豁免：仅当 blocker 确实是死锁环成员（等待链最终指回 v）
-        // 时才降为 CREEP；若 blocker 只是恰好停着等第三方（非死锁），
-        // 安全第一，保持 STOP，不能朝停着的车 CREEP 过去。
-        if (v.ttc_stop_hold_remaining <= 1e-9 &&
-            v.cycle_break_immunity > 0.0 && req == VehicleAction::STOP) {
-            bool blocker_in_cycle = false;
-            if (v.blocker_id >= 0) {
-                int cur_id = v.blocker_id;
-                const int kMaxHops = static_cast<int>(vehicles.size()) + 1;
-                for (int hop = 0; hop < kMaxHops && cur_id >= 0; ++hop) {
-                    if (cur_id == v.id) { blocker_in_cycle = true; break; }
-                    int next_id = -1;
-                    for (const VehicleAgent& o : vehicles) {
-                        if (o.id == cur_id) {
-                            if (o.action == VehicleAction::STOP && o.blocker_id >= 0)
-                                next_id = o.blocker_id;
-                            break;
-                        }
-                    }
-                    cur_id = next_id;
-                }
-            }
-            if (blocker_in_cycle) {
-                req = VehicleAction::CREEP;  // 验证为死锁环，缓行打破
-            } else {
-                // blocker 不是死锁环成员，安全第一
-                v.cycle_break_immunity = 0.0;
-            }
-        }
-
-        // §9 破环车保底:即便某层仍要它 STOP,也强制至少 CREEP 冲出环(它已在资源/
-        // 优先级层拿到最高优先级,这里保证动作落地)。硬护栏仍兜底防真碰撞。
-        if (v.ttc_stop_hold_remaining <= 1e-9 &&
-            v.deadlock_breaker && req == VehicleAction::STOP) {
-            req = VehicleAction::CREEP;
-            v.reason = "deadlock_break";
         }
 
         if (hold <= 0.0) {                              // smoothing disabled
@@ -2409,57 +2364,6 @@ void RuleEngine::applyRequestedActions(std::vector<VehicleAgent>& vehicles,
                 v.action_hold_remaining = hold;
             }
         }
-    }
-}
-
-void RuleEngine::breakDeadlockCycles(std::vector<VehicleAgent>& vehicles) {
-    const size_t n = vehicles.size();
-
-    auto indexOfId = [&](int id) -> int {
-        for (size_t i = 0; i < n; ++i) {
-            if (vehicles[i].id == id) return static_cast<int>(i);
-        }
-        return -1;
-    };
-    auto waitEdge = [&](int i) -> int {
-        const VehicleAgent& v = vehicles[i];
-        if (v.mode != VehicleMode::ACTIVE) return -1;
-        if (v.action != VehicleAction::STOP) return -1;  // only fully-stopped waits
-        if (v.blocker_id < 0) return -1;
-        return indexOfId(v.blocker_id);
-    };
-
-    std::vector<int> visit_state(n, 0);  // 0 unvisited, 1 in-progress, 2 done
-    for (size_t s = 0; s < n; ++s) {
-        if (visit_state[s] != 0) continue;
-        std::vector<int> path;
-        int cur = static_cast<int>(s);
-        while (cur >= 0 && visit_state[cur] == 0) {
-            visit_state[cur] = 1;
-            path.push_back(cur);
-            cur = waitEdge(cur);
-        }
-        if (cur >= 0 && visit_state[cur] == 1) {
-            const auto cycle_begin = std::find(path.begin(), path.end(), cur);
-            int release = -1;
-            int release_id = std::numeric_limits<int>::max();
-            for (auto p = cycle_begin; p != path.end(); ++p) {
-                if (vehicles[*p].id < release_id) {
-                    release_id = vehicles[*p].id;
-                    release = *p;
-                }
-            }
-            if (release >= 0) {
-                VehicleAgent& r = vehicles[release];
-                r.action = VehicleAction::YIELD;
-                r.requested_action = VehicleAction::YIELD;
-                r.action_hold_remaining = 0.0;
-                r.cycle_break_immunity = 0.6;  // 0.6s 内规则层不得将该车重新降为 STOP
-                r.wait_time = 0.0;
-                r.reason = "cycle_break";
-            }
-        }
-        for (int p : path) visit_state[p] = 2;
     }
 }
 
@@ -2558,7 +2462,7 @@ void RuleEngine::arbitrateResources(std::vector<VehicleAgent>& vehicles,
                 rq.task_count = v.task_count;
                 rq.already_inside = bodyInside(v, reqs[k]);
                 rq.already_has_token = (v.id == holder);
-                rq.emergency_or_clear = v.deadlock_breaker;  // §9 破环车临时最高
+                rq.emergency_or_clear = false;
                 rq.starving = v.wait_time > cfg_.starvation_wait_time;
                 rq.eta = rq.already_inside
                              ? 0.0
@@ -2617,108 +2521,76 @@ void RuleEngine::refreshResourceSpans(std::vector<VehicleAgent>& vehicles) {
     }
 }
 
-void RuleEngine::resolveDeadlock(std::vector<VehicleAgent>& vehicles, double dt) {
-    // §9/§11.11:用上一周期残留的等待边(blocker_id,本周期 reset 前仍有效)建等待图,
-    // 检测环,选破环车给临时最高优先级(deadlock_breaker)。等待图是功能图(每车至多
-    // 一条出边=它在等的 blocker),跟指针即可找环。
-    constexpr double kBreakerHold = 2.0;  // 破环身份迟滞保持秒数(防闪烁蹭行)
-    const size_t n = vehicles.size();
-    // 迟滞:保持期未到的破环车继续是破环车(它一动起来就不再 STOP 等待、环检测会消失,
-    // 若不保持就会标志闪烁→被旧层反复摁停→蹭行)。保持期到了才清。
-    for (VehicleAgent& v : vehicles) {
-        v.deadlock_breaker_hold = std::max(0.0, v.deadlock_breaker_hold - dt);
-        v.deadlock_breaker = (v.deadlock_breaker_hold > 0.0);
-    }
-
-    auto indexOfId = [&](int id) -> int {
-        for (size_t i = 0; i < n; ++i)
-            if (vehicles[i].id == id) return static_cast<int>(i);
-        return -1;
-    };
-    // 破环车必须选「真正能往前走的那辆」(§16):用车身几何实测——车 i 沿固定路径
-    // 前进一小步(probe),车身是否仍与任何其它车的当前车身不重叠。能=它前进可脱困、
-    // 抖开环;不能(前方就是对冲车)=放它也是被硬护栏摁死、环永远破不了。这修正了
-    // 旧的 min-id 盲选:楔死时常把「动不了的那辆」选成破环车而徒劳。
-    auto bodyAtCurrent = [&](const VehicleAgent& v) {
-        const double s =
-            (v.mode == VehicleMode::DWELL) ? v.track.length() : v.path_s;
-        return makeBody(v.track.poseAtS(s), mp_, 0.0);
-    };
-    auto canStepForward = [&](int i) -> bool {
-        const VehicleAgent& v = vehicles[i];
-        if (v.track.empty()) return false;
-        constexpr double kProbe = 0.10;  // 前探约半身,足以判别前方是否被对冲车堵死
-        const double s_next = std::min(v.track.length(), v.path_s + kProbe);
-        const OBB body_next = makeBody(v.track.poseAtS(s_next), mp_, 0.0);
-        for (size_t j = 0; j < n; ++j) {
-            if (static_cast<int>(j) == i) continue;
-            const VehicleAgent& o = vehicles[j];
-            if (o.track.empty() || o.mode == VehicleMode::NEED_TASK) continue;
-            if (overlaps(body_next, bodyAtCurrent(o))) return false;
+void RuleEngine::applyRecoveryPolicy(std::vector<VehicleAgent>& vehicles) {
+    const RecoveryDirective& recovery = deadlock_manager_.directive();
+    if (!recovery.active()) return;
+    for (VehicleAgent& vehicle : vehicles) {
+        if (vehicle.id == recovery.retreat_vehicle_id) {
+            applyActionRequest(vehicle, VehicleAction::STOP,
+                               recovery.phase == RecoveryPhase::PASS
+                                   ? "deadlock_pass_hold"
+                                   : "deadlock_retreat_override",
+                               recovery.pass_vehicle_id);
+            continue;
         }
-        return true;
-    };
-    auto waitEdge = [&](int i) -> int {
-        const VehicleAgent& v = vehicles[i];
-        if (v.mode != VehicleMode::ACTIVE) return -1;
-        if (v.action != VehicleAction::STOP) return -1;  // 只看完全停住的等待
-        if (v.blocker_id < 0) return -1;
-        return indexOfId(v.blocker_id);
-    };
-
-    std::vector<int> state(n, 0);  // 0 未访 1 在栈 2 完成
-    for (size_t s = 0; s < n; ++s) {
-        if (state[s] != 0) continue;
-        std::vector<int> path;
-        int cur = static_cast<int>(s);
-        while (cur >= 0 && state[cur] == 0) {
-            state[cur] = 1;
-            path.push_back(cur);
-            cur = waitEdge(cur);
-        }
-        if (cur >= 0 && state[cur] == 1) {  // 找到环:从 cur 首次出现到末尾
-            const auto begin = std::find(path.begin(), path.end(), cur);
-            // 协调图第5步:严格全序(unifiedPriority)使"谁让谁"关系本应无环 ⇒ 这里检测到
-            // 环=无环保证被破坏的 bug 信号(通常是 priorityWinner 里的 slot 资源前置约束
-            // 成环,即任务分配出现循环占位)。降为断言:**告警**把它暴露出来。破环逃生暂留
-            // 作安全网(确认长跑不再告警后可移除)。
-            {
-                std::string ring;
-                for (auto p = begin; p != path.end(); ++p) {
-                    if (p != begin) ring += "->";
-                    ring += "V" + std::to_string(vehicles[*p].id);
-                }
-                ROS_WARN_THROTTLE(
-                    5.0,
-                    "[DIAG cycle] 等待图检测到环 %s —— 严格全序下本不该出现,"
-                    "疑为 slot 资源前置约束成环(循环占位)。暂由破环逃生兜底。",
-                    ring.c_str());
+        if (vehicle.id != recovery.pass_vehicle_id) continue;
+        if (recovery.phase == RecoveryPhase::RETREAT ||
+            recovery.phase == RecoveryPhase::UNRESOLVED ||
+            recovery.phase == RecoveryPhase::ABORT) {
+            applyActionRequest(vehicle, VehicleAction::STOP,
+                               "deadlock_pair_hold",
+                               recovery.retreat_vehicle_id);
+        } else if (recovery.phase == RecoveryPhase::PASS &&
+                   vehicle.blocker_id == recovery.retreat_vehicle_id) {
+            if (vehicle.reason == "hard_collision_guard" ||
+                vehicle.reason.rfind("forward_clearance", 0) == 0) {
+                continue;
             }
-            // 选破环车:优先「前进一步能脱困」的车(canStepForward),同类里取 id 最小
-            // (确定性,§19)。若环内无人能前进(真·楔死,需倒车的罕见情形),退回 id
-            // 最小。只放一辆:其余正常让行停住——绝不会两辆对冲车一起被放而相撞。
-            int breaker = -1, best_id = std::numeric_limits<int>::max();
-            int breaker_any = -1, best_any = std::numeric_limits<int>::max();
-            for (auto p = begin; p != path.end(); ++p) {
-                const int vid = vehicles[*p].id;
-                if (vid < best_any) { best_any = vid; breaker_any = *p; }
-                if (canStepForward(*p) && vid < best_id) {
-                    best_id = vid;
-                    breaker = *p;
-                }
-            }
-            if (breaker < 0) breaker = breaker_any;  // 无人能前进→退回 min-id
-            // 破环逃生已停用(降为纯检测+告警):在「禁止倒车」前提下,前向破环本身是碰撞源
-            // ——它豁免让行方刹车、强推它前冲脱困,而前方就是环里别的车 → 直接顶上去(实测
-            // V2 brkr=1 被强推顶进卡死的 V7,此后两车贴死、硬护栏每拍触发=那 16857 次"碰撞")。
-            // 既然不能倒车,环就应是「静止对峙(楔死)」而非「对撞」:安全优先,先把碰撞降级。
-            // 真正出路是从源头不让环形成(出库口/出口检查),见 草履虫规则_协调图统一架构设计。
-            (void)breaker; (void)kBreakerHold;
-            // vehicles[breaker].deadlock_breaker = true;          // 已停用
-            // vehicles[breaker].deadlock_breaker_hold = kBreakerHold;
+            vehicle.blocker_id = -1;
+            vehicle.requested_action = VehicleAction::NOMINAL;
+            vehicle.reason = "deadlock_pass";
         }
-        for (int p : path) state[p] = 2;
     }
+}
+
+void RuleEngine::applyRecoveryDirectiveToOutput(
+    std::vector<VehicleAgent>& vehicles) {
+    applyRecoveryPolicy(vehicles);
+    const RecoveryDirective& recovery = deadlock_manager_.directive();
+    if (!recovery.active()) return;
+    for (VehicleAgent& vehicle : vehicles) {
+        if (vehicle.id != recovery.retreat_vehicle_id &&
+            vehicle.id != recovery.pass_vehicle_id) continue;
+        if (vehicle.id == recovery.pass_vehicle_id &&
+            recovery.phase == RecoveryPhase::PASS &&
+            vehicle.reason != "deadlock_pass") continue;
+        vehicle.action = vehicle.requested_action;
+        vehicle.current_speed = 0.0;
+    }
+}
+
+void RuleEngine::observeDeadlock(std::vector<VehicleAgent>& vehicles,
+                                 double dt, bool emit_logs) {
+    std::vector<DeadlockPairGeometry> geometry_items;
+    for (size_t i = 0; i < vehicles.size(); ++i) {
+        const VehicleAgent& a = vehicles[i];
+        if (a.mode != VehicleMode::ACTIVE ||
+            a.action != VehicleAction::STOP || a.blocker_id < 0) continue;
+        for (size_t j = i + 1; j < vehicles.size(); ++j) {
+            const VehicleAgent& b = vehicles[j];
+            if (b.mode != VehicleMode::ACTIVE ||
+                b.action != VehicleAction::STOP ||
+                a.blocker_id != b.id || b.blocker_id != a.id) continue;
+            DeadlockPairGeometry geometry;
+            geometry.vehicle_a = a.id;
+            geometry.vehicle_b = b.id;
+            geometry.path_gen_a = a.path_gen;
+            geometry.path_gen_b = b.path_gen;
+            geometry.zones = findConflictZones(a, b);
+            geometry_items.push_back(std::move(geometry));
+        }
+    }
+    deadlock_manager_.update(vehicles, geometry_items, dt, emit_logs);
 }
 
 void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
@@ -2726,10 +2598,11 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
                         bool reuse_ordinary_coordination,
                         const RollingDynamicDecision*
                             period_ordinary_decision) {
+    observeDeadlock(vehicles, dt, debug_log_source_ == "REAL");
+
     conflicts_.clear();
     last_rolling_dynamic_decision_ = RollingDynamicDecision{};
     now_ += dt;                      // 内部仿真时钟(令牌防抖/超时)
-    resolveDeadlock(vehicles, dt);   // Phase4:用上周期等待边检测环、选破环车(reset 前)
     refreshResourceSpans(vehicles);  // Phase 2:刷新每车路径的资源占用缓存
 
     previous_following_followers_.clear();
@@ -2753,9 +2626,14 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
     }
 
     for (VehicleAgent& v : vehicles) {
+        const RecoveryDirective& recovery = deadlock_manager_.directive();
+        if (recovery.phase == RecoveryPhase::PASS &&
+            v.id == recovery.pass_vehicle_id &&
+            v.blocker_id == recovery.retreat_vehicle_id) {
+            v.ttc_stop_hold_remaining = 0.0;
+        }
         if (v.mode != VehicleMode::ACTIVE) {
             v.blocker_id = -1;
-            v.cycle_break_immunity = 0.0;
             v.requested_action = VehicleAction::STOP;
             v.reason = "not_active";
             v.ttc_stop_hold_remaining = 0.0;
@@ -2801,11 +2679,11 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
     enforceFutureA1Admission(vehicles, dt);
     enforceDepartureClusterCommitments(vehicles, dt);
     resolveTargetSlotOccupancy(vehicles);  // slot-mouth queueing (spec 6/7)
+    applyRecoveryPolicy(vehicles);
     // Safety validation runs after all coordination/special-resource outputs
     // and may only reject a physically illegal next control step.
     enforceForwardClearance(vehicles, dt);
     applyRequestedActions(vehicles, dt);
-    if (cfg_.enable_cycle_break) breakDeadlockCycles(vehicles);  // spec 16
 
     for (VehicleAgent& v : vehicles) {
         if (v.mode != VehicleMode::ACTIVE) continue;  // DWELL/NEED_TASK do not accumulate

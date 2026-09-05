@@ -13,6 +13,7 @@
 #include "forklift_map/map_param.h"
 #include "forklift_planner/multi_vehicle/a1/a1_coordinator.h"
 #include "forklift_planner/multi_vehicle/dynamic_speed_coordination.h"
+#include "forklift_planner/multi_vehicle/deadlock/deadlock_manager.h"
 #include "forklift_planner/multi_vehicle/multi_vehicle_config.h"
 #include "forklift_planner/multi_vehicle/spatiotemporal_interaction.h"
 #include "forklift_planner/multi_vehicle/traffic_resource.h"
@@ -122,6 +123,7 @@ public:
     void setCoordLogSink(const std::function<void(const std::string&)>& sink) {
         coord_log_sink_ = sink;
         a1_coordinator_.setCoordLogSink(sink);
+        deadlock_manager_.setLogSink(sink);
     }
     // Diagnostic metadata only. It never participates in a rule decision.
     void setDebugLogContext(const std::string& source, uint64_t plan_id,
@@ -174,7 +176,14 @@ public:
                 bool reuse_ordinary_coordination = false,
                 const RollingDynamicDecision* period_ordinary_decision =
                     nullptr);
+    void observeDeadlock(std::vector<VehicleAgent>& vehicles, double dt,
+                         bool emit_logs);
+    void applyRecoveryDirectiveToOutput(
+        std::vector<VehicleAgent>& vehicles);
     double speedForAction(VehicleAction action) const;
+    const RecoveryDirective& recoveryDirective() const {
+        return deadlock_manager_.directive();
+    }
 
     // 前瞻仿真用:快照/恢复跨周期持久状态,使「克隆-空跑」忠实复现真实协调(确定性⇒预测准)。
     struct SimSnapshot {
@@ -186,10 +195,11 @@ public:
         // rewrites it on every predicted step. Snapshot it as well so a
         // rollout cannot leak its final predicted frame into current RViz.
         std::vector<ConflictMarker> conflicts;
+        DeadlockManager::Snapshot deadlock;
         double now = 0.0;
     };
     SimSnapshot snapshot() const;
-    void restore(const SimSnapshot& s);
+    void restore(const SimSnapshot& s, bool restore_deadlock = true);
     // Read-only stress-test diagnostics. This exposes the current commitment
     // without creating, changing, or releasing any coordination state.
     const FutureA1Commitment& futureA1Commitment() const {
@@ -252,7 +262,6 @@ public:
         unsigned long long reservation_create_terminal = 0;
         unsigned long long reservation_create_already_inside = 0;
         unsigned long long reservation_create_braking_safety = 0;
-        unsigned long long reservation_create_deadlock = 0;
         unsigned long long reservation_create_multi_vehicle = 0;
         unsigned long long reservation_create_other = 0;
     };
@@ -395,15 +404,12 @@ private:
     void applyFollowingSuggestions(std::vector<VehicleAgent>& vehicles);
     // 普适前向净空护栏:任何车若沿自身固定路径在自己刹车距离内会撞上另一辆车的当前
     // 车身,提前 STOP(留余量、干净对停)。堵死 following/crossing 分类接缝处「两套都
-    // 没刹→NOMINAL 直撞停着的车→十字楔死」的漏洞。破环车豁免。比硬护栏早刹留余量。
+    // 没刹→NOMINAL 直撞停着的车→十字楔死」的漏洞。比硬护栏早刹留余量。
     void enforceForwardClearance(std::vector<VehicleAgent>& vehicles,
                                  double dt);
     void resolveTargetSlotOccupancy(std::vector<VehicleAgent>& vehicles);
     void applyRequestedActions(std::vector<VehicleAgent>& vehicles, double dt);
-    void breakDeadlockCycles(std::vector<VehicleAgent>& vehicles);
-    // Phase 4(§9/§11.11):用上一周期的等待边(blocker_id)建等待图,检测环,
-    // 按 §9 顺序选破环车并置 deadlock_breaker(资源/优先级层据此给它临时最高优先级)。
-    void resolveDeadlock(std::vector<VehicleAgent>& vehicles, double dt);
+    void applyRecoveryPolicy(std::vector<VehicleAgent>& vehicles);
     // Phase 2:track 变化时,用资源地图重算每车路径的资源占用区间(缓存到 agent)。
     void refreshResourceSpans(std::vector<VehicleAgent>& vehicles);
     // Phase 2.2:对 capacity=1 互斥资源(窄道/路口/货位口)按统一优先级发令牌,
@@ -470,6 +476,7 @@ private:
     RollingDynamicDecision last_rolling_dynamic_decision_;
     double now_ = 0.0;  // 内部仿真时钟(每 decide 累加 dt),供令牌防抖/超时用
     A1Coordinator a1_coordinator_;
+    DeadlockManager deadlock_manager_;
 };
 
 }  // namespace multi_vehicle

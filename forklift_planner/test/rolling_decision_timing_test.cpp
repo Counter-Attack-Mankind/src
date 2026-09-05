@@ -184,6 +184,7 @@ int main() {
     std::vector<VehicleAgent> mid{
         crossingVehicle(0, 1.50, false),
         crossingVehicle(1, 1.90, true)};
+    mid[1].path_s = 0.40;
     mid_engine.decide(mid, 0.1, 15.0);
     const std::vector<PeriodTarget> mid_targets = captureTargets(mid);
     const auto mid_decision = mid_engine.lastRollingDynamicDecision();
@@ -268,8 +269,9 @@ int main() {
     // create an already-inside reservation.
     RuleEngine inside_engine(map_param, config);
     std::vector<VehicleAgent> inside{
-        crossingVehicle(0, 0.30, false),
-        crossingVehicle(1, 0.79, true)};
+        crossingVehicle(0, 0.80, false),
+        crossingVehicle(1, 1.05, true)};
+    inside[1].path_s = 0.25;
     inside_engine.decide(inside, 0.1, 15.0);
     const auto inside_decision =
         inside_engine.lastRollingDynamicDecision();

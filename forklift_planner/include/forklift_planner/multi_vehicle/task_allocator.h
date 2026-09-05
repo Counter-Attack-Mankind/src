@@ -77,10 +77,6 @@ public:
         row_visit_counts_ = s.row;
         task_rng_ = s.task_rng;
     }
-    // 死锁恢复(C):给一辆卡死车从其「当前实际位姿」重规划到一个空库位,使其驶离争用区。
-    // 不倒车;成功置新 track 并返回 true。失败(无可行目标/路径)返回 false。
-    bool replanFromPose(VehicleAgent& vehicle,
-                        const std::vector<VehicleAgent>& all);
     const char* rejectReasonName(TaskRejectReason reason) const;
 
     bool hasValidOutbound(int slot) const;

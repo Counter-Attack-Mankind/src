@@ -85,18 +85,10 @@ struct MultiVehicleConfig {
     // are policy, not safety. Set both false for pure collision avoidance: it is
     // provably collision-free but will deadlock on symmetric conflicts.
     bool enable_priority_tiebreak = true;  // who proceeds in a symmetric conflict
-    // global_stall_release(盲目轻推卡住的车)与资源模型冲突:它每帧把 res_wait 的车
-    // 往前蹭 → STOP↔CREEP 抖动"磨磨唧唧"(§15 第三类)。资源模型靠"优先级 winner 必能
-    // 通过 + 出口检查 + cycle_break"提供活性,无需盲推。故默认关闭。
-    bool enable_stall_release = false;     // (旧兜底,已被资源模型取代)
-    // 旧启发式死锁兜底:与资源模型互掐(顺 res_wait 链误判成环、每帧给 YIELD 与
-    // res_wait STOP 交替→蹭行)。资源活性改由 Phase4 正式等待图提供。落地前先关。
-    bool enable_deadlock_reverse = false;
-    bool enable_cycle_break = false;
-    // 死锁恢复(检测持续环→从当前位姿重规划到别的库位脱困)。这种「开到一半
-    // 发现锁死→重规划脱困」的反应式兜底直接扔掉,改从源头(规则+分配)根治。默认关闭;
-    // 看门狗仍可纯检测(deadlock_ticks 计数),仅不执行重规划动作。
-    bool enable_deadlock_recovery = false;
+    bool deadlock_enabled = true;
+    double deadlock_confirm_time = 4.0;          // s
+    double deadlock_retreat_search_step = 0.05;  // m along path_s
+    double deadlock_retreat_clearance = 0.02;    // m
 
     // 实车模式:位置来自动捕 /object(替代 advanceVehicles 积分),输出 /traj_i + /coord_speed_i
     // 给 pure_pursuit。协调(updateDwellAndTasks/decide/到库DWELL/预测错峰)与 sim 逐字节一致。

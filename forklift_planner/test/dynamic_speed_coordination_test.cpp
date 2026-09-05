@@ -102,7 +102,8 @@ int main() {
     }
 
     const VehicleAgent far_a = crossingVehicle(0, 2.50, false);
-    const VehicleAgent far_b = crossingVehicle(1, 2.90, true);
+    VehicleAgent far_b = crossingVehicle(1, 2.90, true);
+    far_b.path_s = 0.40;
     const auto far_result = evaluate(far_a, far_b, map_param, config);
     if (!far_result.action_selected ||
         far_result.selected_action_a != VehicleAction::NOMINAL ||
@@ -111,7 +112,8 @@ int main() {
     }
 
     const VehicleAgent mid_a = crossingVehicle(0, 1.50, false);
-    const VehicleAgent mid_b = crossingVehicle(1, 1.90, true);
+    VehicleAgent mid_b = crossingVehicle(1, 1.90, true);
+    mid_b.path_s = 0.40;
     const auto mid_baseline = baseline(mid_a, mid_b, map_param, config, 15.0);
     const auto mid_result = evaluate(mid_a, mid_b, map_param, config);
     if (!mid_baseline.event.valid ||
@@ -141,7 +143,8 @@ int main() {
     }
 
     const VehicleAgent near_a = crossingVehicle(0, 0.80, false);
-    const VehicleAgent near_b = crossingVehicle(1, 1.05, true);
+    VehicleAgent near_b = crossingVehicle(1, 1.05, true);
+    near_b.path_s = 0.25;
     const auto near_baseline = baseline(
         near_a, near_b, map_param, config, 15.0);
     const auto near_result = evaluate(near_a, near_b, map_param, config);

@@ -61,6 +61,7 @@ add_executable(multi_vehicle_patrol_node
   src/multi_vehicle/multi_vehicle_config.cpp
   src/multi_vehicle/path_track.cpp
   src/multi_vehicle/a1/a1_coordinator.cpp
+  src/multi_vehicle/deadlock/deadlock_manager.cpp
   src/multi_vehicle/rule_engine.cpp
   src/multi_vehicle/spatiotemporal_interaction.cpp
   src/multi_vehicle/task_allocator.cpp
@@ -126,6 +127,18 @@ if(CATKIN_ENABLE_TESTING)
            COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
                    $<TARGET_FILE:real_state_estimation_test>)
 
+  add_executable(deadlock_manager_test
+    test/deadlock_manager_test.cpp
+    src/multi_vehicle/deadlock/deadlock_manager.cpp
+    src/multi_vehicle/footprint.cpp
+    src/multi_vehicle/path_track.cpp
+  )
+  add_dependencies(deadlock_manager_test ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(deadlock_manager_test ${catkin_LIBRARIES})
+  add_test(NAME deadlock_manager_test
+           COMMAND ${CATKIN_DEVEL_PREFIX}/env.sh
+                   $<TARGET_FILE:deadlock_manager_test>)
+
   add_executable(bridge_ttc_correction_test
     test/bridge_ttc_correction_test.cpp
     src/multi_vehicle/bridge_ttc_correction.cpp
@@ -156,6 +169,7 @@ if(CATKIN_ENABLE_TESTING)
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
     src/multi_vehicle/a1/a1_coordinator.cpp
+    src/multi_vehicle/deadlock/deadlock_manager.cpp
     src/multi_vehicle/rule_engine.cpp
     src/multi_vehicle/spatiotemporal_interaction.cpp
     src/multi_vehicle/traffic_resource_map.cpp
@@ -187,6 +201,7 @@ if(CATKIN_ENABLE_TESTING)
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
     src/multi_vehicle/a1/a1_coordinator.cpp
+    src/multi_vehicle/deadlock/deadlock_manager.cpp
     src/multi_vehicle/rule_engine.cpp
     src/multi_vehicle/spatiotemporal_interaction.cpp
     src/multi_vehicle/traffic_resource_map.cpp
@@ -218,6 +233,7 @@ if(CATKIN_ENABLE_TESTING)
     src/multi_vehicle/footprint.cpp
     src/multi_vehicle/path_track.cpp
     src/multi_vehicle/a1/a1_coordinator.cpp
+    src/multi_vehicle/deadlock/deadlock_manager.cpp
     src/multi_vehicle/rule_engine.cpp
     src/multi_vehicle/spatiotemporal_interaction.cpp
     src/multi_vehicle/traffic_resource_map.cpp

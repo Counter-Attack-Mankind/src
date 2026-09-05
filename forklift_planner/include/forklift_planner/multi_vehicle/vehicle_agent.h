@@ -71,14 +71,6 @@ struct VehicleAgent {
     // this blocks replanning for one complete rolling decision period.
     double ttc_stop_hold_remaining = 0.0;
     double wait_time = 0.0;
-    double cycle_break_immunity = 0.0;  // s remaining where rules cannot re-STOP this vehicle
-    // Phase 4(§9/§11.11):本车被等待图选为破环车。置位后在资源仲裁/优先级裁决中
-    // 获得临时最高优先级(emergency),并被强制至少 CREEP 冲出环,直到环解开。
-    bool deadlock_breaker = false;
-    // 破环身份迟滞保持(秒)。一旦被选为破环车就保持一段时间——否则它一动起来就不再
-    // 是"STOP 等待",环检测立刻消失、标志掉、又被旧层摁停 → 反复闪烁蹭行。保持期内
-    // 持续享最高优先级,直到真正冲出冲突。
-    double deadlock_breaker_hold = 0.0;
     double dwell_remaining = 0.0;
     double path_s = 0.0;
     double current_speed = 0.0;
