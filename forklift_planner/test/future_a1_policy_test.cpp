@@ -48,10 +48,10 @@ int main() {
     if (selected != 1) return fail("earlier candidate did not win");
     std::cout << "B event=SELECT owner=V1 reason=earlier_candidate\n";
 
-    // C. Admission must stop before the most-upstream relevant entry.
-    const std::optional<double> stop_s = futureA1StopS(3.075, 2.175, 0.01);
-    if (!stop_s || !near(*stop_s, 2.165) || *stop_s >= 2.175) {
-        return fail("ordinary conflict entry did not bound stop_s");
+    // C. Admission stops only before the frozen departure entry.
+    const std::optional<double> stop_s = futureA1StopS(3.075, 0.01);
+    if (!stop_s || !near(*stop_s, 3.065) || *stop_s >= 3.075) {
+        return fail("frozen departure entry did not bound stop_s");
     }
 
     // D. A protected seed pulls in an overlapping downstream-owner zone.
@@ -67,7 +67,7 @@ int main() {
         return fail("overlapping second future-exit zone was not protected");
     }
     const auto clustered_stop =
-        futureA1StopS(cluster.upstream_other_enter, std::nullopt, 0.01);
+        futureA1StopS(cluster.upstream_other_enter, 0.01);
     if (!clustered_stop || !near(*clustered_stop, 4.115)) {
         return fail("clustered future-exit stop line was not upstream");
     }
@@ -109,9 +109,8 @@ int main() {
         return fail("actual occupancy inside protected closure was missed");
     }
 
-    // Departure A. TO_B handoff must not relax 0.490 to the downstream
-    // ordinary single-event stop at 0.540.
-    const auto handoff_stop = futureA1StopS(0.500, 0.550, 0.010);
+    // Departure A. The frozen TO_B boundary remains the single source.
+    const auto handoff_stop = futureA1StopS(0.500, 0.010);
     if (!handoff_stop || !near(*handoff_stop, 0.490)) {
         return fail("TO_B handoff relaxed the Future stop boundary");
     }

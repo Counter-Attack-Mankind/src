@@ -804,8 +804,7 @@ void A1Coordinator::enforceFutureA1Admission(
     std::vector<VehicleAgent>& vehicles, double dt,
     const ActionRequest& request_action) {
     if (!future_a1_commitment_.valid() ||
-        !dependencies_.compute_full_conflict_zones ||
-        !dependencies_.current_conflict_zones) {
+        !dependencies_.compute_full_conflict_zones) {
         return;
     }
     VehicleAgent* owner = agentById(vehicles, future_a1_commitment_.owner_id);
@@ -854,49 +853,13 @@ void A1Coordinator::enforceFutureA1Admission(
             future_exit_enter_s = future_selected.s_other_enter;
         }
 
-        bool ordinary_already_inside = false;
-        std::optional<double> ordinary_enter_s;
-        ConflictZone ordinary_selected;
-        const bool owner_is_lo = owner->id < other.id;
-        const VehicleAgent& ordinary_lo = owner_is_lo ? *owner : other;
-        const VehicleAgent& ordinary_hi = owner_is_lo ? other : *owner;
-        const auto ordinary_blocks =
-            dependencies_.current_conflict_zones(ordinary_lo, ordinary_hi);
-        for (const ConflictZone& canonical : ordinary_blocks) {
-            ConflictZone zone = canonical;
-            if (!owner_is_lo) {
-                std::swap(zone.s_self_enter, zone.s_other_enter);
-                std::swap(zone.s_self_exit, zone.s_other_exit);
-            }
-            if (owner->path_s > zone.s_self_exit + 1e-9 ||
-                other.path_s > zone.s_other_exit + 1e-9) {
-                continue;
-            }
-            if (other.path_s > zone.s_other_enter + 1e-9) {
-                ordinary_already_inside = true;
-                ordinary_enter_s = zone.s_other_enter;
-                ordinary_selected = zone;
-                break;
-            }
-            if (!ordinary_enter_s ||
-                zone.s_other_enter < *ordinary_enter_s) {
-                ordinary_enter_s = zone.s_other_enter;
-                ordinary_selected = zone;
-            }
-        }
         if (!future_exit_enter_s) continue;
 
-        const bool already_inside =
-            future_zones.other_already_inside || ordinary_already_inside;
-        const std::optional<double> selected_stop_boundary_s =
-            futureA1StopBoundary(future_exit_enter_s, ordinary_enter_s);
+        const bool already_inside = future_zones.other_already_inside;
+        const double selected_stop_boundary_s = *future_exit_enter_s;
         const std::optional<double> selected_stop_s = futureA1StopS(
-            future_exit_enter_s, ordinary_enter_s, cfg_.a1_stop_margin);
-        if (!selected_stop_boundary_s || !selected_stop_s) continue;
-        const bool ordinary_selected_boundary = ordinary_enter_s &&
-            std::abs(*ordinary_enter_s - *selected_stop_boundary_s) <= 1e-9;
-        const ConflictZone& selected = ordinary_selected_boundary
-            ? ordinary_selected : future_selected;
+            future_exit_enter_s, cfg_.a1_stop_margin);
+        if (!selected_stop_s) continue;
 
         const std::pair<int, int> cluster_key{
             std::min(owner->id, other.id), std::max(owner->id, other.id)};
@@ -913,7 +876,7 @@ void A1Coordinator::enforceFutureA1Admission(
             staged.frozen_owner_track = exit_preview.track;
             staged.seed_indices = future_zones.seed_indices;
             staged.cluster_indices = future_zones.protected_indices;
-            staged.waiter_stop_boundary_s = *selected_stop_boundary_s;
+            staged.waiter_stop_boundary_s = selected_stop_boundary_s;
             staged.waiter_stop_s = *selected_stop_s;
             staged.active = true;
             staged.handed_off_from_future = true;
@@ -959,10 +922,11 @@ void A1Coordinator::enforceFutureA1Admission(
                  << " blocked=V" << other.id
                  << " reason=future_a1_exit_priority early_stop=true"
                  << " holder=V" << owner->id
-                 << " conflict_zone=(" << selected.x << "," << selected.y
+                 << " conflict_zone=(" << future_selected.x << ","
+                 << future_selected.y
                  << ") future_exit_enter_s=" << *future_exit_enter_s
                  << " selected_stop_boundary_s="
-                 << *selected_stop_boundary_s
+                 << selected_stop_boundary_s
                  << " stop_s=" << *selected_stop_s
                  << " other_s=" << other.path_s
                  << " already_inside=false";

@@ -158,24 +158,12 @@ inline int selectFutureA1Candidate(
     return best == nullptr ? -1 : best->vehicle_id;
 }
 
-inline std::optional<double> futureA1StopBoundary(
-    const std::optional<double>& future_exit_enter_s,
-    const std::optional<double>& ordinary_enter_s) {
-    if (future_exit_enter_s && ordinary_enter_s) {
-        return std::min(*future_exit_enter_s, *ordinary_enter_s);
-    }
-    if (future_exit_enter_s) return future_exit_enter_s;
-    return ordinary_enter_s;
-}
-
 inline std::optional<double> futureA1StopS(
-    const std::optional<double>& future_exit_enter_s,
-    const std::optional<double>& ordinary_enter_s,
+    const std::optional<double>& frozen_departure_enter_s,
     double stop_buffer) {
-    const std::optional<double> boundary =
-        futureA1StopBoundary(future_exit_enter_s, ordinary_enter_s);
-    if (!boundary) return std::nullopt;
-    return std::max(0.0, *boundary - std::max(0.0, stop_buffer));
+    if (!frozen_departure_enter_s) return std::nullopt;
+    return std::max(0.0, *frozen_departure_enter_s -
+                             std::max(0.0, stop_buffer));
 }
 
 inline std::string futureA1TransitionReason(
