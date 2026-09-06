@@ -934,7 +934,7 @@ private:
                 return limitedSpeed(current_speed, desired_speed, dt);
             };
         rule_engine_->refreshA1PlanningContext(
-            agents_, rb_horizon_, sim_time_, a1_kinematics);
+            agents_, cfg_.a1_owner_horizon, sim_time_, a1_kinematics);
 
         std::vector<SimPlanFrame> frames;
         rollWorldModel(rb_horizon_, trajs, hold, &frames,

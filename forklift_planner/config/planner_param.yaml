@@ -70,6 +70,8 @@ forklift_planner:
     a1_pre_dock_y: 4.100
     # A1 waiter control stop line upstream of the bare-body conflict boundary (m).
     a1_stop_margin: 0.10
+    # Future A1 owner reservation window only; independent of rolling/TTC horizons.
+    a1_owner_horizon: 45.0      # s
     rolling_horizon: 15.0         # s，每次生成未来多长时间的轨迹
     rolling_refresh_period: 2.0   # s，每隔多久重新计算并覆盖发布轨迹
 

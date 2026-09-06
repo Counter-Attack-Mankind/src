@@ -42,6 +42,9 @@ struct MultiVehicleConfig {
     double a1_pre_dock_y = 4.100;
     // Upstream control margin from the bare-body A1 conflict boundary. Unit: m.
     double a1_stop_margin = 0.10;
+    // Future A1 owner reservation window. Independent of rolling/prediction
+    // horizons and used only when refreshing the FutureA1Commitment. Unit: s.
+    double a1_owner_horizon = 45.0;
     double rolling_horizon = 10.0;          // future planner time 
     double rolling_refresh_period = 2.0;        //  refresh period
 
