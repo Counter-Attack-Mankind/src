@@ -89,78 +89,157 @@ MarkerPublisher::MarkerPublisher(ros::NodeHandle& nh, const MapParam& mp,
 }
 
 void MarkerPublisher::addA1DiagnosticMarkers(
-    visualization_msgs::MarkerArray& arr) const {
+    visualization_msgs::MarkerArray& arr,
+    const std::vector<VehicleAgent>& vehicles,
+    const RuleEngine::FutureA1Commitment& future_a1,
+    const std::map<std::pair<int, int>,
+                   RuleEngine::DepartureClusterCommitment>&
+        departure_clusters) const {
     if (!cfg_.use_a1_cycle) return;
     const ros::Time now = ros::Time::now();
 
-    // Complete parked vehicle body at the physical pickup pose. The path
-    // endpoint itself remains a rear-axle reference and is intentionally not
-    // used as the visual pickup footprint.
-    visualization_msgs::Marker pickup;
-    pickup.header.frame_id = pp_.frame_id;
-    pickup.header.stamp = now;
-    pickup.ns = "a1_diagnostic_region";
-    pickup.id = 0;
-    pickup.type = visualization_msgs::Marker::CUBE;
-    pickup.action = visualization_msgs::Marker::ADD;
-    pickup.pose.position.x = a1_pickup_.cx;
-    pickup.pose.position.y = a1_pickup_.cy;
-    pickup.pose.position.z = 0.026;
-    pickup.pose.orientation.z = std::sin(0.5 * a1_pickup_.dock_theta);
-    pickup.pose.orientation.w = std::cos(0.5 * a1_pickup_.dock_theta);
-    pickup.scale.x = mp_.vehicle_length;
-    pickup.scale.y = mp_.vehicle_width;
-    pickup.scale.z = 0.020;
-    pickup.color = rgba(0.20f, 1.00f, 0.30f, 0.42f);
-    arr.markers.push_back(pickup);
+    auto deleteMarker = [&](const char* marker_ns, int id) {
+        visualization_msgs::Marker marker;
+        marker.header.frame_id = pp_.frame_id;
+        marker.header.stamp = now;
+        marker.ns = marker_ns;
+        marker.id = id;
+        marker.action = visualization_msgs::Marker::DELETE;
+        arr.markers.push_back(marker);
+    };
 
-    visualization_msgs::Marker direction;
-    direction.header = pickup.header;
-    direction.ns = "a1_diagnostic_region";
-    direction.id = 1;
-    direction.type = visualization_msgs::Marker::ARROW;
-    direction.action = visualization_msgs::Marker::ADD;
-    direction.pose.orientation.w = 1.0;
-    direction.scale.x = 0.018;
-    direction.scale.y = 0.045;
-    direction.scale.z = 0.065;
-    direction.color = rgba(0.20f, 1.00f, 0.30f, 1.0f);
-    direction.points.push_back(pt3(a1_pickup_.cx, a1_pickup_.cy, 0.065));
-    direction.points.push_back(pt3(
-        a1_pickup_.cx + 0.24 * std::cos(a1_pickup_.dock_theta),
-        a1_pickup_.cy + 0.24 * std::sin(a1_pickup_.dock_theta), 0.065));
-    arr.markers.push_back(direction);
+    // Remove the former pickup footprint, direction arrow, pre-dock point,
+    // and verbose diagnostic label.
+    for (int id = 0; id < 4; ++id) {
+        deleteMarker("a1_diagnostic_region", id);
+    }
 
-    visualization_msgs::Marker pre_dock;
-    pre_dock.header = pickup.header;
-    pre_dock.ns = "a1_diagnostic_region";
-    pre_dock.id = 2;
-    pre_dock.type = visualization_msgs::Marker::SPHERE;
-    pre_dock.action = visualization_msgs::Marker::ADD;
-    pre_dock.pose.position.x = a1_pickup_.pre_dock_x;
-    pre_dock.pose.position.y = a1_pickup_.pre_dock_y;
-    pre_dock.pose.position.z = 0.045;
-    pre_dock.pose.orientation.w = 1.0;
-    pre_dock.scale.x = 0.055;
-    pre_dock.scale.y = 0.055;
-    pre_dock.scale.z = 0.055;
-    pre_dock.color = rgba(1.0f, 1.0f, 1.0f, 0.95f);
-    arr.markers.push_back(pre_dock);
+    int owner_id = -1;
+    for (const auto& entry : departure_clusters) {
+        if (entry.second.active) {
+            owner_id = entry.second.owner_id;
+            break;
+        }
+    }
+    if (owner_id < 0 && future_a1.valid()) {
+        owner_id = future_a1.owner_id;
+    }
 
-    visualization_msgs::Marker label;
-    label.header = pickup.header;
-    label.ns = "a1_diagnostic_region";
-    label.id = 3;
-    label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-    label.action = visualization_msgs::Marker::ADD;
-    label.pose.position.x = a1_pickup_.cx;
-    label.pose.position.y = a1_pickup_.cy;
-    label.pose.position.z = 0.19;
-    label.pose.orientation.w = 1.0;
-    label.scale.z = 0.075;
-    label.color = rgba(0.20f, 1.00f, 0.30f, 1.0f);
-    label.text = "A1 diagnostic region\npickup footprint + pre-dock";
-    arr.markers.push_back(label);
+    visualization_msgs::Marker owner;
+    owner.header.frame_id = pp_.frame_id;
+    owner.header.stamp = now;
+    owner.ns = "a1_owner";
+    owner.id = 0;
+    owner.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+    owner.action = visualization_msgs::Marker::ADD;
+    owner.pose.position.x = a1_pickup_.cx;
+    owner.pose.position.y = a1_pickup_.cy;
+    owner.pose.position.z = 0.19;
+    owner.pose.orientation.w = 1.0;
+    owner.scale.z = 0.075;
+    owner.color = rgba(0.20f, 1.00f, 0.30f, 1.0f);
+    owner.text = owner_id >= 0
+        ? "A1 owner=V" + std::to_string(owner_id)
+        : "A1 owner=none";
+    arr.markers.push_back(owner);
+
+    int waiter_marker_id = 0;
+    int frozen_zone_marker_id = 0;
+    for (const auto& entry : departure_clusters) {
+        const RuleEngine::DepartureClusterCommitment& cluster =
+            entry.second;
+        if (!cluster.active) continue;
+
+        const auto waiter = std::find_if(
+            vehicles.begin(), vehicles.end(),
+            [&](const VehicleAgent& vehicle) {
+                return vehicle.id == cluster.other_id;
+            });
+        if (waiter != vehicles.end() &&
+            waiter->mission_phase == MissionPhase::TO_A1 &&
+            !waiter->track.empty()) {
+            const RoughWp pose =
+                waiter->track.poseAtS(cluster.waiter_stop_s);
+            constexpr double kStopLineHalfLength = 0.18;
+            const double nx = -std::sin(pose.theta);
+            const double ny = std::cos(pose.theta);
+
+            visualization_msgs::Marker stop_line;
+            stop_line.header.frame_id = pp_.frame_id;
+            stop_line.header.stamp = now;
+            stop_line.ns = "a1_waiter_stop";
+            stop_line.id = waiter_marker_id++;
+            stop_line.type = visualization_msgs::Marker::LINE_STRIP;
+            stop_line.action = visualization_msgs::Marker::ADD;
+            stop_line.pose.orientation.w = 1.0;
+            stop_line.scale.x = 0.030;
+            stop_line.color = rgba(1.00f, 0.15f, 0.10f, 1.0f);
+            stop_line.points.push_back(pt3(
+                pose.x - kStopLineHalfLength * nx,
+                pose.y - kStopLineHalfLength * ny, 0.070));
+            stop_line.points.push_back(pt3(
+                pose.x + kStopLineHalfLength * nx,
+                pose.y + kStopLineHalfLength * ny, 0.070));
+            arr.markers.push_back(stop_line);
+
+            visualization_msgs::Marker stop_label;
+            stop_label.header = stop_line.header;
+            stop_label.ns = "a1_waiter_stop";
+            stop_label.id = waiter_marker_id++;
+            stop_label.type =
+                visualization_msgs::Marker::TEXT_VIEW_FACING;
+            stop_label.action = visualization_msgs::Marker::ADD;
+            stop_label.pose.position.x = pose.x;
+            stop_label.pose.position.y = pose.y;
+            stop_label.pose.position.z = 0.16;
+            stop_label.pose.orientation.w = 1.0;
+            stop_label.scale.z = 0.060;
+            stop_label.color = rgba(1.00f, 0.85f, 0.10f, 1.0f);
+            std::ostringstream text;
+            text << std::fixed << std::setprecision(2)
+                 << "A1 STOP V" << waiter->id
+                 << " s=" << cluster.waiter_stop_s;
+            stop_label.text = text.str();
+            arr.markers.push_back(stop_label);
+        }
+
+        for (const auto& aabb :
+             cluster.diagnostic_protected_zone_aabbs) {
+            if (!aabb.valid) continue;
+            visualization_msgs::Marker zone;
+            zone.header.frame_id = pp_.frame_id;
+            zone.header.stamp = now;
+            zone.ns = "a1_frozen_zone";
+            zone.id = frozen_zone_marker_id++;
+            zone.type = visualization_msgs::Marker::LINE_STRIP;
+            zone.action = visualization_msgs::Marker::ADD;
+            zone.pose.orientation.w = 1.0;
+            zone.scale.x = 0.025;
+            zone.color = rgba(1.00f, 0.05f, 0.05f, 1.0f);
+            zone.points.push_back(
+                pt3(aabb.min_x, aabb.min_y, 0.060));
+            zone.points.push_back(
+                pt3(aabb.max_x, aabb.min_y, 0.060));
+            zone.points.push_back(
+                pt3(aabb.max_x, aabb.max_y, 0.060));
+            zone.points.push_back(
+                pt3(aabb.min_x, aabb.max_y, 0.060));
+            zone.points.push_back(
+                pt3(aabb.min_x, aabb.min_y, 0.060));
+            arr.markers.push_back(zone);
+        }
+    }
+
+    for (int id = waiter_marker_id;
+         id < last_a1_waiter_stop_marker_count_; ++id) {
+        deleteMarker("a1_waiter_stop", id);
+    }
+    for (int id = frozen_zone_marker_id;
+         id < last_a1_frozen_zone_marker_count_; ++id) {
+        deleteMarker("a1_frozen_zone", id);
+    }
+    last_a1_waiter_stop_marker_count_ = waiter_marker_id;
+    last_a1_frozen_zone_marker_count_ = frozen_zone_marker_id;
 }
 
 void MarkerPublisher::addPathMarker(visualization_msgs::MarkerArray& arr,
@@ -778,11 +857,16 @@ void MarkerPublisher::publish(
     const std::vector<VehicleAgent>& vehicles,
     const std::vector<bool>& visited_slots,
     const std::vector<ConflictMarker>& conflicts,
-    const std::vector<ConflictMarker>& resource_markers) const {
+    const std::vector<ConflictMarker>& resource_markers,
+    const RuleEngine::FutureA1Commitment& future_a1,
+    const std::map<std::pair<int, int>,
+                   RuleEngine::DepartureClusterCommitment>&
+        departure_clusters) const {
     ++publish_seq_;
     visualization_msgs::MarkerArray arr;
     addVisitedSlotMarkers(arr, visited_slots);
-    addA1DiagnosticMarkers(arr);
+    addA1DiagnosticMarkers(arr, vehicles, future_a1,
+                           departure_clusters);
     addOriginAxes(arr);  // 地图原点+XY正方向(标定核对用)
     for (const VehicleAgent& v : vehicles) {
         addPathMarker(arr, v);

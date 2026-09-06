@@ -3,8 +3,10 @@
 #include <ros/ros.h>
 #include <visualization_msgs/MarkerArray.h>
 
-#include <vector>
+#include <map>
 #include <set>
+#include <utility>
+#include <vector>
 
 #include "forklift_map/map_param.h"
 #include "forklift_map/map_types.h"
@@ -32,7 +34,11 @@ public:
     void publish(const std::vector<VehicleAgent>& vehicles,
                  const std::vector<bool>& visited_slots,
                  const std::vector<ConflictMarker>& conflicts,
-                 const std::vector<ConflictMarker>& resource_markers) const;
+                 const std::vector<ConflictMarker>& resource_markers,
+                 const RuleEngine::FutureA1Commitment& future_a1,
+                 const std::map<std::pair<int, int>,
+                                RuleEngine::DepartureClusterCommitment>&
+                     departure_clusters) const;
     void setRollingDecision(
         const RuleEngine::RollingDynamicDecision& rolling_decision) {
         rolling_decision_ = rolling_decision;
@@ -54,7 +60,12 @@ private:
                             const std::vector<ConflictMarker>&
                                 resource_markers) const;
     void addA1DiagnosticMarkers(
-        visualization_msgs::MarkerArray& arr) const;
+        visualization_msgs::MarkerArray& arr,
+        const std::vector<VehicleAgent>& vehicles,
+        const RuleEngine::FutureA1Commitment& future_a1,
+        const std::map<std::pair<int, int>,
+                       RuleEngine::DepartureClusterCommitment>&
+            departure_clusters) const;
 
     ros::Publisher pub_;
     const MapParam& mp_;
@@ -67,6 +78,8 @@ private:
     mutable int last_potential_conflict_zone_marker_count_ = 0;
     mutable int last_conflict_reservation_marker_count_ = 0;
     mutable std::set<int> last_zone_marker_ids_;
+    mutable int last_a1_waiter_stop_marker_count_ = 0;
+    mutable int last_a1_frozen_zone_marker_count_ = 0;
     mutable int publish_seq_ = 0;
     RuleEngine::RollingDynamicDecision rolling_decision_;
 };

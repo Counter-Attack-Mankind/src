@@ -924,6 +924,10 @@ void A1Coordinator::enforceFutureA1Admission(
                 staged.intervals.push_back(FutureA1ConflictInterval{
                     zone.s_self_enter, zone.s_self_exit,
                     zone.s_other_enter, zone.s_other_exit});
+                staged.diagnostic_protected_zone_aabbs.push_back({
+                    zone.aabb_min_x, zone.aabb_min_y,
+                    zone.aabb_max_x, zone.aabb_max_y,
+                    zone.aabb_valid});
                 staged.owner_release_exit_s = std::max(
                     staged.owner_release_exit_s, zone.s_self_exit);
                 staged.other_release_exit_s = std::max(

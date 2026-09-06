@@ -51,6 +51,14 @@ public:
     };
 
     struct DepartureClusterCommitment {
+        struct DiagnosticAabb {
+            double min_x = 0.0;
+            double min_y = 0.0;
+            double max_x = 0.0;
+            double max_y = 0.0;
+            bool valid = false;
+        };
+
         int owner_id = -1;
         int transaction_owner_path_gen = -1;
         int owner_path_gen = -1;
@@ -60,6 +68,9 @@ public:
         std::vector<size_t> seed_indices;
         std::vector<size_t> cluster_indices;
         std::vector<FutureA1ConflictInterval> intervals;
+        // Diagnostic-only geometry frozen with the transaction. It must not
+        // participate in authority, stop, release, or arbitration decisions.
+        std::vector<DiagnosticAabb> diagnostic_protected_zone_aabbs;
         double waiter_stop_boundary_s = 0.0;
         double waiter_stop_s = 0.0;
         double owner_release_exit_s = 0.0;

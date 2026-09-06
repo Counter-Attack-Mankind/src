@@ -2331,7 +2331,9 @@ private:
                     marker_pub_->hasSubscribers()
                         ? rule_engine_->conflictResourceMarkers(agents_)
                         : std::vector<forklift_planner::multi_vehicle::
-                              ConflictMarker>{});   //发布车辆、地图
+                              ConflictMarker>{},
+                    rule_engine_->futureA1Commitment(),
+                    rule_engine_->a1DepartureClusters());   //发布车辆、地图
                 publishRealTrailMarkers();  //发布真实车身尾迹
                 logPlacementStatus();       //打印摆车状态
                 return;
@@ -2357,7 +2359,9 @@ private:
                     marker_pub_->hasSubscribers()
                         ? rule_engine_->conflictResourceMarkers(agents_)
                         : std::vector<forklift_planner::multi_vehicle::
-                              ConflictMarker>{});
+                              ConflictMarker>{},
+                    rule_engine_->futureA1Commitment(),
+                    rule_engine_->a1DepartureClusters());
                 publishRealTrailMarkers();
                 return;
             }
@@ -2392,7 +2396,9 @@ private:
                 marker_pub_->hasSubscribers()
                     ? rule_engine_->conflictResourceMarkers(agents_)
                     : std::vector<forklift_planner::multi_vehicle::
-                          ConflictMarker>{});
+                          ConflictMarker>{},
+                rule_engine_->futureA1Commitment(),
+                rule_engine_->a1DepartureClusters());
             publishRealTrailMarkers();
             return;
         }
@@ -2449,7 +2455,9 @@ private:
             marker_pub_->hasSubscribers()
                 ? rule_engine_->conflictResourceMarkers(agents_)
                 : std::vector<forklift_planner::multi_vehicle::
-                      ConflictMarker>{});
+                      ConflictMarker>{},
+            rule_engine_->futureA1Commitment(),
+            rule_engine_->a1DepartureClusters());
     }
     
     //===========================================================================
