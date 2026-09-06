@@ -119,6 +119,78 @@ int main() {
     }
     priority_a.target_slot = 11;
 
+    // Initial Future-A1 competition includes a vehicle whose next service is
+    // known while it is still completing TO_B. Its commitment is keyed to the
+    // next pickup path generation and remains locked through unload and the
+    // subsequent TO_A1 activation.
+    MultiVehicleConfig future_config = config;
+    future_config.unload_dwell_time = 2.0;
+    future_config.pickup_dwell_time = 1.0;
+    RuleEngine future_engine(map_param, future_config);
+    VehicleAgent future_to_b = laneVehicle(30, 1.0, 1.0);
+    future_to_b.track.set(
+        RoughPath{wp(0.0, 0.0, 0.0), wp(2.0, 0.0, 0.0)});
+    future_to_b.mission_phase = MissionPhase::TO_B;
+    future_to_b.leg_target = LegTargetKind::B_SLOT;
+    future_to_b.target_slot = 12;
+    future_to_b.path_gen = 7;
+    future_to_b.loaded = true;
+    VehicleAgent later_to_a1 = laneVehicle(31, 0.0, 0.0);
+    later_to_a1.track.set(
+        RoughPath{wp(0.0, 1.0, 0.0), wp(5.0, 1.0, 0.0)});
+    later_to_a1.mission_phase = MissionPhase::TO_A1;
+    later_to_a1.leg_target = LegTargetKind::A1;
+    later_to_a1.pending_dropoff_valid = true;
+    later_to_a1.pending_dropoff_track.set(
+        RoughPath{wp(0.0, 2.0, 0.0), wp(1.0, 2.0, 0.0)});
+    std::vector<VehicleAgent> future_vehicles{future_to_b, later_to_a1};
+    RuleEngine::A1ArrivalKinematics future_kinematics;
+    future_kinematics.dt = 0.1;
+    future_kinematics.desired_speed =
+        [](const VehicleAgent&) { return 1.0; };
+    future_kinematics.limited_speed =
+        [](double, double desired, double) { return desired; };
+    future_kinematics.pickup_leg_track = [](int slot, PathTrack& out) {
+        if (slot != 12) return false;
+        out.set(RoughPath{wp(0.0, 3.0, 0.0), wp(1.0, 3.0, 0.0)});
+        return true;
+    };
+    future_engine.refreshA1PlanningContext(
+        future_vehicles, 10.0, 0.0, future_kinematics);
+    const auto first_future_owner = future_engine.futureA1Commitment();
+    if (first_future_owner.owner_id != 30 ||
+        first_future_owner.owner_path_gen != 8 ||
+        std::abs(first_future_owner.predicted_a1_arrival_time - 4.0) > 1e-9) {
+        return fail("TO_B next-A1 ETA or future path generation is incorrect");
+    }
+    future_vehicles[0].mode = VehicleMode::DWELL;
+    future_vehicles[0].mission_phase = MissionPhase::UNLOAD_DWELL;
+    future_vehicles[0].current_slot = 12;
+    future_vehicles[0].dwell_remaining = 1.5;
+    future_engine.refreshA1PlanningContext(
+        future_vehicles, 10.0, 0.1, future_kinematics);
+    if (future_engine.futureA1Commitment().owner_id != 30 ||
+        future_engine.futureA1Commitment().owner_path_gen != 8) {
+        return fail("next-A1 owner was not locked through UNLOAD_DWELL");
+    }
+    future_vehicles[0].mode = VehicleMode::ACTIVE;
+    future_vehicles[0].mission_phase = MissionPhase::TO_A1;
+    future_vehicles[0].leg_target = LegTargetKind::A1;
+    future_vehicles[0].path_gen = 8;
+    future_vehicles[0].path_s = 0.0;
+    future_vehicles[0].current_speed = 0.0;
+    future_vehicles[0].track.set(
+        RoughPath{wp(0.0, 3.0, 0.0), wp(1.0, 3.0, 0.0)});
+    future_vehicles[0].pending_dropoff_valid = true;
+    future_vehicles[0].pending_dropoff_track.set(
+        RoughPath{wp(0.0, 4.0, 0.0), wp(1.0, 4.0, 0.0)});
+    future_engine.refreshA1PlanningContext(
+        future_vehicles, 10.0, 0.2, future_kinematics);
+    if (future_engine.futureA1Commitment().owner_id != 30 ||
+        future_engine.futureA1Commitment().owner_path_gen != 8) {
+        return fail("next-A1 owner did not hand off to the pickup leg");
+    }
+
     // Slot departure admission gives an already ACTIVE road vehicle priority
     // only when synchronized OBB overlap occurs before the candidate clears
     // its source-slot prefix. A later conflict remains rolling-coordinator

@@ -1,4 +1,6 @@
-﻿#include "forklift_planner/path_generator.h"
+﻿//====函数作用 根据起点库位、目标库位、生成一条从A1驶向B库位的RoughPath======
+
+#include "forklift_planner/path_generator.h"
 
 #include <algorithm>
 #include <cmath>
@@ -24,13 +26,14 @@ using namespace forklift_planner::path_internal;
 
 }
 
+//（主函数） 根据起点 src、目标 tgt 和当前 PathGenerator 内部地图/规划参数，生成一条 A1 → B 方向的 RoughPath
 RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
                                              PathGenerationInfo* info) const {
     if (info != nullptr) {
         *info = PathGenerationInfo{};
     }
 
-
+    //根据 row1 和 row3 通道宽度，计算双向车道相对于通道中心的横向偏移。
     const double row1_lane_off = dual_lane_offset(mp_.row1_left_aisle);
     const double row3_lane_off = dual_lane_offset(mp_.row3_center_aisle);
 

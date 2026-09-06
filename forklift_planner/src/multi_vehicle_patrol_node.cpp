@@ -933,6 +933,11 @@ private:
             [this](double current_speed, double desired_speed, double dt) {
                 return limitedSpeed(current_speed, desired_speed, dt);
             };
+        a1_kinematics.pickup_leg_track =
+            [this](int slot,
+                   forklift_planner::multi_vehicle::PathTrack& out) {
+                return allocator_->getPickupLegTrack(slot, out);
+            };
         rule_engine_->refreshA1PlanningContext(
             agents_, cfg_.a1_owner_horizon, sim_time_, a1_kinematics);
 

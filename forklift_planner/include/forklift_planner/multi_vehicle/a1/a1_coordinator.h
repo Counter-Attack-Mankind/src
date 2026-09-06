@@ -110,6 +110,7 @@ public:
     struct ArrivalPrediction {
         int vehicle_id = -1;
         int path_gen = -1;
+        int service_path_gen = -1;
         double arrival_time = -1.0;
         double to_b_time = -1.0;
     };
@@ -125,6 +126,8 @@ public:
         // Must reproduce min(NOMINAL speed, the current curvature speed).
         std::function<double(const VehicleAgent&)> desired_speed;
         std::function<double(double, double, double)> limited_speed;
+        // Read-only lookup of an already-built B->A1 cache entry.
+        std::function<bool(int, PathTrack&)> pickup_leg_track;
     };
 
     struct ServiceMetrics {

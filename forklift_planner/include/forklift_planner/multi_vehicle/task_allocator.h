@@ -81,6 +81,7 @@ public:
 
     bool hasValidOutbound(int slot) const;
     bool hasValidPickupLeg(int slot) const;
+    bool getPickupLegTrack(int slot, PathTrack& out) const;
     double slotDepartureClearS(const PathTrack& track,
                                int source_slot) const;
 
@@ -125,6 +126,7 @@ private:
     TaskPlanCache& cacheAt(int src, int target);
     bool planAvailable(const VehicleAgent& vehicle, int target,
                        bool require_no_arc) const;
+    bool dispatchTargetEnabled(int slot) const;
     int chooseNextTarget(const VehicleAgent& vehicle,
                          const std::vector<VehicleAgent>& all,
                          bool require_no_arc) const;

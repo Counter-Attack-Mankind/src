@@ -890,6 +890,10 @@ int TaskAllocator::chooseNextTarget(const VehicleAgent& vehicle,
     rejected.reserve(static_cast<size_t>(n));
 
     for (int target = 0; target < n; ++target) {
+        if (!dispatchTargetEnabled(target)) {
+            rejected.push_back({target, "dispatch_disabled"});
+            continue;
+        }
         if (target == vehicle.current_slot) {
             rejected.push_back({target, "same_slot"});
             continue;
@@ -975,7 +979,9 @@ void TaskAllocator::rememberTask(VehicleAgent& vehicle, int target) {
 
 bool TaskAllocator::tryPlan(VehicleAgent& vehicle, int target,
                             bool require_no_arc) {
-    if (target == vehicle.current_slot) return false;
+    if (!dispatchTargetEnabled(target) || target == vehicle.current_slot) {
+        return false;
+    }
 
     TaskPlanCache plan;
     const bool continue_from_current_pose =
@@ -1076,6 +1082,7 @@ int TaskAllocator::nearestForwardTargetLen(const VehicleAgent& vehicle,
     int best = -1;
     double best_len = std::numeric_limits<double>::infinity();
     for (int t = 0; t < n; ++t) {
+        if (!dispatchTargetEnabled(t)) continue;
         if (t == vehicle.current_slot) continue;
         if (!hasValidOutbound(t)) continue;                 // 别派进出不来的陷阱位
         if (slotReservedByOther(vehicle, all, t)) continue; // 已被别车预约/占用
@@ -1107,6 +1114,7 @@ void TaskAllocator::forwardTargets(int slot, std::vector<int>& out,
     if (out_len) out_len->clear();
     const int n = static_cast<int>(map_.slots().size());
     for (int t = 0; t < n; ++t) {
+        if (!dispatchTargetEnabled(t)) continue;
         if (t == slot) continue;
         TaskPlanCache plan;
         if (cfg_.precompute_task_filter) plan = cacheAt(slot, t);
@@ -1139,6 +1147,23 @@ bool TaskAllocator::hasValidPickupLeg(int slot) const {
     const DepotLegCache& leg =
         b_to_a1_leg_cache_.at(static_cast<size_t>(slot));
     return leg.ready && leg.valid && !leg.path.empty();
+}
+
+bool TaskAllocator::getPickupLegTrack(int slot, PathTrack& out) const {
+    if (!a1_leg_cache_ready_ || slot < 0 ||
+        slot >= static_cast<int>(b_to_a1_leg_cache_.size())) {
+        return false;
+    }
+    const DepotLegCache& leg =
+        b_to_a1_leg_cache_.at(static_cast<size_t>(slot));
+    if (!leg.ready || !leg.valid || leg.path.empty()) return false;
+    out.set(leg.path);
+    return true;
+}
+
+bool TaskAllocator::dispatchTargetEnabled(int slot) const {
+    return slot >= 0 && slot < static_cast<int>(map_.slots().size()) &&
+           map_.slots().at(static_cast<size_t>(slot)).row_id != 1;
 }
 
 double TaskAllocator::slotDepartureClearS(const PathTrack& track,
@@ -1230,7 +1255,7 @@ bool TaskAllocator::assignPickupLeg(VehicleAgent& vehicle, bool emit_log) {
 
 bool TaskAllocator::tryPrepareFromA1(VehicleAgent& vehicle, int target,
                                      bool require_no_arc) {
-    if (target < 0 ||
+    if (!dispatchTargetEnabled(target) || target < 0 ||
         target >= static_cast<int>(map_.slots().size())) {
         return false;
     }
@@ -1312,7 +1337,8 @@ bool TaskAllocator::prepareDropoffLeg(
         for (int candidate = 0;
              candidate < static_cast<int>(map_.slots().size());
              ++candidate) {
-            if (candidate == vehicle.current_slot ||
+            if (!dispatchTargetEnabled(candidate) ||
+                candidate == vehicle.current_slot ||
                 slotReservedByOther(vehicle, all, candidate) ||
                 !hasValidOutbound(candidate) ||
                 !exitPlanAvailable(candidate, require_no_arc)) {
@@ -1332,7 +1358,7 @@ bool TaskAllocator::prepareDropoffLeg(
     if (vehicle.task_count == 0 && vehicle.id >= 0 &&
         vehicle.id < static_cast<int>(cfg_.target_slots.size())) {
         const int preset = cfg_.target_slots[vehicle.id];
-        if (preset >= 0 &&
+        if (dispatchTargetEnabled(preset) && preset >= 0 &&
             preset < static_cast<int>(map_.slots().size()) &&
             preset != vehicle.current_slot &&
             !slotReservedByOther(vehicle, all, preset) &&
@@ -1469,7 +1495,8 @@ bool TaskAllocator::assignNextTask(VehicleAgent& vehicle,
         if (vehicle.id >= 0 &&
             vehicle.id < static_cast<int>(cfg_.target_slots.size())) {
             const int pt = cfg_.target_slots[vehicle.id];
-            if (pt >= 0 && pt != vehicle.current_slot &&
+            if (dispatchTargetEnabled(pt) && pt >= 0 &&
+                pt != vehicle.current_slot &&
                 !slotReservedByOther(vehicle, all, pt)) {
                 std::vector<int> ft; forwardTargets(vehicle.current_slot, ft);
                 if (std::find(ft.begin(), ft.end(), pt) != ft.end()) t = pt;
@@ -1498,7 +1525,8 @@ bool TaskAllocator::assignNextTask(VehicleAgent& vehicle,
         const int pt = cfg_.target_slots[vehicle.id];
         const bool target_in_range =
             pt >= 0 && pt < static_cast<int>(map_.slots().size());
-        if (target_in_range && pt != vehicle.current_slot &&
+        if (target_in_range && dispatchTargetEnabled(pt) &&
+            pt != vehicle.current_slot &&
             !slotReservedByOther(vehicle, all, pt) &&
             planAvailable(vehicle, pt, prefer_no_arc)) {
             target = pt;

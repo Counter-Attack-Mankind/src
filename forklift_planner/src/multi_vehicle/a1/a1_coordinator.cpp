@@ -186,52 +186,107 @@ A1Coordinator::ArrivalSummary A1Coordinator::predictA1Arrivals(
     const ArrivalKinematics& kinematics) const {
     ArrivalSummary summary;
     const double dt = kinematics.dt;
-    const int max_steps = std::max(
-        0, static_cast<int>(std::ceil(std::max(0.0, horizon) / dt)));
+    const auto trackTime = [&](VehicleAgent preview,
+                               double time_limit) -> double {
+        if (preview.track.empty()) return -1.0;
+        if (preview.path_s >= preview.track.length() - 1e-9) return 0.0;
+        const int max_steps = std::max(
+            0, static_cast<int>(std::ceil(std::max(0.0, time_limit) / dt)));
+        for (int step = 1; step <= max_steps; ++step) {
+            const double desired = kinematics.desired_speed
+                ? kinematics.desired_speed(preview) : 0.0;
+            if (!std::isfinite(desired) || desired <= 1e-9) return -1.0;
+            preview.current_speed = kinematics.limited_speed
+                ? kinematics.limited_speed(preview.current_speed, desired, dt)
+                : desired;
+            const double old_s = preview.path_s;
+            preview.path_s = std::min(
+                preview.track.length(),
+                preview.path_s + preview.current_speed * dt);
+            if (preview.path_s <= old_s + 1e-12) return -1.0;
+            if (preview.path_s >= preview.track.length() - 1e-9) {
+                return static_cast<double>(step) * dt;
+            }
+        }
+        return -1.0;
+    };
+
+    const auto pickupTrack = [&](int slot, PathTrack& out) {
+        return kinematics.pickup_leg_track &&
+               kinematics.pickup_leg_track(slot, out) && !out.empty();
+    };
 
     for (const VehicleAgent& vehicle : vehicles) {
-        if ((kinematics.enabled && !kinematics.enabled(vehicle.id)) ||
-            !vehicle.active() ||
-            vehicle.mission_phase != MissionPhase::TO_A1 ||
-            vehicle.leg_target != LegTargetKind::A1 ||
-            vehicle.track.empty()) {
+        if (kinematics.enabled && !kinematics.enabled(vehicle.id)) {
             continue;
         }
 
-        VehicleAgent preview = vehicle;
         double arrival_time = -1.0;
-        if (preview.path_s >= preview.track.length() - 1e-9) {
-            arrival_time = 0.0;
-        } else {
-            for (int step = 1;
-                 step <= max_steps &&
-                 preview.path_s < preview.track.length() - 1e-9;
-                 ++step) {
-                const double desired = kinematics.desired_speed
-                    ? kinematics.desired_speed(preview) : 0.0;
-                if (!std::isfinite(desired) || desired <= 1e-9) break;
-                preview.current_speed = kinematics.limited_speed
-                    ? kinematics.limited_speed(preview.current_speed,
-                                                desired, dt)
-                    : desired;
-                const double old_s = preview.path_s;
-                preview.path_s = std::min(
-                    preview.track.length(),
-                    preview.path_s + preview.current_speed * dt);
-                if (preview.path_s <= old_s + 1e-12) break;
-                if (preview.path_s >= preview.track.length() - 1e-9) {
-                    arrival_time = static_cast<double>(step) * dt;
+        int service_path_gen = vehicle.path_gen;
+        if (vehicle.active() &&
+            vehicle.mission_phase == MissionPhase::TO_A1 &&
+            vehicle.leg_target == LegTargetKind::A1) {
+            arrival_time = trackTime(vehicle, horizon);
+        } else if (vehicle.active() &&
+                   vehicle.mission_phase == MissionPhase::TO_B &&
+                   vehicle.leg_target == LegTargetKind::B_SLOT) {
+            const double to_b_time = trackTime(vehicle, horizon);
+            PathTrack next_pickup;
+            if (to_b_time < 0.0) {
+                // The current A1->B leg alone already exceeds the horizon.
+            } else if (pickupTrack(vehicle.target_slot, next_pickup)) {
+                VehicleAgent pickup = vehicle;
+                pickup.track = next_pickup;
+                pickup.path_s = 0.0;
+                pickup.current_speed = 0.0;
+                pickup.mission_phase = MissionPhase::TO_A1;
+                pickup.leg_target = LegTargetKind::A1;
+                const double fixed_time =
+                    to_b_time + cfg_.unload_dwell_time;
+                const double pickup_time = trackTime(
+                    pickup, std::max(0.0, horizon - fixed_time));
+                if (pickup_time >= 0.0) {
+                    arrival_time = fixed_time + pickup_time;
                 }
+                service_path_gen = vehicle.path_gen + 1;
+            } else {
+                summary.excluded[vehicle.id] = "pickup_leg_unavailable";
             }
+        } else if (vehicle.mode == VehicleMode::DWELL &&
+                   vehicle.mission_phase == MissionPhase::UNLOAD_DWELL) {
+            PathTrack next_pickup;
+            if (pickupTrack(vehicle.current_slot, next_pickup)) {
+                VehicleAgent pickup = vehicle;
+                pickup.track = next_pickup;
+                pickup.path_s = 0.0;
+                pickup.current_speed = 0.0;
+                pickup.mission_phase = MissionPhase::TO_A1;
+                pickup.leg_target = LegTargetKind::A1;
+                const double fixed_time =
+                    std::max(0.0, vehicle.dwell_remaining);
+                const double pickup_time = trackTime(
+                    pickup, std::max(0.0, horizon - fixed_time));
+                if (pickup_time >= 0.0) {
+                    arrival_time = fixed_time + pickup_time;
+                }
+                service_path_gen = vehicle.path_gen + 1;
+            } else {
+                summary.excluded[vehicle.id] = "pickup_leg_unavailable";
+            }
+        } else {
+            continue;
         }
         if (!futureA1ArrivalWithinHorizon(arrival_time, horizon)) {
-            summary.excluded[vehicle.id] = "horizon_exceeded";
+            if (summary.excluded.find(vehicle.id) == summary.excluded.end()) {
+                summary.excluded[vehicle.id] = "horizon_exceeded";
+            }
             continue;
         }
 
         ArrivalPrediction prediction;
         prediction.vehicle_id = vehicle.id;
         prediction.path_gen = vehicle.path_gen;
+        prediction.service_path_gen = service_path_gen;
         prediction.arrival_time = arrival_time;
         prediction.to_b_time = arrival_time + cfg_.pickup_dwell_time;
         summary.candidates[vehicle.id] = prediction;
@@ -263,7 +318,7 @@ A1Coordinator::FutureA1Commitment A1Coordinator::selectFutureA1Owner(
     const auto best = summary.candidates.find(best_id);
     if (best == summary.candidates.end()) return commitment;
     commitment.owner_id = best->second.vehicle_id;
-    commitment.owner_path_gen = best->second.path_gen;
+    commitment.owner_path_gen = best->second.service_path_gen;
     commitment.predicted_a1_arrival_time = best->second.arrival_time;
     commitment.predicted_to_b_time = best->second.to_b_time;
     return commitment;
@@ -284,6 +339,28 @@ A1Coordinator::retainLockedFutureA1Owner(
     }
 
     FutureA1Commitment retained = future_a1_commitment_;
+    const bool awaiting_next_service_path =
+        owner->path_gen + 1 == retained.owner_path_gen;
+    if (awaiting_next_service_path &&
+        owner->mission_phase == MissionPhase::TO_B) {
+        if (owner->mode != VehicleMode::ACTIVE ||
+            owner->leg_target != LegTargetKind::B_SLOT ||
+            owner->track.empty()) {
+            retain_reason = "future_owner_to_b_invalid";
+            return FutureA1Commitment{};
+        }
+        retain_reason = "future_owner_locked_to_b";
+        return retained;
+    }
+    if (awaiting_next_service_path &&
+        owner->mission_phase == MissionPhase::UNLOAD_DWELL) {
+        if (owner->mode != VehicleMode::DWELL) {
+            retain_reason = "future_owner_unload_invalid";
+            return FutureA1Commitment{};
+        }
+        retain_reason = "future_owner_locked_unload";
+        return retained;
+    }
     if (owner->mission_phase == MissionPhase::TO_A1) {
         if (owner->mode != VehicleMode::ACTIVE ||
             owner->leg_target != LegTargetKind::A1 ||
