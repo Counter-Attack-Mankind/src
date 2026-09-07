@@ -1,0 +1,243 @@
+[FIRST-COLLISION] @tick=15371 sim_t=1537s 涉及对=[V0-V1 ]
+
+========== FIRST-COLLISION 前 80 拍历史(看 gen 是否刚跳变=刚被脱困重置) ==========
+tick=15292
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=6.2 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=2.2 gen=40
+tick=15293
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=6.3 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=2.3 gen=40
+tick=15294
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=6.4 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=2.4 gen=40
+tick=15295
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=6.5 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=2.5 gen=40
+tick=15296
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=6.6 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=2.6 gen=40
+tick=15297
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=6.7 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=2.7 gen=40
+tick=15298
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=6.8 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=2.8 gen=40
+tick=15299
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=6.9 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=2.9 gen=40
+tick=15300
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=7.0 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=3.0 gen=40
+tick=15301
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=7.1 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=3.1 gen=40
+tick=15302
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=7.2 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=3.2 gen=40
+tick=15303
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=7.3 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=3.3 gen=40
+tick=15304
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=7.4 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=3.4 gen=40
+tick=15305
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=7.5 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=3.5 gen=40
+tick=15306
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=7.6 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=3.6 gen=40
+tick=15307
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=7.7 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=3.7 gen=40
+tick=15308
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=7.8 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=3.8 gen=40
+tick=15309
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=7.9 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=3.9 gen=40
+tick=15310
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=8.0 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=4.0 gen=40
+tick=15311
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=8.1 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=4.1 gen=40
+tick=15312
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=8.2 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=4.2 gen=40
+tick=15313
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.198/3.391 rem=3.193 spd=0.000 wait=8.3 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=4.3 gen=40
+tick=15314
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.196/3.391 rem=3.195 spd=0.020 wait=8.4 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=4.4 gen=40
+tick=15315
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.194/3.391 rem=3.197 spd=0.020 wait=8.5 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=4.5 gen=40
+tick=15316
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.192/3.391 rem=3.199 spd=0.020 wait=8.6 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=4.6 gen=40
+tick=15317
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.190/3.391 rem=3.201 spd=0.020 wait=8.7 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=4.7 gen=40
+tick=15318
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.188/3.391 rem=3.203 spd=0.020 wait=8.8 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=4.8 gen=40
+tick=15319
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.186/3.391 rem=3.205 spd=0.020 wait=8.9 gen=41
+  V1 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=4.9 gen=40
+tick=15320
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.184/3.391 rem=3.207 spd=0.020 wait=9.0 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=5.0 gen=40
+tick=15321
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.182/3.391 rem=3.209 spd=0.020 wait=9.1 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=5.1 gen=40
+tick=15322
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.180/3.391 rem=3.211 spd=0.020 wait=9.2 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=5.2 gen=40
+tick=15323
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.178/3.391 rem=3.213 spd=0.020 wait=9.3 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=5.3 gen=40
+tick=15324
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.176/3.391 rem=3.215 spd=0.020 wait=9.4 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=5.4 gen=40
+tick=15325
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.174/3.391 rem=3.217 spd=0.020 wait=9.5 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=0.0 gen=40
+tick=15326
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.172/3.391 rem=3.219 spd=0.020 wait=9.6 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=0.0 gen=40
+tick=15327
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.170/3.391 rem=3.221 spd=0.020 wait=9.7 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=0.0 gen=40
+tick=15328
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.168/3.391 rem=3.223 spd=0.020 wait=9.8 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=0.0 gen=40
+tick=15329
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.166/3.391 rem=3.225 spd=0.020 wait=9.9 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=0.0 gen=40
+tick=15330
+  V0 mode=1 act=0 reason=dynamic_speed_STOP_V1 blk=1 task=20 slot=20->-1 s=0.164/3.391 rem=3.227 spd=0.020 wait=10.0 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=0.0 gen=40
+tick=15331
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.162/3.391 rem=3.229 spd=0.020 wait=10.1 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=0.0 gen=40
+tick=15332
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.020 wait=10.2 gen=41
+  V1 mode=1 act=0 reason=deadlock_pair_hold blk=0 task=19 slot=4->15 s=2.613/4.311 rem=1.698 spd=0.000 wait=0.0 gen=40
+tick=15333
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=10.3 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.615/4.311 rem=1.696 spd=0.020 wait=0.0 gen=40
+tick=15334
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=10.4 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.619/4.311 rem=1.692 spd=0.040 wait=0.0 gen=40
+tick=15335
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=10.5 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.625/4.311 rem=1.686 spd=0.060 wait=0.0 gen=40
+tick=15336
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=10.6 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.633/4.311 rem=1.678 spd=0.080 wait=0.0 gen=40
+tick=15337
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=10.7 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.643/4.311 rem=1.668 spd=0.100 wait=0.0 gen=40
+tick=15338
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=10.8 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.655/4.311 rem=1.656 spd=0.120 wait=0.0 gen=40
+tick=15339
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=10.9 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.669/4.311 rem=1.642 spd=0.140 wait=0.0 gen=40
+tick=15340
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=11.0 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.685/4.311 rem=1.626 spd=0.160 wait=0.0 gen=40
+tick=15341
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=11.1 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.703/4.311 rem=1.608 spd=0.180 wait=0.0 gen=40
+tick=15342
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=11.2 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.723/4.311 rem=1.588 spd=0.200 wait=0.0 gen=40
+tick=15343
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=11.3 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.743/4.311 rem=1.568 spd=0.200 wait=0.0 gen=40
+tick=15344
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=11.4 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.763/4.311 rem=1.548 spd=0.200 wait=0.0 gen=40
+tick=15345
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=11.5 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.783/4.311 rem=1.528 spd=0.200 wait=0.0 gen=40
+tick=15346
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=11.6 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.803/4.311 rem=1.508 spd=0.200 wait=0.0 gen=40
+tick=15347
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=11.7 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.823/4.311 rem=1.489 spd=0.196 wait=0.0 gen=40
+tick=15348
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=11.8 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.841/4.311 rem=1.470 spd=0.185 wait=0.0 gen=40
+tick=15349
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=11.9 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.859/4.311 rem=1.452 spd=0.177 wait=0.0 gen=40
+tick=15350
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=12.0 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.876/4.311 rem=1.435 spd=0.170 wait=0.0 gen=40
+tick=15351
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=12.1 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.892/4.311 rem=1.419 spd=0.164 wait=0.0 gen=40
+tick=15352
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=12.2 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.908/4.311 rem=1.403 spd=0.159 wait=0.0 gen=40
+tick=15353
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=12.3 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.923/4.311 rem=1.388 spd=0.154 wait=0.0 gen=40
+tick=15354
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=12.4 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.938/4.311 rem=1.373 spd=0.150 wait=0.0 gen=40
+tick=15355
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=12.5 gen=41
+  V1 mode=1 act=3 reason=clear blk=-1 task=19 slot=4->15 s=2.953/4.311 rem=1.358 spd=0.147 wait=0.0 gen=40
+tick=15356
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=12.6 gen=41
+  V1 mode=1 act=3 reason=deadlock_pass blk=-1 task=19 slot=4->15 s=2.955/4.311 rem=1.356 spd=0.020 wait=0.1 gen=40
+tick=15357
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=12.7 gen=41
+  V1 mode=1 act=3 reason=deadlock_pass blk=-1 task=19 slot=4->15 s=2.957/4.311 rem=1.354 spd=0.020 wait=0.2 gen=40
+tick=15358
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=12.8 gen=41
+  V1 mode=1 act=0 reason=action_hold blk=-1 task=19 slot=4->15 s=2.957/4.311 rem=1.354 spd=0.000 wait=0.3 gen=40
+tick=15359
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=12.9 gen=41
+  V1 mode=1 act=0 reason=action_hold blk=-1 task=19 slot=4->15 s=2.957/4.311 rem=1.354 spd=0.000 wait=0.4 gen=40
+tick=15360
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=13.0 gen=41
+  V1 mode=1 act=0 reason=action_hold blk=-1 task=19 slot=4->15 s=2.957/4.311 rem=1.354 spd=0.000 wait=0.5 gen=40
+tick=15361
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=13.1 gen=41
+  V1 mode=1 act=1 reason=clear blk=-1 task=19 slot=4->15 s=2.959/4.311 rem=1.352 spd=0.020 wait=0.6 gen=40
+tick=15362
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=13.2 gen=41
+  V1 mode=1 act=3 reason=deadlock_pass blk=-1 task=19 slot=4->15 s=2.961/4.311 rem=1.350 spd=0.020 wait=0.7 gen=40
+tick=15363
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=13.3 gen=41
+  V1 mode=1 act=0 reason=action_hold blk=-1 task=19 slot=4->15 s=2.961/4.311 rem=1.350 spd=0.000 wait=0.8 gen=40
+tick=15364
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=13.4 gen=41
+  V1 mode=1 act=0 reason=action_hold blk=-1 task=19 slot=4->15 s=2.961/4.311 rem=1.350 spd=0.000 wait=0.9 gen=40
+tick=15365
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=13.5 gen=41
+  V1 mode=1 act=0 reason=action_hold blk=-1 task=19 slot=4->15 s=2.961/4.311 rem=1.350 spd=0.000 wait=1.0 gen=40
+tick=15366
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=13.6 gen=41
+  V1 mode=1 act=0 reason=action_hold blk=-1 task=19 slot=4->15 s=2.961/4.311 rem=1.350 spd=0.000 wait=1.1 gen=40
+tick=15367
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=13.7 gen=41
+  V1 mode=1 act=1 reason=clear blk=-1 task=19 slot=4->15 s=2.963/4.311 rem=1.348 spd=0.020 wait=1.2 gen=40
+tick=15368
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=13.8 gen=41
+  V1 mode=1 act=3 reason=deadlock_pass blk=-1 task=19 slot=4->15 s=2.965/4.311 rem=1.346 spd=0.020 wait=1.3 gen=40
+tick=15369
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=13.9 gen=41
+  V1 mode=1 act=3 reason=deadlock_pass blk=-1 task=19 slot=4->15 s=2.967/4.311 rem=1.344 spd=0.020 wait=1.4 gen=40
+tick=15370
+  V0 mode=1 act=0 reason=deadlock_pass_hold blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=14.0 gen=41
+  V1 mode=1 act=3 reason=deadlock_pass blk=-1 task=19 slot=4->15 s=2.969/4.311 rem=1.342 spd=0.020 wait=1.5 gen=40
+tick=15371
+  V0 mode=1 act=0 reason=hard_collision_guard blk=1 task=20 slot=20->-1 s=0.160/3.391 rem=3.231 spd=0.000 wait=14.1 gen=41
+  V1 mode=1 act=0 reason=hard_collision_guard blk=0 task=19 slot=4->15 s=2.969/4.311 rem=1.342 spd=0.000 wait=1.6 gen=40

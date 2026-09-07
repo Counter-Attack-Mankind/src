@@ -2330,7 +2330,9 @@ void RuleEngine::applyRecoveryDirectiveToOutput(
             recovery.phase == RecoveryPhase::PASS &&
             vehicle.reason != "deadlock_pass") continue;
         vehicle.action = vehicle.requested_action;
-        vehicle.current_speed = 0.0;
+        if (recovery.motionFor(vehicle.id) == RecoveryMotion::HOLD) {
+            vehicle.current_speed = 0.0;
+        }
     }
 }
 

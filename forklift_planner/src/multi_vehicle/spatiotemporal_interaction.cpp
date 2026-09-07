@@ -81,6 +81,36 @@ double targetSpeed(VehicleAction action, const MultiVehicleConfig& config) {
     return 0.0;
 }
 
+PredictedKinematicSample interpolatePrediction(
+    const VehicleAgent& vehicle, const PredictedKinematicSample& begin,
+    const PredictedKinematicSample& end, double ratio) {
+    ratio = std::max(0.0, std::min(1.0, ratio));
+    const double s = begin.s + ratio * (end.s - begin.s);
+    const RoughWp pose = vehicle.track.poseAtS(s);
+    const RoughWp begin_pose = vehicle.track.poseAtS(begin.s);
+    const double begin_cos = std::cos(begin_pose.theta);
+    const double begin_sin = std::sin(begin_pose.theta);
+    const double offset_x = begin.body.x - begin_pose.x;
+    const double offset_y = begin.body.y - begin_pose.y;
+    const double longitudinal_offset =
+        offset_x * begin_cos + offset_y * begin_sin;
+    const double lateral_offset =
+        -offset_x * begin_sin + offset_y * begin_cos;
+    const double pose_cos = std::cos(pose.theta);
+    const double pose_sin = std::sin(pose.theta);
+    OBB body = begin.body;
+    body.x = pose.x + longitudinal_offset * pose_cos -
+             lateral_offset * pose_sin;
+    body.y = pose.y + longitudinal_offset * pose_sin +
+             lateral_offset * pose_cos;
+    body.theta = pose.theta;
+    return PredictedKinematicSample{
+        begin.t + ratio * (end.t - begin.t),
+        s,
+        begin.speed + ratio * (end.speed - begin.speed),
+        body};
+}
+
 }  // namespace
 
 std::vector<InteractionPoint> intersectObbs(const OBB& a, const OBB& b) {
@@ -203,18 +233,20 @@ PairInteractionResult detectPairInteractionFromPredictions(
     result.potential_zones = potential_zones;
 
     const size_t count = std::min(prediction_a.size(), prediction_b.size());
-    for (size_t k = 0; k < count; ++k) {
-        const bool hit = overlaps(prediction_a[k].body, prediction_b[k].body);
+    if (count == 0) return result;
+
+    auto inspect = [&](const PredictedKinematicSample& sample_a,
+                       const PredictedKinematicSample& sample_b) {
+        const bool hit = overlaps(sample_a.body, sample_b.body);
         if (!hit) {
-            if (result.event.valid) break;
-            continue;
+            return !result.event.valid;
         }
         if (!result.event.valid) {
             result.event.valid = true;
             result.type = PairInteractionType::CROSSING;
-            result.event.first_overlap_t = prediction_a[k].t;
-            const double s_a = prediction_a[k].s;
-            const double s_b = prediction_b[k].s;
+            result.event.first_overlap_t = sample_a.t;
+            const double s_a = sample_a.s;
+            const double s_b = sample_b.s;
             result.event.collision_s_a = s_a;
             result.event.collision_s_b = s_b;
             result.event.danger_s_a = s_a;
@@ -238,13 +270,50 @@ PairInteractionResult detectPairInteractionFromPredictions(
                 }
             }
         }
-        result.event.last_t = prediction_a[k].t;
-        auto polygon = intersectObbs(prediction_a[k].body,
-                                     prediction_b[k].body);
+        result.event.last_t = sample_a.t;
+        auto polygon = intersectObbs(sample_a.body, sample_b.body);
         if (polygon.size() >= 3) {
             result.event.timed_overlaps.push_back(
-                TimedOverlapGeometry{prediction_a[k].t,
-                                     std::move(polygon)});
+                TimedOverlapGeometry{sample_a.t, std::move(polygon)});
+        }
+        return true;
+    };
+
+    if (!inspect(prediction_a.front(), prediction_b.front())) return result;
+
+    constexpr double kMaxCheckDt = 0.05;
+    constexpr double kMinCheckDt = 0.005;
+    constexpr double kMaxRelativeTravel = 0.01;
+    for (size_t k = 1; k < count; ++k) {
+        const double interval_a = prediction_a[k].t - prediction_a[k - 1].t;
+        const double interval_b = prediction_b[k].t - prediction_b[k - 1].t;
+        const double interval = std::min(interval_a, interval_b);
+        if (interval <= 1e-9) continue;
+
+        const double velocity_a_x =
+            (prediction_a[k].body.x - prediction_a[k - 1].body.x) / interval_a;
+        const double velocity_a_y =
+            (prediction_a[k].body.y - prediction_a[k - 1].body.y) / interval_a;
+        const double velocity_b_x =
+            (prediction_b[k].body.x - prediction_b[k - 1].body.x) / interval_b;
+        const double velocity_b_y =
+            (prediction_b[k].body.y - prediction_b[k - 1].body.y) / interval_b;
+        const double relative_speed = std::hypot(
+            velocity_a_x - velocity_b_x, velocity_a_y - velocity_b_y);
+        const double relative_check_dt = relative_speed > 1e-9
+            ? kMaxRelativeTravel / relative_speed : kMaxCheckDt;
+        const double check_dt = std::max(
+            kMinCheckDt, std::min(kMaxCheckDt, relative_check_dt));
+        const int subdivisions = std::max(
+            1, static_cast<int>(std::ceil(interval / check_dt)));
+        for (int substep = 1; substep <= subdivisions; ++substep) {
+            const double ratio =
+                static_cast<double>(substep) / subdivisions;
+            const PredictedKinematicSample sample_a = interpolatePrediction(
+                vehicle_a, prediction_a[k - 1], prediction_a[k], ratio);
+            const PredictedKinematicSample sample_b = interpolatePrediction(
+                vehicle_b, prediction_b[k - 1], prediction_b[k], ratio);
+            if (!inspect(sample_a, sample_b)) return result;
         }
     }
     return result;

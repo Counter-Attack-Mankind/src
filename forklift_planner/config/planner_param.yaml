@@ -54,7 +54,7 @@ forklift_planner:
 
     # Stateless correction after a real synchronized-OBB conflict.
     bridge_opposing_threshold: -0.50     # local actual-motion-heading dot threshold
-    bridge_backtrack_step: 0.025        # m，沿本车路径向后回溯
+    bridge_backtrack_step: 0.01         # m，bridge relation/static OBB 几何回溯精度
 
     # 滚动轨迹与休眠配置
     dwell_time: 5.0               # s，到达目标货位后的休眠/等待时间
@@ -113,7 +113,7 @@ forklift_planner:
     deadlock_enabled: true
     deadlock_confirm_time: 4.0             # s; live STOP/STOP confirmation
     deadlock_retreat_search_step: 0.05     # m along decreasing path_s
-    deadlock_retreat_clearance: 0.02       # m beyond conflict-corridor s exit
+    deadlock_retreat_clearance: 0.02       # m; corridor s exit and safe target backoff
     deadlock_retreat_speed: 0.10           # m/s; RETREAT only
 
     # 目标货位/泊车队列窗口
@@ -133,7 +133,7 @@ forklift_planner:
     reject_path_kinks: true
     kink_min_angle: 0.61    # rad，约 35deg；小于该角度视为平滑转弯
     kink_cusp_angle: 2.53   # rad，约 145deg；大于该角度视为正常换向尖点
-    path_validation_step: 0.02
+    path_validation_step: 0.01
     precompute_task_filter: true
     log_invalid_task_pairs: false
     quiet_task_filter_precompute: true

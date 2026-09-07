@@ -26,7 +26,7 @@ struct MultiVehicleConfig {
     // the existing local opposing definition. Traversal changes update actual
     // motion headings but do not themselves terminate backtracking.
     double bridge_opposing_threshold = -0.50;
-    double bridge_backtrack_step = 0.025;
+    double bridge_backtrack_step = 0.01;
 
     double dwell_time = 20.0;       // sleep time
     double pickup_dwell_time = 5.0; // A1 pickup operation
@@ -91,7 +91,7 @@ struct MultiVehicleConfig {
     bool deadlock_enabled = true;
     double deadlock_confirm_time = 4.0;          // s
     double deadlock_retreat_search_step = 0.05;  // m along path_s
-    double deadlock_retreat_clearance = 0.02;    // m
+    double deadlock_retreat_clearance = 0.02;    // m; corridor exit / safe backoff
     double deadlock_retreat_speed = 0.10;        // m/s; RETREAT only
 
     // 实车模式:位置来自动捕 /object(替代 advanceVehicles 积分),输出 /traj_i + /coord_speed_i
@@ -121,7 +121,7 @@ struct MultiVehicleConfig {
     bool reject_path_kinks = true;        // reject paths with a kinematic kink
     double kink_min_angle = 0.61;         // rad (~35deg): below = smooth travel
     double kink_cusp_angle = 2.53;        // rad (~145deg): above = clean reverse cusp
-    double path_validation_step = 0.02;
+    double path_validation_step = 0.01;
     bool precompute_task_filter = true;
     bool log_invalid_task_pairs = false;
     bool quiet_task_filter_precompute = true;

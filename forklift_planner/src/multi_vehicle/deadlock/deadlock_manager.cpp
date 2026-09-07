@@ -13,17 +13,20 @@ namespace multi_vehicle {
 
 namespace {
 
+//得到一辆车当前用于几何检测的路径纵向位置s，若休眠则证明在库位，走完路径。
 double vehiclePoseS(const VehicleAgent& vehicle) {
     return vehicle.mode == VehicleMode::DWELL
                ? vehicle.track.length()
                : vehicle.path_s;
 }
 
+
 template <typename Callback>
+//在一段路径 s 区间上按照指定步长采样，并对每个采样点执行回调
 bool sampleInterval(double begin, double end, double step,
                     const Callback& callback) {
-    const double direction = end >= begin ? 1.0 : -1.0;
-    const double distance = std::abs(end - begin);
+    const double direction = end >= begin ? 1.0 : -1.0;     //路径方向
+    const double distance = std::abs(end - begin);          //路径长度
     const int count = std::max(1, static_cast<int>(std::ceil(distance / step)));
     for (int i = 0; i <= count; ++i) {
         const double ratio = static_cast<double>(i) / count;
@@ -34,6 +37,7 @@ bool sampleInterval(double begin, double end, double step,
 
 }  // namespace
 
+//Recovery 状态与动作解释，用于日志调试
 const char* recoveryPhaseName(RecoveryPhase phase) {
     switch (phase) {
         case RecoveryPhase::NONE: return "NONE";
@@ -46,7 +50,9 @@ const char* recoveryPhaseName(RecoveryPhase phase) {
     return "UNKNOWN";
 }
 
+//寻找当前死锁恢复状态下，某一辆车到底应该执行RETREAT、HOLD 还是 NORMAL
 RecoveryMotion RecoveryDirective::motionFor(int vehicle_id) const {
+    //在死锁解决触发的恢复状态下，retreat车辆执行退让，pass车辆执行hold静止
     if (phase == RecoveryPhase::RETREAT) {
         if (vehicle_id == retreat_vehicle_id) return RecoveryMotion::RETREAT;
         if (vehicle_id == pass_vehicle_id) return RecoveryMotion::HOLD;
@@ -61,10 +67,13 @@ RecoveryMotion RecoveryDirective::motionFor(int vehicle_id) const {
     return RecoveryMotion::NORMAL;
 }
 
+//构造函数。创建一个 DeadlockManager 对象时，这个构造函数会执行一次
 DeadlockManager::DeadlockManager(const MapParam& map_param,
                                  const MultiVehicleConfig& config)
-    : map_param_(map_param), config_(config) {}
+    //读取传入的 map_param 和 config，并分别保存到自己的 map_param_ 和 config_ 成员中。
+    : map_param_(map_param), config_(config) {}  //成员初始化列表
 
+//查询函数，输入id，在vehicles容器中查找对应车辆；找到就返回该车辆的只读指针，找不到就返回 nullptr
 const VehicleAgent* DeadlockManager::vehicleById(
     const std::vector<VehicleAgent>& vehicles, int id) const {
     for (const VehicleAgent& vehicle : vehicles) {
@@ -73,6 +82,8 @@ const VehicleAgent* DeadlockManager::vehicleById(
     return nullptr;
 }
 
+//根据两个车辆 ID，在死锁车辆对几何信息表中查找对应的组队
+//车辆顺序不敏感；找到返回指针，找不到返回空指针
 const DeadlockPairGeometry* DeadlockManager::geometryFor(
     const std::vector<DeadlockPairGeometry>& geometry,
     int vehicle_a, int vehicle_b) const {
@@ -85,11 +96,16 @@ const DeadlockPairGeometry* DeadlockManager::geometryFor(
     return nullptr;
 }
 
+//检查 retreat 车辆从当前位置一路倒到 target_s 的整个车身扫掠区域，会不会撞到任何其他车辆。
+//判断向后退，是否会撞到其他车
 bool DeadlockManager::retreatSweepClear(
     const VehicleAgent& retreat, const VehicleAgent& passer,
     const std::vector<VehicleAgent>& vehicles, double target_s) const {
+    //确定采样步长，在0.005m和0.01m之间
     const double sweep_step = std::max(
-        0.005, std::min(0.02, config_.path_validation_step));
+        0.005, std::min(0.01, config_.path_validation_step));
+    //创建匿名函数，从当前 path_s 一直采样到 target_s，检查后退车辆沿途每一个采样位置是否会和其他车辆车身重叠；
+    //只要有一个位置发生碰撞，就返回 false；全部位置都安全，返回 true
     return sampleInterval(retreat.path_s, target_s, sweep_step,
                           [&](double retreat_s) {
         const OBB body = makeBody(retreat.track.poseAtS(retreat_s),
@@ -202,7 +218,7 @@ DeadlockManager::RetreatEvaluation DeadlockManager::evaluateRetreat(
         }
     }
     const double sweep_step = std::max(
-        0.005, std::min(0.02, config_.path_validation_step));
+        0.005, std::min(0.01, config_.path_validation_step));
     result.pass_clear_s = std::min(
         passer.track.length(), zone_pass_exit +
                                    config_.deadlock_retreat_clearance +
@@ -231,9 +247,14 @@ DeadlockManager::RetreatEvaluation DeadlockManager::evaluateRetreat(
          candidate_s = std::max(0.0, candidate_s - search_step)) {
         if (targetClearsCorridor(candidate_s) &&
             retreatSweepClear(retreat, passer, vehicles, candidate_s)) {
-            result.target_s = candidate_s;
-            found = true;
-            break;
+            const double safe_target_s = std::max(
+                0.0, candidate_s - config_.deadlock_retreat_clearance);
+            if (targetClearsCorridor(safe_target_s) &&
+                retreatSweepClear(retreat, passer, vehicles, safe_target_s)) {
+                result.target_s = safe_target_s;
+                found = true;
+                break;
+            }
         }
         if (candidate_s <= 1e-9) break;
     }
