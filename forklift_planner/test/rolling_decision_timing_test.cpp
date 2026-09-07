@@ -298,8 +298,8 @@ int main() {
                         map_param, config, 0.1);
     }
 
-    // Reuse mode still honors an A1 reservation and may tighten a period
-    // NOMINAL target to STOP.
+    // Pair-wide A1 reservations from an older snapshot are obsolete. Reuse
+    // mode must purge them instead of skipping ordinary rolling coordination.
     RuleEngine safety_engine(map_param, config);
     std::vector<VehicleAgent> safety{
         crossingVehicle(0, 0.30, false, config.nominal_speed),
@@ -317,9 +317,9 @@ int main() {
     safety_state.reservations[{0, 1}] = reservation;
     safety_engine.restore(safety_state);
     safety_engine.decide(safety, 0.1, 15.0, true);
-    if (safety[1].requested_action != VehicleAction::STOP ||
-        safety_engine.snapshot().reservations.count({0, 1}) == 0) {
-        return fail("existing reservation could not override reused NOMINAL");
+    if (safety[1].requested_action != VehicleAction::NOMINAL ||
+        !safety_engine.snapshot().reservations.empty()) {
+        return fail("obsolete A1 reservation still overrode reused NOMINAL");
     }
 
     // A TTC safety STOP owns one complete rolling period. Its prediction

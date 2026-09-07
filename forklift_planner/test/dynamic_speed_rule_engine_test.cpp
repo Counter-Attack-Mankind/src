@@ -459,9 +459,13 @@ int main() {
         return fail("Future A1 owner identity still captured an ordinary pair");
     }
 
-    // A valid active departure cluster remains strong pair-level A1
-    // authority and retains the legacy A1 reservation chain.
+    // An active departure transaction must not capture a current-road event
+    // outside its frozen protected intervals. That event remains ordinary
+    // synchronized-OBB/bridge TTC and creates no pair reservation.
     RuleEngine active_cluster_engine(map_param, config);
+    std::vector<std::string> active_cluster_logs;
+    active_cluster_engine.setCoordLogSink(
+        [&](const std::string& line) { active_cluster_logs.push_back(line); });
     std::vector<VehicleAgent> active_cluster{
         crossingVehicle(0, 0.30, false),
         crossingVehicle(1, 0.70, true)};
@@ -474,18 +478,66 @@ int main() {
     active_commitment.other_id = 1;
     active_commitment.other_path_gen = 1;
     active_commitment.intervals.push_back(
-        FutureA1ConflictInterval{0.10, 1.50, 0.40, 1.60});
+        FutureA1ConflictInterval{2.10, 2.50, 2.40, 2.80});
+    active_commitment.waiter_stop_boundary_s = 2.40;
+    active_commitment.waiter_stop_s = 2.30;
     active_commitment.owner_release_exit_s = 1.50;
-    active_commitment.other_release_exit_s = 1.60;
+    active_commitment.other_release_exit_s = 2.80;
     active_commitment.active = true;
     active_state.a1.departure_clusters[{0, 1}] = active_commitment;
     active_cluster_engine.restore(active_state);
     active_cluster_engine.decide(active_cluster, 0.1, 15.0);
-    if (active_cluster_engine.snapshot().reservations.empty() ||
-        active_cluster_engine.snapshot().reservations.begin()->second.
-                create_reason != "a1_related" ||
-        active_cluster_engine.dynamicSpeedMetrics().a1_fallbacks == 0) {
-        return fail("active departure cluster lost A1 pair authority");
+    bool saw_dynamic_speed = false;
+    bool saw_bridge_ttc = false;
+    bool saw_a1_skip = false;
+    for (const std::string& line : active_cluster_logs) {
+        saw_dynamic_speed = saw_dynamic_speed ||
+            line.find("[DYN-SPEED]") != std::string::npos;
+        saw_bridge_ttc = saw_bridge_ttc ||
+            line.find("[BRIDGE-TTC]") != std::string::npos;
+        saw_a1_skip = saw_a1_skip ||
+            line.find("a1_protected") != std::string::npos ||
+            line.find("reservation_reason=a1_related") != std::string::npos;
+    }
+    if (!active_cluster_engine.snapshot().reservations.empty() ||
+        active_cluster_engine.dynamicSpeedMetrics().baseline_conflicts == 0 ||
+        active_cluster_engine.dynamicSpeedMetrics().a1_fallbacks != 0 ||
+        !saw_dynamic_speed || !saw_bridge_ttc || saw_a1_skip ||
+        active_cluster[1].reason == "time_brake_V0") {
+        return fail("active A1 pair captured an ordinary current-road event");
+    }
+
+    // The same change must not weaken the frozen departure stop boundary.
+    RuleEngine frozen_stop_engine(map_param, config);
+    std::vector<VehicleAgent> frozen_stop{
+        laneVehicle(0, 0.20, config.nominal_speed),
+        laneVehicle(1, 0.89, config.nominal_speed)};
+    frozen_stop[0].mission_phase = MissionPhase::TO_B;
+    frozen_stop[1].mission_phase = MissionPhase::TO_A1;
+    frozen_stop[1].track.set(
+        RoughPath{wp(0.0, 10.0, 0.0), wp(4.0, 10.0, 0.0)});
+    RuleEngine::SimSnapshot frozen_state;
+    RuleEngine::DepartureClusterCommitment frozen_commitment;
+    frozen_commitment.owner_id = 0;
+    frozen_commitment.transaction_owner_path_gen = 0;
+    frozen_commitment.owner_path_gen = 1;
+    frozen_commitment.other_id = 1;
+    frozen_commitment.other_path_gen = 1;
+    frozen_commitment.intervals.push_back(
+        FutureA1ConflictInterval{0.50, 1.00, 1.00, 1.50});
+    frozen_commitment.waiter_stop_boundary_s = 1.00;
+    frozen_commitment.waiter_stop_s = 0.90;
+    frozen_commitment.owner_release_exit_s = 1.00;
+    frozen_commitment.other_release_exit_s = 1.50;
+    frozen_commitment.active = true;
+    frozen_state.a1.departure_clusters[{0, 1}] = frozen_commitment;
+    frozen_stop_engine.restore(frozen_state);
+    frozen_stop_engine.decide(frozen_stop, 0.1, 15.0);
+    if (frozen_stop[1].requested_action != VehicleAction::STOP ||
+        frozen_stop[1].reason != "departure_cluster_priority" ||
+        frozen_stop_engine.snapshot().a1.departure_clusters.empty() ||
+        !frozen_stop_engine.snapshot().reservations.empty()) {
+        return fail("frozen departure stop boundary protection was weakened");
     }
 
     // PICKUP_DWELL is inactive for pairwise motion, but its already-known
