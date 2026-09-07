@@ -37,10 +37,16 @@ struct RecoveryDirective {
     double pass_clear_s = 0.0;
     double retreat_distance = 0.0;
     double estimated_retreat_time = 0.0;
+    int cooldown_vehicle_id = -1;
+    int cooldown_path_gen = -1;
+    double cooldown_remaining = 0.0;
     std::string reason;
 
     bool active() const {
         return phase != RecoveryPhase::NONE && phase != RecoveryPhase::CLEAR;
+    }
+    bool cooldownActive() const {
+        return cooldown_vehicle_id >= 0 && cooldown_remaining > 1e-9;
     }
     RecoveryMotion motionFor(int vehicle_id) const;
 };
@@ -76,12 +82,20 @@ public:
         double pass_clear_s = 0.0;
         double retreat_distance = 0.0;
         double estimated_retreat_time = 0.0;
+        double pass_confirmation_elapsed = 0.0;
         std::string reason;
+    };
+
+    struct CooldownState {
+        int vehicle_id = -1;
+        int path_gen = -1;
+        double remaining = 0.0;
     };
 
     struct Snapshot {
         CandidateState candidate;
         TransactionState transaction;
+        CooldownState cooldown;
         RecoveryDirective directive;
     };
 
@@ -97,7 +111,6 @@ public:
                 double dt, bool emit_logs);
 
     const RecoveryDirective& directive() const { return directive_; }
-    bool passOverride(int vehicle_a, int vehicle_b) const;
 
     Snapshot snapshot() const;
     void restore(const Snapshot& snapshot);
@@ -126,14 +139,23 @@ private:
                            const VehicleAgent& passer,
                            const std::vector<VehicleAgent>& vehicles,
                            double target_s) const;
+    bool retreatPoseClearsPassCorridor(const VehicleAgent& retreat,
+                                       const VehicleAgent& passer,
+                                       double retreat_s,
+                                       double pass_clear_s) const;
     void refreshDirective();
     void emit(const char* event, const std::string& details, bool enabled) const;
     void abort(const std::string& reason, bool emit_logs);
+    void clearSuccessfulRecovery(const VehicleAgent* retreat,
+                                 const VehicleAgent* passer,
+                                 const std::string& reason,
+                                 bool emit_logs);
 
     const MapParam& map_param_;
     const MultiVehicleConfig& config_;
     CandidateState candidate_;
     TransactionState transaction_;
+    CooldownState cooldown_;
     RecoveryDirective directive_;
     std::function<void(const std::string&)> log_sink_;
 };

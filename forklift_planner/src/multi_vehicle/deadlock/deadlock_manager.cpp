@@ -6,6 +6,8 @@
 #include <limits>
 #include <sstream>
 
+#include <ros/ros.h>
+
 #include "forklift_planner/multi_vehicle/footprint.h"
 
 namespace forklift_planner {
@@ -52,19 +54,37 @@ const char* recoveryPhaseName(RecoveryPhase phase) {
 
 //寻找当前死锁恢复状态下，某一辆车到底应该执行RETREAT、HOLD 还是 NORMAL
 RecoveryMotion RecoveryDirective::motionFor(int vehicle_id) const {
+    if (cooldownActive() && vehicle_id == cooldown_vehicle_id) {
+        return RecoveryMotion::HOLD;
+    }
     //在死锁解决触发的恢复状态下，retreat车辆执行退让，pass车辆执行hold静止
     if (phase == RecoveryPhase::RETREAT) {
         if (vehicle_id == retreat_vehicle_id) return RecoveryMotion::RETREAT;
         if (vehicle_id == pass_vehicle_id) return RecoveryMotion::HOLD;
     } else if (phase == RecoveryPhase::PASS) {
         if (vehicle_id == retreat_vehicle_id) return RecoveryMotion::HOLD;
-    } else if (phase == RecoveryPhase::UNRESOLVED ||
-               phase == RecoveryPhase::ABORT) {
+    } else if (phase == RecoveryPhase::UNRESOLVED) {
         if (vehicle_id == retreat_vehicle_id || vehicle_id == pass_vehicle_id) {
             return RecoveryMotion::HOLD;
         }
     }
     return RecoveryMotion::NORMAL;
+}
+
+bool DeadlockManager::retreatPoseClearsPassCorridor(
+    const VehicleAgent& retreat, const VehicleAgent& passer,
+    double retreat_s, double pass_clear_s) const {
+    if (retreat.track.empty() || passer.track.empty()) return false;
+    const OBB stopped = makeBody(retreat.track.poseAtS(retreat_s),
+                                 map_param_, 0.0);
+    const double sweep_step = std::max(
+        0.005, std::min(0.01, config_.path_validation_step));
+    return sampleInterval(passer.path_s, pass_clear_s, sweep_step,
+                          [&](double pass_s) {
+        const OBB pass_body = makeBody(passer.track.poseAtS(pass_s),
+                                       map_param_, 0.0);
+        return !overlaps(stopped, pass_body);
+    });
 }
 
 //构造函数。创建一个 DeadlockManager 对象时，这个构造函数会执行一次
@@ -270,6 +290,7 @@ DeadlockManager::RetreatEvaluation DeadlockManager::evaluateRetreat(
 }
 
 void DeadlockManager::refreshDirective() {
+    directive_ = {};
     directive_.phase = transaction_.phase;
     directive_.retreat_vehicle_id = transaction_.retreat_vehicle_id;
     directive_.pass_vehicle_id = transaction_.pass_vehicle_id;
@@ -279,23 +300,56 @@ void DeadlockManager::refreshDirective() {
     directive_.pass_clear_s = transaction_.pass_clear_s;
     directive_.retreat_distance = transaction_.retreat_distance;
     directive_.estimated_retreat_time = transaction_.estimated_retreat_time;
+    directive_.cooldown_vehicle_id = cooldown_.vehicle_id;
+    directive_.cooldown_path_gen = cooldown_.path_gen;
+    directive_.cooldown_remaining = cooldown_.remaining;
     directive_.reason = transaction_.reason;
 }
 
 void DeadlockManager::emit(const char* event, const std::string& details,
                            bool enabled) const {
-    if (!enabled || !log_sink_) return;
-    log_sink_(std::string("[DEADLOCK] event=") + event + " " + details);
+    if (!enabled) return;
+    const std::string line =
+        std::string("[DEADLOCK] event=") + event + " " + details;
+    if (log_sink_) log_sink_(line);
+    const std::string name(event);
+    if (name == "CONFIRMED" || name == "SELECT" ||
+        name == "RETREAT_DONE" || name == "PASS_START" ||
+        name == "CLEAR" || name == "UNRESOLVED" || name == "ABORT") {
+        ROS_WARN_STREAM(line);
+    }
 }
 
 void DeadlockManager::abort(const std::string& reason, bool emit_logs) {
-    transaction_.phase = RecoveryPhase::ABORT;
-    transaction_.reason = reason;
-    refreshDirective();
-    emit("ABORT", "pair=V" + std::to_string(transaction_.retreat_vehicle_id) +
-                      "-V" + std::to_string(transaction_.pass_vehicle_id) +
-                      " reason=" + reason,
+    const int retreat_id = transaction_.retreat_vehicle_id;
+    const int pass_id = transaction_.pass_vehicle_id;
+    emit("ABORT", "pair=V" + std::to_string(retreat_id) +
+                      "-V" + std::to_string(pass_id) + " reason=" + reason,
          emit_logs);
+    candidate_ = {};
+    transaction_ = {};
+    refreshDirective();
+}
+
+void DeadlockManager::clearSuccessfulRecovery(
+    const VehicleAgent* retreat, const VehicleAgent* passer,
+    const std::string& reason, bool emit_logs) {
+    const int retreat_id = transaction_.retreat_vehicle_id;
+    const int pass_id = transaction_.pass_vehicle_id;
+    const double pass_s = passer != nullptr ? passer->path_s : 0.0;
+    std::ostringstream details;
+    details << "pair=V" << retreat_id << "-V" << pass_id
+            << " pass_s=" << pass_s
+            << " reason=" << reason;
+    emit("CLEAR", details.str(), emit_logs);
+
+    cooldown_.vehicle_id = retreat_id;
+    cooldown_.path_gen = retreat != nullptr
+        ? retreat->path_gen : transaction_.retreat_path_gen;
+    cooldown_.remaining = config_.rolling_refresh_period;
+    candidate_ = {};
+    transaction_ = {};
+    refreshDirective();
 }
 
 void DeadlockManager::update(
@@ -305,20 +359,47 @@ void DeadlockManager::update(
     if (!config_.deadlock_enabled) {
         candidate_ = {};
         transaction_ = {};
+        cooldown_ = {};
         directive_ = {};
         return;
     }
 
-    if (transaction_.phase != RecoveryPhase::NONE) {
-        if (transaction_.phase == RecoveryPhase::CLEAR) {
-            transaction_ = {};
-            refreshDirective();
-            return;
+    if (cooldown_.remaining > 1e-9) {
+        const VehicleAgent* cooling = vehicleById(vehicles,
+                                                   cooldown_.vehicle_id);
+        if (cooling == nullptr || cooling->mode != VehicleMode::ACTIVE ||
+            cooling->path_gen != cooldown_.path_gen) {
+            cooldown_ = {};
+        } else {
+            cooldown_.remaining = std::max(0.0, cooldown_.remaining - dt);
+            if (cooldown_.remaining <= 1e-9) cooldown_ = {};
         }
+        refreshDirective();
+    }
+
+    if (transaction_.phase != RecoveryPhase::NONE) {
         const VehicleAgent* retreat = vehicleById(
             vehicles, transaction_.retreat_vehicle_id);
         const VehicleAgent* passer = vehicleById(
             vehicles, transaction_.pass_vehicle_id);
+
+        // PASS is a one-cycle release confirmation. It is deliberately
+        // evaluated before path/mode identity changes so a passer that has
+        // naturally completed this passage closes recovery instead of ABORT.
+        if (transaction_.phase == RecoveryPhase::PASS) {
+            if (passer == nullptr) {
+                abort("pass_vehicle_missing", emit_logs);
+                return;
+            }
+            transaction_.pass_confirmation_elapsed += std::max(0.0, dt);
+            if (transaction_.pass_confirmation_elapsed > 1e-9) {
+                clearSuccessfulRecovery(
+                    retreat, passer, "passer_released_to_normal_coordination",
+                    emit_logs);
+            }
+            return;
+        }
+
         if (retreat == nullptr || passer == nullptr ||
             retreat->mode != VehicleMode::ACTIVE ||
             passer->mode != VehicleMode::ACTIVE ||
@@ -337,8 +418,17 @@ void DeadlockManager::update(
             const double tolerance = std::max(
                 0.005, 0.25 * config_.deadlock_retreat_search_step);
             if (retreat->path_s <= transaction_.retreat_target_s + tolerance) {
+                if (!retreatPoseClearsPassCorridor(
+                        *retreat, *passer, retreat->path_s,
+                        transaction_.pass_clear_s)) {
+                    transaction_.reason =
+                        "actual_retreat_pose_still_blocks_pass_corridor";
+                    refreshDirective();
+                    return;
+                }
                 transaction_.phase = RecoveryPhase::PASS;
-                transaction_.reason = "retreat_target_reached";
+                transaction_.pass_confirmation_elapsed = 0.0;
+                transaction_.reason = "actual_retreat_pose_clears_corridor";
                 refreshDirective();
                 std::ostringstream details;
                 details << "pair=V" << retreat->id << "-V" << passer->id
@@ -351,19 +441,15 @@ void DeadlockManager::update(
             return;
         }
 
-        if (transaction_.phase == RecoveryPhase::PASS) {
-            if (passer->path_s >= transaction_.pass_clear_s - 1e-9) {
-                std::ostringstream details;
-                details << "pair=V" << retreat->id << "-V" << passer->id
-                        << " pass_s=" << passer->path_s
-                        << " pass_clear_s=" << transaction_.pass_clear_s;
-                transaction_.phase = RecoveryPhase::CLEAR;
-                transaction_.reason = "passer_cleared_corridor";
-                refreshDirective();
-                emit("CLEAR", details.str(), emit_logs);
-            }
-            return;
-        }
+        return;
+    }
+
+    // The manager owns one short-lived recovery at a time. During restart
+    // hold, keep all other vehicles under ordinary coordination and wait
+    // until this single-vehicle cooldown has expired before confirming a new
+    // deadlock transaction.
+    if (cooldown_.remaining > 1e-9) {
+        candidate_ = {};
         return;
     }
 
@@ -374,11 +460,15 @@ void DeadlockManager::update(
             a.action != VehicleAction::STOP || a.blocker_id < 0) {
             continue;
         }
+        if (cooldown_.remaining > 1e-9 &&
+            a.id == cooldown_.vehicle_id) continue;
         const VehicleAgent* b = vehicleById(vehicles, a.blocker_id);
         if (b == nullptr || b->mode != VehicleMode::ACTIVE ||
             b->action != VehicleAction::STOP || b->blocker_id != a.id) {
             continue;
         }
+        if (cooldown_.remaining > 1e-9 &&
+            b->id == cooldown_.vehicle_id) continue;
         if (a.id < b->id) {
             candidate_a = &a;
             candidate_b = b;
@@ -388,7 +478,7 @@ void DeadlockManager::update(
 
     if (candidate_a == nullptr) {
         candidate_ = {};
-        directive_ = {};
+        refreshDirective();
         return;
     }
 
@@ -522,21 +612,14 @@ void DeadlockManager::update(
     emit("SELECT", selection.str(), emit_logs);
 }
 
-bool DeadlockManager::passOverride(int vehicle_a, int vehicle_b) const {
-    if (transaction_.phase != RecoveryPhase::PASS) return false;
-    return (transaction_.retreat_vehicle_id == vehicle_a &&
-            transaction_.pass_vehicle_id == vehicle_b) ||
-           (transaction_.retreat_vehicle_id == vehicle_b &&
-            transaction_.pass_vehicle_id == vehicle_a);
-}
-
 DeadlockManager::Snapshot DeadlockManager::snapshot() const {
-    return Snapshot{candidate_, transaction_, directive_};
+    return Snapshot{candidate_, transaction_, cooldown_, directive_};
 }
 
 void DeadlockManager::restore(const Snapshot& snapshot) {
     candidate_ = snapshot.candidate;
     transaction_ = snapshot.transaction;
+    cooldown_ = snapshot.cooldown;
     directive_ = snapshot.directive;
 }
 

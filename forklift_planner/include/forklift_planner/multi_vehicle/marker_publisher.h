@@ -38,7 +38,8 @@ public:
                  const RuleEngine::FutureA1Commitment& future_a1,
                  const std::map<std::pair<int, int>,
                                 RuleEngine::DepartureClusterCommitment>&
-                     departure_clusters) const;
+                     departure_clusters,
+                 const RecoveryDirective& recovery) const;
     void setRollingDecision(
         const RuleEngine::RollingDynamicDecision& rolling_decision) {
         rolling_decision_ = rolling_decision;
@@ -52,7 +53,8 @@ private:
     void addArrowMarker(visualization_msgs::MarkerArray& arr,
                         const VehicleAgent& v) const;
     void addLabelMarker(visualization_msgs::MarkerArray& arr,
-                        const VehicleAgent& v) const;
+                        const VehicleAgent& v,
+                        const RecoveryDirective& recovery) const;
     void addVisitedSlotMarkers(visualization_msgs::MarkerArray& arr,
                                const std::vector<bool>& visited_slots) const;
     void addConflictMarkers(visualization_msgs::MarkerArray& arr,

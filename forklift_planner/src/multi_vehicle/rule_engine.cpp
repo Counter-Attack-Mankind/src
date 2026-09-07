@@ -984,8 +984,11 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         vehicles.size());
     for (size_t i = 0; i < vehicles.size(); ++i) {
         if (vehicles[i].active() && !vehicles[i].track.empty()) {
+            const RecoveryMotion recovery_motion =
+                deadlock_manager_.directive().motionFor(vehicles[i].id);
             const VehicleAction prediction_action =
-                vehicles[i].ttc_stop_hold_remaining > 1e-9
+                recovery_motion == RecoveryMotion::HOLD ||
+                        vehicles[i].ttc_stop_hold_remaining > 1e-9
                     ? VehicleAction::STOP : VehicleAction::NOMINAL;
             predictions[i] =
                 predictTrajectory(vehicles[i], mp_, cfg_,
@@ -1136,8 +1139,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         for (size_t j = i + 1; j < vehicles.size(); ++j) {
             VehicleAgent& b = vehicles[j];
             if (!b.active() || predictions[j].empty()) continue;
-            if (deadlock_manager_.passOverride(a.id, b.id)) continue;
-
             const std::pair<int, int> key{std::min(a.id, b.id),
                                           std::max(a.id, b.id)};
             // Crossing truth is generated directly from synchronized OBBs.
@@ -2288,8 +2289,15 @@ void RuleEngine::refreshResourceSpans(std::vector<VehicleAgent>& vehicles) {
 
 void RuleEngine::applyRecoveryPolicy(std::vector<VehicleAgent>& vehicles) {
     const RecoveryDirective& recovery = deadlock_manager_.directive();
-    if (!recovery.active()) return;
     for (VehicleAgent& vehicle : vehicles) {
+        if (recovery.cooldownActive() &&
+            vehicle.id == recovery.cooldown_vehicle_id) {
+            vehicle.requested_action = VehicleAction::STOP;
+            vehicle.reason = "deadlock_restart_hold";
+            vehicle.blocker_id = -1;
+            continue;
+        }
+        if (!recovery.active()) continue;
         if (vehicle.id == recovery.retreat_vehicle_id) {
             applyActionRequest(vehicle, VehicleAction::STOP,
                                recovery.phase == RecoveryPhase::PASS
@@ -2305,15 +2313,6 @@ void RuleEngine::applyRecoveryPolicy(std::vector<VehicleAgent>& vehicles) {
             applyActionRequest(vehicle, VehicleAction::STOP,
                                "deadlock_pair_hold",
                                recovery.retreat_vehicle_id);
-        } else if (recovery.phase == RecoveryPhase::PASS &&
-                   vehicle.blocker_id == recovery.retreat_vehicle_id) {
-            if (vehicle.reason == "hard_collision_guard" ||
-                vehicle.reason.rfind("forward_clearance", 0) == 0) {
-                continue;
-            }
-            vehicle.blocker_id = -1;
-            vehicle.requested_action = VehicleAction::NOMINAL;
-            vehicle.reason = "deadlock_pass";
         }
     }
 }
@@ -2322,13 +2321,23 @@ void RuleEngine::applyRecoveryDirectiveToOutput(
     std::vector<VehicleAgent>& vehicles) {
     applyRecoveryPolicy(vehicles);
     const RecoveryDirective& recovery = deadlock_manager_.directive();
-    if (!recovery.active()) return;
+    if (!recovery.active() && !recovery.cooldownActive()) return;
     for (VehicleAgent& vehicle : vehicles) {
+        if (recovery.cooldownActive() &&
+            vehicle.id == recovery.cooldown_vehicle_id) {
+            vehicle.action = VehicleAction::STOP;
+            vehicle.requested_action = VehicleAction::STOP;
+            vehicle.current_speed = 0.0;
+            vehicle.reason = "deadlock_restart_hold";
+            vehicle.blocker_id = -1;
+            continue;
+        }
+        if (!recovery.active()) continue;
         if (vehicle.id != recovery.retreat_vehicle_id &&
             vehicle.id != recovery.pass_vehicle_id) continue;
-        if (vehicle.id == recovery.pass_vehicle_id &&
-            recovery.phase == RecoveryPhase::PASS &&
-            vehicle.reason != "deadlock_pass") continue;
+        if (recovery.motionFor(vehicle.id) == RecoveryMotion::NORMAL) {
+            continue;
+        }
         vehicle.action = vehicle.requested_action;
         if (recovery.motionFor(vehicle.id) == RecoveryMotion::HOLD) {
             vehicle.current_speed = 0.0;
@@ -2393,12 +2402,6 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
     }
 
     for (VehicleAgent& v : vehicles) {
-        const RecoveryDirective& recovery = deadlock_manager_.directive();
-        if (recovery.phase == RecoveryPhase::PASS &&
-            v.id == recovery.pass_vehicle_id &&
-            v.blocker_id == recovery.retreat_vehicle_id) {
-            v.ttc_stop_hold_remaining = 0.0;
-        }
         if (v.mode != VehicleMode::ACTIVE) {
             v.blocker_id = -1;
             v.requested_action = VehicleAction::STOP;

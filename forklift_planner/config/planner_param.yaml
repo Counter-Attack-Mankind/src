@@ -147,5 +147,5 @@ forklift_planner:
     recent_row_memory: 4
 
     # 可视化
-    show_paths: false
+    show_paths: true
     show_prediction_conflicts: true

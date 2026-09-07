@@ -236,7 +236,7 @@ private:
     using DepartureTransactionIdentity =
         std::tuple<int, int, int, int, int, int, int, bool>;
     using RecoveryIdentity =
-        std::tuple<int, int, int, int, int, double, double>;
+        std::tuple<int, int, int, int, int, double, double, int, int>;
 
     struct ExecutedRollingDecisionMetrics {
         unsigned long long far_periods = 0;
@@ -878,7 +878,8 @@ private:
             static_cast<int>(recovery.phase), recovery.retreat_vehicle_id,
             recovery.pass_vehicle_id, recovery.retreat_path_gen,
             recovery.pass_path_gen, recovery.retreat_target_s,
-            recovery.pass_clear_s);
+            recovery.pass_clear_s, recovery.cooldown_vehicle_id,
+            recovery.cooldown_path_gen);
     }
 
     void rememberRealPlanIdentity() {
@@ -2342,7 +2343,8 @@ private:
                         : std::vector<forklift_planner::multi_vehicle::
                               ConflictMarker>{},
                     rule_engine_->futureA1Commitment(),
-                    rule_engine_->a1DepartureClusters());   //发布车辆、地图
+                    rule_engine_->a1DepartureClusters(),
+                    rule_engine_->recoveryDirective());   //发布车辆、地图
                 publishRealTrailMarkers();  //发布真实车身尾迹
                 logPlacementStatus();       //打印摆车状态
                 return;
@@ -2370,7 +2372,8 @@ private:
                         : std::vector<forklift_planner::multi_vehicle::
                               ConflictMarker>{},
                     rule_engine_->futureA1Commitment(),
-                    rule_engine_->a1DepartureClusters());
+                    rule_engine_->a1DepartureClusters(),
+                    rule_engine_->recoveryDirective());
                 publishRealTrailMarkers();
                 return;
             }
@@ -2407,7 +2410,8 @@ private:
                     : std::vector<forklift_planner::multi_vehicle::
                           ConflictMarker>{},
                 rule_engine_->futureA1Commitment(),
-                rule_engine_->a1DepartureClusters());
+                rule_engine_->a1DepartureClusters(),
+                rule_engine_->recoveryDirective());
             publishRealTrailMarkers();
             return;
         }
@@ -2466,7 +2470,8 @@ private:
                 : std::vector<forklift_planner::multi_vehicle::
                       ConflictMarker>{},
             rule_engine_->futureA1Commitment(),
-            rule_engine_->a1DepartureClusters());
+            rule_engine_->a1DepartureClusters(),
+            rule_engine_->recoveryDirective());
     }
     
     //===========================================================================

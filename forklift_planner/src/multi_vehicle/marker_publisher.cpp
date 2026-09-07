@@ -337,7 +337,8 @@ void MarkerPublisher::addArrowMarker(visualization_msgs::MarkerArray& arr,
 }
 
 void MarkerPublisher::addLabelMarker(visualization_msgs::MarkerArray& arr,
-                                     const VehicleAgent& v) const {
+                                     const VehicleAgent& v,
+                                     const RecoveryDirective& recovery) const {
     const RoughWp p = bodyCenterPose(displayPose(v), mp_);
     constexpr double kLabelLongitudinalOffsetScale = 0.85;
     const double offset =
@@ -355,9 +356,24 @@ void MarkerPublisher::addLabelMarker(visualization_msgs::MarkerArray& arr,
     m.pose.orientation.w = 1.0;
     m.scale.z = 0.070;
     m.color = v.color;
+    std::string displayed_action = actionName(v.action);
+    if (recovery.cooldownActive() &&
+        recovery.cooldown_vehicle_id == v.id) {
+        displayed_action = "DEADLOCK_COOLDOWN";
+    } else if (recovery.active()) {
+        const RecoveryMotion motion = recovery.motionFor(v.id);
+        if (motion == RecoveryMotion::RETREAT) {
+            displayed_action = "RETREAT";
+        } else if (motion == RecoveryMotion::HOLD) {
+            displayed_action = "HOLD";
+        } else if (recovery.phase == RecoveryPhase::PASS &&
+                   recovery.pass_vehicle_id == v.id) {
+            displayed_action = "PASS";
+        }
+    }
     std::ostringstream text;
     text << std::fixed << std::setprecision(2)
-         << "V" << v.id << " " << actionName(v.action)
+         << "V" << v.id << " " << displayed_action
          << " V=" << v.current_speed << "\nTTC=";
     const RuleEngine::RollingDynamicDecision::VehicleTtcDiagnostic*
         diagnostic = nullptr;
@@ -375,9 +391,20 @@ void MarkerPublisher::addLabelMarker(visualization_msgs::MarkerArray& arr,
         }
     }
     if (diagnostic != nullptr && diagnostic->ttc) {
-        text << *diagnostic->ttc << "s " << diagnostic->reason;
+        text << *diagnostic->ttc << "s ";
+        if (diagnostic->reason == "rolling_emergency_stop") {
+            // This reason describes the pair. The label describes this
+            // vehicle, so show its own final action instead.
+            text << "final_" << actionName(v.action);
+        } else {
+            text << diagnostic->reason;
+        }
     } else {
         text << "clear";
+    }
+    if (recovery.cooldownActive() &&
+        recovery.cooldown_vehicle_id == v.id) {
+        text << "\nRESTART_HOLD=" << recovery.cooldown_remaining << "s";
     }
     m.text = text.str();
     arr.markers.push_back(m);
@@ -861,7 +888,8 @@ void MarkerPublisher::publish(
     const RuleEngine::FutureA1Commitment& future_a1,
     const std::map<std::pair<int, int>,
                    RuleEngine::DepartureClusterCommitment>&
-        departure_clusters) const {
+        departure_clusters,
+    const RecoveryDirective& recovery) const {
     ++publish_seq_;
     visualization_msgs::MarkerArray arr;
     addVisitedSlotMarkers(arr, visited_slots);
@@ -873,7 +901,7 @@ void MarkerPublisher::publish(
         if (v.mode == VehicleMode::NEED_TASK || v.track.empty()) continue;
         addBodyMarker(arr, v);
         addArrowMarker(arr, v);
-        addLabelMarker(arr, v);
+        addLabelMarker(arr, v, recovery);
     }
     addConflictMarkers(arr, conflicts, resource_markers);
     pub_.publish(arr);

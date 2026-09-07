@@ -69,13 +69,17 @@ int main() {
     vehicles[0].path_s = selected.retreat_target_s;
     manager.update(vehicles, {geometry}, 0.1, false);
     if (manager.directive().phase != RecoveryPhase::PASS ||
-        !manager.passOverride(0, 1)) {
-        return fail("RETREAT did not transition to pair-local PASS");
+        manager.directive().motionFor(0) != RecoveryMotion::HOLD ||
+        manager.directive().motionFor(1) != RecoveryMotion::NORMAL) {
+        return fail("PASS did not hold retreat and release passer");
     }
-    vehicles[1].path_s = manager.directive().pass_clear_s;
     manager.update(vehicles, {geometry}, 0.1, false);
-    if (manager.directive().phase != RecoveryPhase::CLEAR) {
-        return fail("PASS did not transition to CLEAR");
+    if (manager.directive().phase != RecoveryPhase::NONE ||
+        !manager.directive().cooldownActive() ||
+        manager.directive().cooldown_vehicle_id != 0 ||
+        manager.directive().motionFor(0) != RecoveryMotion::HOLD ||
+        manager.directive().motionFor(1) != RecoveryMotion::NORMAL) {
+        return fail("PASS did not clear into retreat-only cooldown");
     }
     std::cout << "deadlock_manager_test: PASS\n";
     return 0;
