@@ -90,12 +90,10 @@ bool DeadlockManager::retreatSweepClear(
     const std::vector<VehicleAgent>& vehicles, double target_s) const {
     const double sweep_step = std::max(
         0.005, std::min(0.02, config_.path_validation_step));
-    const double inflation = 0.5 * config_.deadlock_retreat_clearance +
-                             0.5 * sweep_step;
     return sampleInterval(retreat.path_s, target_s, sweep_step,
                           [&](double retreat_s) {
         const OBB body = makeBody(retreat.track.poseAtS(retreat_s),
-                                  map_param_, inflation);
+                                  map_param_, 0.0);
         for (const VehicleAgent& other : vehicles) {
             if (other.id == retreat.id || other.track.empty() ||
                 other.mode == VehicleMode::NEED_TASK) {
@@ -105,7 +103,7 @@ bool DeadlockManager::retreatSweepClear(
                                        ? passer.path_s
                                        : vehiclePoseS(other);
             const OBB obstacle = makeBody(other.track.poseAtS(other_s),
-                                          map_param_, inflation);
+                                          map_param_, 0.0);
             if (overlaps(body, obstacle)) return false;
         }
         return true;
@@ -210,20 +208,18 @@ DeadlockManager::RetreatEvaluation DeadlockManager::evaluateRetreat(
                                    config_.deadlock_retreat_clearance +
                                    sweep_step);
 
-    const double inflation = 0.5 * config_.deadlock_retreat_clearance +
-                             0.5 * sweep_step;
     std::vector<OBB> pass_corridor;
     sampleInterval(passer.path_s, result.pass_clear_s, sweep_step,
                    [&](double pass_s) {
         pass_corridor.push_back(makeBody(passer.track.poseAtS(pass_s),
-                                         map_param_, inflation));
+                                         map_param_, 0.0));
         return true;
     });
 
     const double search_step = config_.deadlock_retreat_search_step;
     auto targetClearsCorridor = [&](double candidate_s) {
         const OBB stopped = makeBody(retreat.track.poseAtS(candidate_s),
-                                     map_param_, inflation);
+                                     map_param_, 0.0);
         for (const OBB& pass_body : pass_corridor) {
             if (overlaps(stopped, pass_body)) return false;
         }
@@ -491,7 +487,7 @@ void DeadlockManager::update(
     transaction_.pass_clear_s = selected->pass_clear_s;
     transaction_.retreat_distance = selected->distance;
     const double recovery_speed = std::max(
-        1e-6, config_.nominal_speed * config_.creep_ratio);
+        1e-6, config_.deadlock_retreat_speed);
     transaction_.estimated_retreat_time = selected->distance / recovery_speed;
     transaction_.reason = "minimum_safe_retreat";
     refreshDirective();

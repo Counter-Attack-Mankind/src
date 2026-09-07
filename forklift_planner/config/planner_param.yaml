@@ -113,7 +113,8 @@ forklift_planner:
     deadlock_enabled: true
     deadlock_confirm_time: 4.0             # s; live STOP/STOP confirmation
     deadlock_retreat_search_step: 0.05     # m along decreasing path_s
-    deadlock_retreat_clearance: 0.02       # m added to recovery geometry
+    deadlock_retreat_clearance: 0.02       # m beyond conflict-corridor s exit
+    deadlock_retreat_speed: 0.10           # m/s; RETREAT only
 
     # 目标货位/泊车队列窗口
     target_request_distance: 0.45

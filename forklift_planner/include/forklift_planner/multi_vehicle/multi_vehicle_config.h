@@ -92,6 +92,7 @@ struct MultiVehicleConfig {
     double deadlock_confirm_time = 4.0;          // s
     double deadlock_retreat_search_step = 0.05;  // m along path_s
     double deadlock_retreat_clearance = 0.02;    // m
+    double deadlock_retreat_speed = 0.10;        // m/s; RETREAT only
 
     // 实车模式:位置来自动捕 /object(替代 advanceVehicles 积分),输出 /traj_i + /coord_speed_i
     // 给 pure_pursuit。协调(updateDwellAndTasks/decide/到库DWELL/预测错峰)与 sim 逐字节一致。

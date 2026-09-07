@@ -120,6 +120,9 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     nh.param(ns + "deadlock_retreat_clearance",
              c.deadlock_retreat_clearance,
              c.deadlock_retreat_clearance);
+    nh.param(ns + "deadlock_retreat_speed",
+             c.deadlock_retreat_speed,
+             c.deadlock_retreat_speed);
     nh.param(ns + "simple_forward_demo", c.simple_forward_demo, c.simple_forward_demo);
     nh.param(ns + "use_a1_cycle", c.use_a1_cycle, c.use_a1_cycle);
     nh.param(ns + "a1_cycle_catalog_file", c.a1_cycle_catalog_file,
@@ -190,6 +193,8 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
         std::max(0.005, c.deadlock_retreat_search_step);
     c.deadlock_retreat_clearance =
         std::max(0.0, c.deadlock_retreat_clearance);
+    c.deadlock_retreat_speed =
+        std::max(0.01, std::min(c.deadlock_retreat_speed, c.max_speed));
     return c;
 }
 

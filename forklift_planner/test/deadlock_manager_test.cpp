@@ -18,6 +18,7 @@ int main() {
     config.deadlock_confirm_time = 0.2;
     config.deadlock_retreat_search_step = 0.05;
     config.deadlock_retreat_clearance = 0.01;
+    config.deadlock_retreat_speed = 0.10;
 
     VehicleAgent a;
     a.id = 0; a.mode = VehicleMode::ACTIVE;
@@ -59,6 +60,11 @@ int main() {
         selected.retreat_vehicle_id != 0 || selected.pass_vehicle_id != 1 ||
         selected.retreat_target_s >= vehicles[0].path_s) {
         return fail("deterministic minimum retreat was not selected");
+    }
+    if (std::abs(selected.estimated_retreat_time -
+                 selected.retreat_distance / config.deadlock_retreat_speed) >
+        1e-9) {
+        return fail("retreat estimate did not use dedicated recovery speed");
     }
     vehicles[0].path_s = selected.retreat_target_s;
     manager.update(vehicles, {geometry}, 0.1, false);

@@ -1809,8 +1809,12 @@ private:
                 recovery_motion ==
                         forklift_planner::multi_vehicle::RecoveryMotion::RETREAT
                     ? VehicleAction::CREEP : v.action;
-            const double desired_speed = std::min(
-                rule_engine_->speedForAction(motion_action), curvatureSpeed(v));
+            const double target_speed = recovery_motion ==
+                    forklift_planner::multi_vehicle::RecoveryMotion::RETREAT
+                ? cfg_.deadlock_retreat_speed
+                : rule_engine_->speedForAction(motion_action);
+            const double desired_speed = std::min(target_speed,
+                                                  curvatureSpeed(v));
             next_speed[i] = limitedSpeed(v.current_speed, desired_speed, dt);
             if (recovery_motion ==
                 forklift_planner::multi_vehicle::RecoveryMotion::RETREAT) {
@@ -2898,7 +2902,11 @@ private:
                     ? VehicleAction::CREEP : v.action;
             double mag = recovery_motion ==
                     forklift_planner::multi_vehicle::RecoveryMotion::HOLD
-                ? 0.0 : rule_engine_->speedForAction(motion_action);
+                ? 0.0
+                : (recovery_motion ==
+                           forklift_planner::multi_vehicle::RecoveryMotion::RETREAT
+                       ? cfg_.deadlock_retreat_speed
+                       : rule_engine_->speedForAction(motion_action));
             mag = std::min(mag, curvatureSpeed(v));   // 曲率限速(lat_accel_max,0=关)
             // 方向:当前段倒车,或【前方一小段即将进入倒车段】→ 负(倒车)。后者关键:realAdvance 的
             // path_s 单调只增,前进逼近 FORWARD→REVERSE 的 cusp 时,path_s 越不过 cusp(前进会冲偏、
