@@ -507,6 +507,59 @@ int main() {
         return fail("active A1 pair captured an ordinary current-road event");
     }
 
+    // A nominal overlap beyond the waiter's frozen stop line is not executable:
+    // clip only that event, keep the owner NOMINAL, and let the waiter consume
+    // its own stop-line TTC without changing ordinary pair priority.
+    RuleEngine clipped_engine(map_param, config);
+    std::vector<std::string> clipped_logs;
+    clipped_engine.setCoordLogSink(
+        [&](const std::string& line) { clipped_logs.push_back(line); });
+    std::vector<VehicleAgent> clipped{
+        crossingVehicle(0, 1.50, false, config.nominal_speed),
+        crossingVehicle(1, 1.50, true, config.nominal_speed)};
+    clipped[0].mission_phase = MissionPhase::TO_B;
+    clipped[1].loaded = true;
+    RuleEngine::SimSnapshot clipped_state;
+    RuleEngine::DepartureClusterCommitment clipped_commitment;
+    clipped_commitment.owner_id = 0;
+    clipped_commitment.owner_path_gen = 1;
+    clipped_commitment.other_id = 1;
+    clipped_commitment.other_path_gen = 1;
+    clipped_commitment.intervals.push_back(
+        FutureA1ConflictInterval{0.40, 0.80, 0.70, 1.00});
+    clipped_commitment.waiter_stop_boundary_s = 0.70;
+    clipped_commitment.waiter_stop_s = 0.60;
+    clipped_commitment.owner_release_exit_s = 3.00;
+    clipped_commitment.other_release_exit_s = 1.00;
+    clipped_commitment.active = true;
+    clipped_state.a1.departure_clusters[{0, 1}] = clipped_commitment;
+    clipped_engine.restore(clipped_state);
+    clipped_engine.decide(clipped, 0.1, 15.0);
+    bool saw_a1_stop_ttc = false;
+    bool saw_a1_stop_clip = false;
+    for (const std::string& line : clipped_logs) {
+        saw_a1_stop_ttc = saw_a1_stop_ttc ||
+            line.find("[A1-STOP-TTC]") != std::string::npos;
+        saw_a1_stop_clip = saw_a1_stop_clip ||
+            line.find("[A1-STOP-CLIP]") != std::string::npos;
+    }
+    if (clipped[0].requested_action != VehicleAction::NOMINAL) {
+        return fail("post-stop-line overlap still constrained the A1 owner");
+    }
+    if (clipped[1].requested_action != VehicleAction::CREEP ||
+        clipped[1].reason.rfind("a1_stop_ttc_CREEP_V0", 0) != 0) {
+        return fail("A1 stop TTC did not select waiter CREEP");
+    }
+    if (clipped_engine.dynamicSpeedMetrics().baseline_conflicts != 0 ||
+        !saw_a1_stop_ttc || !saw_a1_stop_clip) {
+        return fail(
+            "A1 stop boundary did not clip the unreachable overlap: baseline=" +
+            std::to_string(clipped_engine.dynamicSpeedMetrics().
+                               baseline_conflicts) +
+            " ttc_log=" + std::to_string(saw_a1_stop_ttc) +
+            " clip_log=" + std::to_string(saw_a1_stop_clip));
+    }
+
     // The same change must not weaken the frozen departure stop boundary.
     RuleEngine frozen_stop_engine(map_param, config);
     std::vector<VehicleAgent> frozen_stop{
@@ -534,7 +587,7 @@ int main() {
     frozen_stop_engine.restore(frozen_state);
     frozen_stop_engine.decide(frozen_stop, 0.1, 15.0);
     if (frozen_stop[1].requested_action != VehicleAction::STOP ||
-        frozen_stop[1].reason != "departure_cluster_priority" ||
+        frozen_stop[1].reason != "a1_stop_ttc_STOP_V0" ||
         frozen_stop_engine.snapshot().a1.departure_clusters.empty() ||
         !frozen_stop_engine.snapshot().reservations.empty()) {
         return fail("frozen departure stop boundary protection was weakened");

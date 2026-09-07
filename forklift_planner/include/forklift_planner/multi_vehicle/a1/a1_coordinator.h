@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <tuple>
@@ -107,6 +108,13 @@ public:
         size_t protected_zone_count = 0;
     };
 
+    struct WaiterStopConstraint {
+        int owner_id = -1;
+        int waiter_id = -1;
+        int waiter_path_gen = -1;
+        double waiter_stop_s = 0.0;
+    };
+
     struct ArrivalPrediction {
         int vehicle_id = -1;
         int path_gen = -1;
@@ -168,6 +176,8 @@ public:
 
     PairAuthority authorityForPair(const VehicleAgent& a,
                                    const VehicleAgent& b) const;
+    std::optional<WaiterStopConstraint> waiterStopConstraint(
+        const VehicleAgent& waiter) const;
     A1LaunchAdmission checkA1LaunchAdmission(
         const VehicleAgent& service_owner,
         const VehicleAgent& launch_candidate) const;

@@ -749,6 +749,34 @@ A1Coordinator::PairAuthority A1Coordinator::authorityForPair(
     return result;
 }
 
+std::optional<A1Coordinator::WaiterStopConstraint>
+A1Coordinator::waiterStopConstraint(const VehicleAgent& waiter) const {
+    if (!waiter.active() || waiter.mission_phase != MissionPhase::TO_A1) {
+        return std::nullopt;
+    }
+    std::optional<WaiterStopConstraint> selected;
+    for (const auto& entry : departure_cluster_commitments_) {
+        const DepartureClusterCommitment& commitment = entry.second;
+        if (!commitment.active || commitment.other_id != waiter.id ||
+            commitment.other_path_gen != waiter.path_gen) {
+            continue;
+        }
+        WaiterStopConstraint candidate;
+        candidate.owner_id = commitment.owner_id;
+        candidate.waiter_id = commitment.other_id;
+        candidate.waiter_path_gen = commitment.other_path_gen;
+        candidate.waiter_stop_s = commitment.waiter_stop_s;
+        if (!selected ||
+            candidate.waiter_stop_s < selected->waiter_stop_s - 1e-9 ||
+            (std::abs(candidate.waiter_stop_s - selected->waiter_stop_s) <=
+                 1e-9 &&
+             candidate.owner_id < selected->owner_id)) {
+            selected = candidate;
+        }
+    }
+    return selected;
+}
+
 A1Coordinator::A1LaunchAdmission A1Coordinator::checkA1LaunchAdmission(
     const VehicleAgent& service_owner,
     const VehicleAgent& launch_candidate) const {

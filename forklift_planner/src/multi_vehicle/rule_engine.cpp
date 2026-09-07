@@ -1023,6 +1023,70 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         it = conflict_reservations_.erase(it);
     }
 
+    auto predictionTtcToS = [](
+            const VehicleAgent& vehicle,
+            const std::vector<PredictedKinematicSample>& prediction,
+            double target_s) -> std::optional<double> {
+        if (vehicle.path_s >= target_s - 1e-9) return 0.0;
+        if (prediction.empty()) return std::nullopt;
+        const PredictedKinematicSample* previous = &prediction.front();
+        if (previous->s >= target_s - 1e-9) return previous->t;
+        for (size_t index = 1; index < prediction.size(); ++index) {
+            const PredictedKinematicSample& current = prediction[index];
+            if (current.s < target_s - 1e-9) {
+                previous = &current;
+                continue;
+            }
+            const double ds = current.s - previous->s;
+            if (ds <= 1e-9) return current.t;
+            const double ratio = std::max(
+                0.0, std::min(1.0, (target_s - previous->s) / ds));
+            return previous->t + ratio * (current.t - previous->t);
+        }
+        return std::nullopt;
+    };
+
+    std::vector<std::optional<A1Coordinator::WaiterStopConstraint>>
+        a1_waiter_constraints(vehicles.size());
+    std::vector<std::optional<double>> a1_stop_ttcs(vehicles.size());
+    for (size_t index = 0; index < vehicles.size(); ++index) {
+        VehicleAgent& waiter = vehicles[index];
+        a1_waiter_constraints[index] =
+            a1_coordinator_.waiterStopConstraint(waiter);
+        if (!a1_waiter_constraints[index]) continue;
+        const auto& constraint = *a1_waiter_constraints[index];
+        a1_stop_ttcs[index] = predictionTtcToS(
+            waiter, predictions[index], constraint.waiter_stop_s);
+        if (!a1_stop_ttcs[index]) continue;
+        const DynamicInterventionBand band =
+            classifyDynamicInterventionBand(*a1_stop_ttcs[index], cfg_);
+        VehicleAction action = selectRollingSpeedAction(band, false);
+        const TtcStopBoundary stop_boundary = evaluateTtcStopBoundary(
+            *a1_stop_ttcs[index], action, cfg_);
+        if (stop_boundary.stop_required) action = VehicleAction::STOP;
+        if (action != VehicleAction::NOMINAL) {
+            applyActionRequest(
+                waiter, action,
+                "a1_stop_ttc_" + std::string(actionName(action)) + "_V" +
+                    std::to_string(constraint.owner_id),
+                constraint.owner_id);
+        }
+        if (coord_log_sink_) {
+            std::ostringstream line;
+            line << std::fixed << std::setprecision(3)
+                 << "[A1-STOP-TTC] owner=V" << constraint.owner_id
+                 << " waiter=V" << waiter.id
+                 << " waiter_path_gen=" << constraint.waiter_path_gen
+                 << " waiter_s=" << waiter.path_s
+                 << " stop_s=" << constraint.waiter_stop_s
+                 << " ttc=" << *a1_stop_ttcs[index]
+                 << " band=" << dynamicInterventionBandName(band)
+                 << " stop_threshold=" << stop_boundary.stop_threshold
+                 << " selected=" << actionName(action);
+            coord_log_sink_(line.str());
+        }
+    }
+
     auto eventZone = [&](const PairInteractionResult& interaction,
                          const std::vector<PredictedKinematicSample>& pa,
                          const std::vector<PredictedKinematicSample>& pb) {
@@ -1078,9 +1142,44 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                                           std::max(a.id, b.id)};
             // Crossing truth is generated directly from synchronized OBBs.
             // Static path geometry is intentionally absent from this call.
-            const PairInteractionResult direct_interaction =
+            PairInteractionResult direct_interaction =
                 detectPairInteractionFromPredictions(
                     a, b, {}, predictions[i], predictions[j]);
+            const bool a_clipped_by_a1_stop = direct_interaction.event.valid &&
+                a1_waiter_constraints[i] &&
+                direct_interaction.event.collision_s_a >
+                    a1_waiter_constraints[i]->waiter_stop_s + 1e-9;
+            const bool b_clipped_by_a1_stop = direct_interaction.event.valid &&
+                a1_waiter_constraints[j] &&
+                direct_interaction.event.collision_s_b >
+                    a1_waiter_constraints[j]->waiter_stop_s + 1e-9;
+            if (a_clipped_by_a1_stop || b_clipped_by_a1_stop) {
+                if (coord_log_sink_) {
+                    std::ostringstream line;
+                    line << std::fixed << std::setprecision(3)
+                         << "[A1-STOP-CLIP] pair=V" << key.first << "-V"
+                         << key.second << " clipped_waiter=";
+                    if (a_clipped_by_a1_stop) {
+                        line << "V" << a.id
+                             << " collision_s="
+                             << direct_interaction.event.collision_s_a
+                             << " stop_s="
+                             << a1_waiter_constraints[i]->waiter_stop_s;
+                    }
+                    if (b_clipped_by_a1_stop) {
+                        if (a_clipped_by_a1_stop) line << ",";
+                        line << "V" << b.id
+                             << " collision_s="
+                             << direct_interaction.event.collision_s_b
+                             << " stop_s="
+                             << a1_waiter_constraints[j]->waiter_stop_s;
+                    }
+                    line << " result=ordinary_overlap_unreachable";
+                    coord_log_sink_(line.str());
+                }
+                direct_interaction.event = TimedConflictEvent{};
+                direct_interaction.type = PairInteractionType::NONE;
+            }
             // Current-path conflicts remain ordinary even when the same pair
             // owns an active frozen A1 departure transaction. A1Coordinator
             // independently enforces only its frozen protected intervals.
