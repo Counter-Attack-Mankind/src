@@ -1,0 +1,12 @@
+status=FAIL
+failure_type=HARD_GUARD
+seed=2024
+vehicle_count=2
+ticks=107373
+sim_time_s=10737.300
+hard_guard_events=1
+wedge_episodes=8
+V0_tasks=135
+V0_max_wait_s=49.200
+V1_tasks=135
+V1_max_wait_s=39.500

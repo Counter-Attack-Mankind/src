@@ -68,6 +68,10 @@ private:
         const std::map<std::pair<int, int>,
                        RuleEngine::DepartureClusterCommitment>&
             departure_clusters) const;
+    void addDeadlockRetreatTargetMarkers(
+        visualization_msgs::MarkerArray& arr,
+        const std::vector<VehicleAgent>& vehicles,
+        const RecoveryDirective& recovery) const;
 
     ros::Publisher pub_;
     const MapParam& mp_;

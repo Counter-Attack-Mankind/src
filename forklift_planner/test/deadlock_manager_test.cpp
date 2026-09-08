@@ -40,10 +40,6 @@ int main() {
     geometry.vehicle_a = a.id; geometry.vehicle_b = b.id;
     geometry.path_gen_a = a.path_gen; geometry.path_gen_b = b.path_gen;
     geometry.preferred_priority_vehicle_id = b.id;
-    PotentialConflictZone zone;
-    zone.s_self_enter = 0.85; zone.s_self_exit = 1.15;
-    zone.s_other_enter = 0.85; zone.s_other_exit = 1.15;
-    geometry.zones.push_back(zone);
 
     std::vector<VehicleAgent> vehicles{a, b};
     DeadlockManager manager(map, config);

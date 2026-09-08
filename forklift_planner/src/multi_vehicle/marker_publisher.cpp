@@ -417,6 +417,74 @@ void MarkerPublisher::addLabelMarker(visualization_msgs::MarkerArray& arr,
     arr.markers.push_back(m);
 }
 
+void MarkerPublisher::addDeadlockRetreatTargetMarkers(
+    visualization_msgs::MarkerArray& arr,
+    const std::vector<VehicleAgent>& vehicles,
+    const RecoveryDirective& recovery) const {
+    const ros::Time now = ros::Time::now();
+    auto erase = [&](const char* marker_ns) {
+        visualization_msgs::Marker marker;
+        marker.header.frame_id = pp_.frame_id;
+        marker.header.stamp = now;
+        marker.ns = marker_ns;
+        marker.id = 0;
+        marker.action = visualization_msgs::Marker::DELETE;
+        arr.markers.push_back(marker);
+    };
+
+    const bool visible = recovery.kind == RecoveryKind::NORMAL_DEADLOCK &&
+        (recovery.phase == RecoveryPhase::RETREAT ||
+         recovery.phase == RecoveryPhase::PASS);
+    const auto retreat = std::find_if(
+        vehicles.begin(), vehicles.end(), [&](const VehicleAgent& vehicle) {
+            return vehicle.id == recovery.retreat_vehicle_id;
+        });
+    if (!visible || retreat == vehicles.end() || retreat->track.empty() ||
+        retreat->path_gen != recovery.retreat_path_gen) {
+        erase("deadlock_retreat_target");
+        erase("deadlock_retreat_target_label");
+        return;
+    }
+
+    const RoughWp pose = retreat->track.poseAtS(std::max(
+        0.0, std::min(recovery.retreat_target_s,
+                      retreat->track.length())));
+    const double half_width = 0.75 * mp_.vehicle_width;
+    const double nx = -std::sin(pose.theta);
+    const double ny = std::cos(pose.theta);
+
+    visualization_msgs::Marker line;
+    line.header.frame_id = pp_.frame_id;
+    line.header.stamp = now;
+    line.ns = "deadlock_retreat_target";
+    line.id = 0;
+    line.type = visualization_msgs::Marker::LINE_LIST;
+    line.action = visualization_msgs::Marker::ADD;
+    line.pose.orientation.w = 1.0;
+    line.scale.x = 0.025;
+    line.color = rgba(1.0f, 0.15f, 0.85f, 1.0f);
+    line.points.push_back(pt3(pose.x - half_width * nx,
+                              pose.y - half_width * ny, 0.095));
+    line.points.push_back(pt3(pose.x + half_width * nx,
+                              pose.y + half_width * ny, 0.095));
+    arr.markers.push_back(line);
+
+    visualization_msgs::Marker label;
+    label.header = line.header;
+    label.ns = "deadlock_retreat_target_label";
+    label.id = 0;
+    label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+    label.action = visualization_msgs::Marker::ADD;
+    label.pose.position.x = pose.x + half_width * nx;
+    label.pose.position.y = pose.y + half_width * ny;
+    label.pose.position.z = 0.14;
+    label.pose.orientation.w = 1.0;
+    label.scale.z = 0.055;
+    label.color = line.color;
+    label.text = "V" + std::to_string(retreat->id) + " retreat target";
+    arr.markers.push_back(label);
+}
+
 void MarkerPublisher::addVisitedSlotMarkers(
     visualization_msgs::MarkerArray& arr,
     const std::vector<bool>& visited_slots) const {
@@ -902,6 +970,7 @@ void MarkerPublisher::publish(
     addVisitedSlotMarkers(arr, visited_slots);
     addA1DiagnosticMarkers(arr, vehicles, future_a1,
                            departure_clusters);
+    addDeadlockRetreatTargetMarkers(arr, vehicles, recovery);
     addOriginAxes(arr);  // 地图原点+XY正方向(标定核对用)
     for (const VehicleAgent& v : vehicles) {
         addPathMarker(arr, v);

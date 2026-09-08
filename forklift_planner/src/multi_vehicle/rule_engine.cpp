@@ -2320,7 +2320,6 @@ void RuleEngine::observeDeadlock(std::vector<VehicleAgent>& vehicles,
             geometry.path_gen_a = a.path_gen;
             geometry.path_gen_b = b.path_gen;
             geometry.preferred_priority_vehicle_id = priorityWinner(a, b);
-            geometry.zones = findConflictZones(a, b);
             geometry_items.push_back(std::move(geometry));
         }
     }

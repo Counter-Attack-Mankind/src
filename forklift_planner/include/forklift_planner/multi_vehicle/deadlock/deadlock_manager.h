@@ -84,7 +84,6 @@ struct DeadlockPairGeometry {
     int path_gen_a = -1;
     int path_gen_b = -1;
     int preferred_priority_vehicle_id = -1;
-    std::vector<PotentialConflictZone> zones;
 };
 
 class DeadlockManager {
@@ -174,8 +173,7 @@ private:
         int vehicle_a, int vehicle_b) const;
     RetreatEvaluation evaluateRetreat(
         const VehicleAgent& retreat, const VehicleAgent& passer,
-        const std::vector<VehicleAgent>& vehicles,
-        const DeadlockPairGeometry& geometry) const;
+        const std::vector<VehicleAgent>& vehicles) const;
     bool retreatSweepClear(const VehicleAgent& retreat,
                            const VehicleAgent& passer,
                            const std::vector<VehicleAgent>& vehicles,

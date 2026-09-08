@@ -1,6 +1,7 @@
 #include "forklift_planner/multi_vehicle/deadlock/deadlock_manager.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -230,8 +231,7 @@ bool DeadlockManager::lateOwnerRetreatConflictsWithOwnerPath(
 
 DeadlockManager::RetreatEvaluation DeadlockManager::evaluateRetreat(
     const VehicleAgent& retreat, const VehicleAgent& passer,
-    const std::vector<VehicleAgent>& vehicles,
-    const DeadlockPairGeometry& geometry) const {
+    const std::vector<VehicleAgent>& vehicles) const {
     RetreatEvaluation result;
     result.retreat_vehicle_id = retreat.id;
     result.pass_vehicle_id = passer.id;
@@ -240,127 +240,114 @@ DeadlockManager::RetreatEvaluation DeadlockManager::evaluateRetreat(
         return result;
     }
 
-    const bool geometry_reversed = geometry.vehicle_a != retreat.id;
-    const PotentialConflictZone* selected = nullptr;
-    double best_distance = std::numeric_limits<double>::infinity();
-    for (const PotentialConflictZone& zone : geometry.zones) {
-        const double retreat_enter = geometry_reversed
-                                         ? zone.s_other_enter
-                                         : zone.s_self_enter;
-        const double retreat_exit = geometry_reversed
-                                        ? zone.s_other_exit
-                                        : zone.s_self_exit;
-        const double pass_enter = geometry_reversed
-                                      ? zone.s_self_enter
-                                      : zone.s_other_enter;
-        const double pass_exit = geometry_reversed
-                                     ? zone.s_self_exit
-                                     : zone.s_other_exit;
-        if (retreat_exit + 1e-9 < retreat.path_s ||
-            pass_exit + 1e-9 < passer.path_s) {
-            continue;
+    // NORMAL_DEADLOCK geometry is derived directly from the two bare-body
+    // OBBs.  Build the overlap set in (pass_s, retreat_s), seed it with the
+    // overlap sample nearest the current state, then retain only its
+    // 8-connected component.  A later, disconnected crossing must not extend
+    // this recovery transaction.
+    constexpr double kClosureStep = 0.01;
+    auto samples = [&](double begin, double end) {
+        const double distance = std::max(0.0, end - begin);
+        const size_t count = std::max<size_t>(
+            1, static_cast<size_t>(std::ceil(distance / kClosureStep)));
+        std::vector<double> values(count + 1);
+        for (size_t i = 0; i <= count; ++i) {
+            values[i] = begin + distance * static_cast<double>(i) /
+                                    static_cast<double>(count);
         }
-        const double distance = std::max(0.0, retreat_enter - retreat.path_s) +
-                                std::max(0.0, pass_enter - passer.path_s);
-        if (distance < best_distance) {
-            best_distance = distance;
-            selected = &zone;
-        }
-    }
-    if (selected == nullptr) {
-        result.reason = "no_active_conflict_corridor";
+        return values;
+    };
+    const std::vector<double> pass_samples = samples(
+        passer.path_s, passer.track.length());
+    const std::vector<double> retreat_samples = samples(0.0, retreat.path_s);
+    const size_t rows = pass_samples.size();
+    const size_t cols = retreat_samples.size();
+    if (rows == 0 || cols == 0 ||
+        rows > std::numeric_limits<size_t>::max() / cols) {
+        result.reason = "invalid_obb_closure_grid";
         return result;
     }
 
-    double retreat_component_enter = geometry_reversed
-        ? selected->s_other_enter : selected->s_self_enter;
-    double retreat_component_exit = geometry_reversed
-        ? selected->s_other_exit : selected->s_self_exit;
-    double pass_component_enter = geometry_reversed
-        ? selected->s_self_enter : selected->s_other_enter;
-    double zone_pass_exit = geometry_reversed
-        ? selected->s_self_exit : selected->s_other_exit;
-    bool expanded = true;
-    while (expanded) {
-        expanded = false;
-        for (const PotentialConflictZone& zone : geometry.zones) {
-            const double retreat_enter = geometry_reversed
-                ? zone.s_other_enter : zone.s_self_enter;
-            const double retreat_exit = geometry_reversed
-                ? zone.s_other_exit : zone.s_self_exit;
-            const double pass_enter = geometry_reversed
-                ? zone.s_self_enter : zone.s_other_enter;
-            const double pass_exit = geometry_reversed
-                ? zone.s_self_exit : zone.s_other_exit;
-            const bool touches_retreat =
-                retreat_enter <= retreat_component_exit +
-                                      config_.deadlock_retreat_clearance &&
-                retreat_exit + config_.deadlock_retreat_clearance >=
-                    retreat_component_enter;
-            const bool touches_pass =
-                pass_enter <= zone_pass_exit +
-                                  config_.deadlock_retreat_clearance &&
-                pass_exit + config_.deadlock_retreat_clearance >=
-                    pass_component_enter;
-            if (!touches_retreat || !touches_pass) continue;
-            const double old_retreat_enter = retreat_component_enter;
-            const double old_retreat_exit = retreat_component_exit;
-            const double old_pass_enter = pass_component_enter;
-            const double old_pass_exit = zone_pass_exit;
-            retreat_component_enter = std::min(retreat_component_enter,
-                                               retreat_enter);
-            retreat_component_exit = std::max(retreat_component_exit,
-                                              retreat_exit);
-            pass_component_enter = std::min(pass_component_enter, pass_enter);
-            zone_pass_exit = std::max(zone_pass_exit, pass_exit);
-            expanded = old_retreat_enter != retreat_component_enter ||
-                       old_retreat_exit != retreat_component_exit ||
-                       old_pass_enter != pass_component_enter ||
-                       old_pass_exit != zone_pass_exit;
-        }
+    std::vector<OBB> pass_bodies;
+    std::vector<OBB> retreat_bodies;
+    pass_bodies.reserve(rows);
+    retreat_bodies.reserve(cols);
+    for (double s : pass_samples) {
+        pass_bodies.push_back(makeBody(passer.track.poseAtS(s),
+                                       map_param_, 0.0));
     }
-    const double sweep_step = std::max(
-        0.005, std::min(0.01, config_.path_validation_step));
-    result.pass_clear_s = std::min(
-        passer.track.length(), zone_pass_exit +
-                                   config_.deadlock_retreat_clearance +
-                                   sweep_step);
+    for (double s : retreat_samples) {
+        retreat_bodies.push_back(makeBody(retreat.track.poseAtS(s),
+                                          map_param_, 0.0));
+    }
 
-    std::vector<OBB> pass_corridor;
-    sampleInterval(passer.path_s, result.pass_clear_s, sweep_step,
-                   [&](double pass_s) {
-        pass_corridor.push_back(makeBody(passer.track.poseAtS(pass_s),
-                                         map_param_, 0.0));
-        return true;
-    });
-
-    const double search_step = config_.deadlock_retreat_search_step;
-    auto targetClearsCorridor = [&](double candidate_s) {
-        const OBB stopped = makeBody(retreat.track.poseAtS(candidate_s),
-                                     map_param_, 0.0);
-        for (const OBB& pass_body : pass_corridor) {
-            if (overlaps(stopped, pass_body)) return false;
-        }
-        return true;
-    };
-
-    bool found = false;
-    for (double candidate_s = std::max(0.0, retreat.path_s - search_step);;
-         candidate_s = std::max(0.0, candidate_s - search_step)) {
-        if (targetClearsCorridor(candidate_s) &&
-            retreatSweepClear(retreat, passer, vehicles, candidate_s)) {
-            const double safe_target_s = std::max(
-                0.0, candidate_s - config_.deadlock_retreat_clearance);
-            if (targetClearsCorridor(safe_target_s) &&
-                retreatSweepClear(retreat, passer, vehicles, safe_target_s)) {
-                result.target_s = safe_target_s;
-                found = true;
-                break;
+    std::vector<uint8_t> overlap_grid(rows * cols, 0);
+    size_t seed = rows * cols;
+    double seed_distance_sq = std::numeric_limits<double>::infinity();
+    for (size_t pass_i = 0; pass_i < rows; ++pass_i) {
+        const double pass_delta = pass_samples[pass_i] - passer.path_s;
+        for (size_t retreat_i = 0; retreat_i < cols; ++retreat_i) {
+            if (!overlaps(pass_bodies[pass_i],
+                          retreat_bodies[retreat_i])) {
+                continue;
+            }
+            const size_t index = pass_i * cols + retreat_i;
+            overlap_grid[index] = 1;
+            const double retreat_delta =
+                retreat.path_s - retreat_samples[retreat_i];
+            const double distance_sq = pass_delta * pass_delta +
+                                       retreat_delta * retreat_delta;
+            if (distance_sq < seed_distance_sq) {
+                seed_distance_sq = distance_sq;
+                seed = index;
             }
         }
-        if (candidate_s <= 1e-9) break;
     }
-    if (!found) {
+    if (seed == overlap_grid.size()) {
+        result.reason = "no_obb_overlap_component";
+        return result;
+    }
+
+    size_t min_retreat_i = seed % cols;
+    size_t max_pass_i = seed / cols;
+    std::vector<size_t> frontier{seed};
+    overlap_grid[seed] = 2;
+    for (size_t head = 0; head < frontier.size(); ++head) {
+        const size_t index = frontier[head];
+        const size_t pass_i = index / cols;
+        const size_t retreat_i = index % cols;
+        min_retreat_i = std::min(min_retreat_i, retreat_i);
+        max_pass_i = std::max(max_pass_i, pass_i);
+        for (int dp = -1; dp <= 1; ++dp) {
+            for (int dr = -1; dr <= 1; ++dr) {
+                if (dp == 0 && dr == 0) continue;
+                const std::ptrdiff_t next_pass =
+                    static_cast<std::ptrdiff_t>(pass_i) + dp;
+                const std::ptrdiff_t next_retreat =
+                    static_cast<std::ptrdiff_t>(retreat_i) + dr;
+                if (next_pass < 0 || next_retreat < 0 ||
+                    next_pass >= static_cast<std::ptrdiff_t>(rows) ||
+                    next_retreat >= static_cast<std::ptrdiff_t>(cols)) {
+                    continue;
+                }
+                const size_t next = static_cast<size_t>(next_pass) * cols +
+                                    static_cast<size_t>(next_retreat);
+                if (overlap_grid[next] != 1) continue;
+                overlap_grid[next] = 2;
+                frontier.push_back(next);
+            }
+        }
+    }
+
+    result.pass_clear_s = pass_samples[max_pass_i];
+    const double retreat_clear_boundary_s = retreat_samples[min_retreat_i];
+    result.target_s = std::max(
+        0.0, retreat_clear_boundary_s -
+                 config_.deadlock_retreat_clearance);
+    if (result.target_s >= retreat.path_s - 1e-9 ||
+        !retreatPoseClearsPassCorridor(
+            retreat, passer, result.target_s, result.pass_clear_s) ||
+        !retreatSweepClear(retreat, passer, vehicles, result.target_s)) {
         result.reason = "retreat_sweep_or_corridor_blocked";
         return result;
     }
@@ -775,7 +762,7 @@ void DeadlockManager::update(
 
     const DeadlockPairGeometry* observed_geometry = geometryFor(
         pair_geometry, candidate_a->id, candidate_b->id);
-    if (observed_geometry == nullptr || observed_geometry->zones.empty()) {
+    if (observed_geometry == nullptr) {
         candidate_ = {};
         directive_ = {};
         return;
@@ -824,11 +811,9 @@ void DeadlockManager::update(
 
     RetreatEvaluation a_retreat;
     RetreatEvaluation b_retreat;
-    if (geometry != nullptr && !geometry->zones.empty()) {
-        a_retreat = evaluateRetreat(*candidate_a, *candidate_b, vehicles,
-                                    *geometry);
-        b_retreat = evaluateRetreat(*candidate_b, *candidate_a, vehicles,
-                                    *geometry);
+    if (geometry != nullptr) {
+        a_retreat = evaluateRetreat(*candidate_a, *candidate_b, vehicles);
+        b_retreat = evaluateRetreat(*candidate_b, *candidate_a, vehicles);
     } else {
         a_retreat.retreat_vehicle_id = candidate_a->id;
         a_retreat.pass_vehicle_id = candidate_b->id;
