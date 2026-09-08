@@ -212,6 +212,16 @@ int RuleEngine::priorityWinner(const VehicleAgent& a,
         if (b_wants_a_slot && !a_wants_b_slot) return a.id;  // a 占用者,先清出
     }
 
+    // The existing continuous A1 service commitment is the second-level
+    // ordinary-road authority. Its creation, lock and release remain wholly
+    // owned by A1Coordinator; pair priority only consumes the current owner.
+    const FutureA1Commitment& a1 = a1_coordinator_.futureA1Commitment();
+    if (a1.valid()) {
+        const bool a_is_owner = a.id == a1.owner_id;
+        const bool b_is_owner = b.id == a1.owner_id;
+        if (a_is_owner != b_is_owner) return a_is_owner ? a.id : b.id;
+    }
+
     // Ordinary-road authority is the existing deterministic total order.
     // Local interaction geometry (including same-direction front/rear order)
     // is not a second priority system.
@@ -2362,6 +2372,7 @@ void RuleEngine::observeDeadlock(std::vector<VehicleAgent>& vehicles,
             geometry.vehicle_b = b.id;
             geometry.path_gen_a = a.path_gen;
             geometry.path_gen_b = b.path_gen;
+            geometry.preferred_priority_vehicle_id = priorityWinner(a, b);
             geometry.zones = findConflictZones(a, b);
             geometry_items.push_back(std::move(geometry));
         }

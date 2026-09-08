@@ -56,6 +56,7 @@ struct DeadlockPairGeometry {
     int vehicle_b = -1;
     int path_gen_a = -1;
     int path_gen_b = -1;
+    int preferred_priority_vehicle_id = -1;
     std::vector<PotentialConflictZone> zones;
 };
 

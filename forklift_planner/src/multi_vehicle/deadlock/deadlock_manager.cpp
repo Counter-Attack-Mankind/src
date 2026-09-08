@@ -548,7 +548,10 @@ void DeadlockManager::update(
     }
 
     std::ostringstream evaluation;
+    const int preferred_priority_id =
+        geometry != nullptr ? geometry->preferred_priority_vehicle_id : -1;
     evaluation << "pair=V" << candidate_a->id << "-V" << candidate_b->id
+               << " preferred_priority=V" << preferred_priority_id
                << " a_retreat_feasible=" << (a_retreat.feasible ? 1 : 0)
                << " a_distance=" << a_retreat.distance
                << " a_reason=" << a_retreat.reason
@@ -558,18 +561,29 @@ void DeadlockManager::update(
     emit("EVAL", evaluation.str(), emit_logs);
 
     const RetreatEvaluation* selected = nullptr;
-    if (a_retreat.feasible && b_retreat.feasible) {
-        if (std::abs(a_retreat.distance - b_retreat.distance) <= 1e-9) {
-            selected = a_retreat.retreat_vehicle_id < b_retreat.retreat_vehicle_id
-                           ? &a_retreat : &b_retreat;
-        } else {
-            selected = a_retreat.distance < b_retreat.distance
-                           ? &a_retreat : &b_retreat;
-        }
-    } else if (a_retreat.feasible) {
-        selected = &a_retreat;
-    } else if (b_retreat.feasible) {
-        selected = &b_retreat;
+    std::string selection_reason;
+    const bool a_is_priority = preferred_priority_id == candidate_a->id;
+    const bool b_is_priority = preferred_priority_id == candidate_b->id;
+    const RetreatEvaluation* preferred_retreat = nullptr;
+    const RetreatEvaluation* safety_fallback = nullptr;
+    if (a_is_priority || b_is_priority) {
+        preferred_retreat = a_is_priority ? &b_retreat : &a_retreat;
+        safety_fallback = a_is_priority ? &a_retreat : &b_retreat;
+    } else {
+        // priorityWinner() can return -1 only when priority tiebreaking is
+        // explicitly disabled. Keep recovery deterministic without reviving
+        // distance-based role selection.
+        preferred_retreat = candidate_a->id < candidate_b->id
+            ? &b_retreat : &a_retreat;
+        safety_fallback = preferred_retreat == &a_retreat
+            ? &b_retreat : &a_retreat;
+    }
+    if (preferred_retreat->feasible) {
+        selected = preferred_retreat;
+        selection_reason = "priority_yielding_vehicle_retreat";
+    } else if (safety_fallback->feasible) {
+        selected = safety_fallback;
+        selection_reason = "preferred_retreat_infeasible";
     }
 
     candidate_ = {};
@@ -600,7 +614,7 @@ void DeadlockManager::update(
     const double recovery_speed = std::max(
         1e-6, config_.deadlock_retreat_speed);
     transaction_.estimated_retreat_time = selected->distance / recovery_speed;
-    transaction_.reason = "minimum_safe_retreat";
+    transaction_.reason = selection_reason;
     refreshDirective();
     std::ostringstream selection;
     selection << "pair=V" << candidate_a->id << "-V" << candidate_b->id
@@ -608,7 +622,8 @@ void DeadlockManager::update(
               << " target_s=" << selected->target_s
               << " pass_clear_s=" << selected->pass_clear_s
               << " distance=" << selected->distance
-              << " estimated_time=" << transaction_.estimated_retreat_time;
+              << " estimated_time=" << transaction_.estimated_retreat_time
+              << " selection_reason=" << selection_reason;
     emit("SELECT", selection.str(), emit_logs);
 }
 
