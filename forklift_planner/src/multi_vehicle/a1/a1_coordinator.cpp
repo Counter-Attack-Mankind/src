@@ -440,6 +440,10 @@ A1Coordinator::retainLockedFutureA1Owner(
 void A1Coordinator::refreshPlanningContext(
     const std::vector<VehicleAgent>& vehicles, double horizon, double now,
     const ArrivalKinematics& kinematics) {
+    // Retain the same read-only allocator-cache lookup used for arrival
+    // prediction so UNLOAD_DWELL waiters can preview their already-built
+    // next B->A1 service without generating another path.
+    pickup_leg_track_ = kinematics.pickup_leg_track;
     const FutureA1Commitment previous = future_a1_commitment_;
     const ArrivalSummary arrivals =
         predictA1Arrivals(vehicles, horizon, kinematics);
@@ -932,14 +936,36 @@ void A1Coordinator::enforceFutureA1Admission(
     if (protected_until <= 1e-9) return;
 
     for (VehicleAgent& other : vehicles) {
-        if (other.id == owner->id || !other.active() ||
-            other.mission_phase != MissionPhase::TO_A1 ||
-            other.track.empty()) {
+        if (other.id == owner->id) {
             continue;
         }
-        const bool preview_is_lo = exit_preview.id < other.id;
-        const VehicleAgent& lo = preview_is_lo ? exit_preview : other;
-        const VehicleAgent& hi = preview_is_lo ? other : exit_preview;
+        const bool active_waiter = other.active() &&
+            other.mission_phase == MissionPhase::TO_A1 &&
+            !other.track.empty();
+        const bool dwell_waiter = other.mode == VehicleMode::DWELL &&
+            other.mission_phase == MissionPhase::UNLOAD_DWELL;
+        if (!active_waiter && !dwell_waiter) continue;
+
+        VehicleAgent waiter_preview = other;
+        if (dwell_waiter) {
+            PathTrack next_pickup;
+            if (!pickup_leg_track_ || other.current_slot < 0 ||
+                !pickup_leg_track_(other.current_slot, next_pickup) ||
+                next_pickup.empty()) {
+                continue;
+            }
+            waiter_preview.track = std::move(next_pickup);
+            waiter_preview.path_s = 0.0;
+            waiter_preview.path_gen = other.path_gen + 1;
+            waiter_preview.current_speed = 0.0;
+            waiter_preview.mode = VehicleMode::ACTIVE;
+            waiter_preview.mission_phase = MissionPhase::TO_A1;
+            waiter_preview.leg_target = LegTargetKind::A1;
+        }
+        const double waiter_path_s = dwell_waiter ? 0.0 : other.path_s;
+        const bool preview_is_lo = exit_preview.id < waiter_preview.id;
+        const VehicleAgent& lo = preview_is_lo ? exit_preview : waiter_preview;
+        const VehicleAgent& hi = preview_is_lo ? waiter_preview : exit_preview;
         const std::pair<int, int> key{lo.id, hi.id};
         ConflictCacheEntry& cache = future_a1_conflict_cache_[key];
         if (cache.gen_lo != lo.path_gen || cache.gen_hi != hi.path_gen) {
@@ -949,7 +975,7 @@ void A1Coordinator::enforceFutureA1Admission(
         }
         const FutureA1ZoneSelection future_zones =
             selectFutureA1ProtectedZones(cache.blocks, preview_is_lo,
-                                         protected_until, other.path_s);
+                                         protected_until, waiter_path_s);
         std::optional<double> future_exit_enter_s;
         ConflictZone future_selected;
         if (future_zones.upstream_index >= 0) {
@@ -977,8 +1003,9 @@ void A1Coordinator::enforceFutureA1Admission(
             staged.transaction_owner_path_gen = owner->path_gen;
             staged.owner_path_gen = exit_preview.path_gen;
             staged.other_id = other.id;
-            staged.other_path_gen = other.path_gen;
+            staged.other_path_gen = waiter_preview.path_gen;
             staged.frozen_owner_track = exit_preview.track;
+            staged.frozen_waiter_track = waiter_preview.track;
             staged.seed_indices = future_zones.seed_indices;
             staged.cluster_indices = future_zones.protected_indices;
             staged.waiter_stop_boundary_s = selected_stop_boundary_s;
@@ -1003,13 +1030,14 @@ void A1Coordinator::enforceFutureA1Admission(
             }
             logDepartureCluster(coord_log_sink_, "CREATE",
                                 "frozen_transaction", staged,
-                                owner->path_s, other.path_s);
+                                owner->path_s, waiter_path_s);
             departure_cluster_commitments_[cluster_key] = std::move(staged);
         }
 
         if (already_inside) continue;
-        const double distance = *selected_stop_s - other.path_s;
-        const double speed = std::max(0.0, other.current_speed);
+        const double distance = *selected_stop_s - waiter_path_s;
+        const double speed = dwell_waiter
+            ? 0.0 : std::max(0.0, other.current_speed);
         const double stopping_distance =
             speed * speed / (2.0 * std::max(1e-6, cfg_.max_decel)) +
             speed * dt;
@@ -1033,7 +1061,8 @@ void A1Coordinator::enforceFutureA1Admission(
                  << " selected_stop_boundary_s="
                  << selected_stop_boundary_s
                  << " stop_s=" << *selected_stop_s
-                 << " other_s=" << other.path_s
+                 << " other_s=" << waiter_path_s
+                 << " waiter_phase=" << missionPhaseName(other.mission_phase)
                  << " already_inside=false";
             coord_log_sink_(line.str());
         }
@@ -1049,13 +1078,18 @@ void A1Coordinator::enforceDepartureClusterCommitments(
         VehicleAgent* owner = agentById(vehicles, commitment.owner_id);
         VehicleAgent* other = agentById(vehicles, commitment.other_id);
         if (owner == nullptr || other == nullptr) continue;
-        const bool waiter_identity_changed =
-            other->path_gen != commitment.other_path_gen ||
-            other->mission_phase != MissionPhase::TO_A1;
+        const bool dwell_waiter = other->mode == VehicleMode::DWELL &&
+            other->mission_phase == MissionPhase::UNLOAD_DWELL;
+        const bool active_waiter = other->mode == VehicleMode::ACTIVE &&
+            other->mission_phase == MissionPhase::TO_A1;
+        const bool waiter_identity_changed = !dwell_waiter &&
+            (!active_waiter ||
+             other->path_gen != commitment.other_path_gen);
+        const double waiter_path_s = dwell_waiter ? 0.0 : other->path_s;
         const bool waiter_crossed_boundary =
-            other->path_s > commitment.waiter_stop_boundary_s + 1e-9;
+            waiter_path_s > commitment.waiter_stop_boundary_s + 1e-9;
         const bool waiter_inside_closure = futureA1OtherInsideCluster(
-            commitment.intervals, other->path_s);
+            commitment.intervals, waiter_path_s);
         if (waiter_identity_changed || waiter_crossed_boundary ||
             waiter_inside_closure) {
             if (request_action) {
@@ -1076,8 +1110,9 @@ void A1Coordinator::enforceDepartureClusterCommitments(
             }
             continue;
         }
-        const double distance = commitment.waiter_stop_s - other->path_s;
-        const double speed = std::max(0.0, other->current_speed);
+        const double distance = commitment.waiter_stop_s - waiter_path_s;
+        const double speed = dwell_waiter
+            ? 0.0 : std::max(0.0, other->current_speed);
         const double stopping_distance =
             speed * speed / (2.0 * std::max(1e-6, cfg_.max_decel)) +
             speed * dt;
@@ -1089,7 +1124,7 @@ void A1Coordinator::enforceDepartureClusterCommitments(
         if (!commitment.hold_logged) {
             logDepartureCluster(coord_log_sink_, "HOLD",
                                 "cluster_stop_boundary", commitment,
-                                owner->path_s, other->path_s);
+                                owner->path_s, waiter_path_s);
             commitment.hold_logged = true;
         }
     }

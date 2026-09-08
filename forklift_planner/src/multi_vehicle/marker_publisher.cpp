@@ -155,11 +155,18 @@ void MarkerPublisher::addA1DiagnosticMarkers(
             [&](const VehicleAgent& vehicle) {
                 return vehicle.id == cluster.other_id;
             });
-        if (waiter != vehicles.end() &&
+        const bool active_waiter = waiter != vehicles.end() &&
             waiter->mission_phase == MissionPhase::TO_A1 &&
-            !waiter->track.empty()) {
+            !waiter->track.empty();
+        const bool dwell_waiter = waiter != vehicles.end() &&
+            waiter->mode == VehicleMode::DWELL &&
+            waiter->mission_phase == MissionPhase::UNLOAD_DWELL &&
+            !cluster.frozen_waiter_track.empty();
+        if (active_waiter || dwell_waiter) {
+            const PathTrack& waiter_track = active_waiter
+                ? waiter->track : cluster.frozen_waiter_track;
             const RoughWp pose =
-                waiter->track.poseAtS(cluster.waiter_stop_s);
+                waiter_track.poseAtS(cluster.waiter_stop_s);
             constexpr double kStopLineHalfLength = 0.18;
             const double nx = -std::sin(pose.theta);
             const double ny = std::cos(pose.theta);

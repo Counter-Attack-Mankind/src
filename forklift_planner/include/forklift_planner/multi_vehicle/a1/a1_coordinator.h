@@ -66,6 +66,7 @@ public:
         int other_id = -1;
         int other_path_gen = -1;
         PathTrack frozen_owner_track;
+        PathTrack frozen_waiter_track;
         std::vector<size_t> seed_indices;
         std::vector<size_t> cluster_indices;
         std::vector<FutureA1ConflictInterval> intervals;
@@ -253,6 +254,7 @@ private:
     std::set<std::tuple<int, int, int, int>> a1_decision_logs_;
     ServiceMetrics service_metrics_;
     std::function<void(const std::string&)> coord_log_sink_;
+    std::function<bool(int, PathTrack&)> pickup_leg_track_;
     std::string debug_log_source_ = "REAL";
     uint64_t debug_log_plan_id_ = 0;
     int debug_log_frame_id_ = -1;
