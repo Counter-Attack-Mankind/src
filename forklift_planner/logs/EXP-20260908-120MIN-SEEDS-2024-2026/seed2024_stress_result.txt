@@ -1,0 +1,12 @@
+status=FAIL
+failure_type=NO_PROGRESS_V1
+seed=2024
+vehicle_count=2
+ticks=46142
+sim_time_s=4614.200
+hard_guard_events=0
+wedge_episodes=11
+V0_tasks=55
+V0_max_wait_s=60.100
+V1_tasks=56
+V1_max_wait_s=60.100

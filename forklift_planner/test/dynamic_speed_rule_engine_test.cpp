@@ -508,8 +508,8 @@ int main() {
     }
 
     // A nominal overlap beyond the waiter's frozen stop line is not executable:
-    // clip only that event, keep the owner NOMINAL, and let the waiter consume
-    // its own stop-line TTC without changing ordinary pair priority.
+    // clip only that event and keep both vehicles NOMINAL while the waiter is
+    // still outside the physical braking distance of stop_s.
     RuleEngine clipped_engine(map_param, config);
     std::vector<std::string> clipped_logs;
     clipped_engine.setCoordLogSink(
@@ -546,12 +546,12 @@ int main() {
     if (clipped[0].requested_action != VehicleAction::NOMINAL) {
         return fail("post-stop-line overlap still constrained the A1 owner");
     }
-    if (clipped[1].requested_action != VehicleAction::CREEP ||
-        clipped[1].reason.rfind("a1_stop_ttc_CREEP_V0", 0) != 0) {
-        return fail("A1 stop TTC did not select waiter CREEP");
+    if (clipped[1].requested_action != VehicleAction::NOMINAL ||
+        clipped[1].reason != "clear") {
+        return fail("far A1 stop_s applied a premature speed action");
     }
     if (clipped_engine.dynamicSpeedMetrics().baseline_conflicts != 0 ||
-        !saw_a1_stop_ttc || !saw_a1_stop_clip) {
+        saw_a1_stop_ttc || !saw_a1_stop_clip) {
         return fail(
             "A1 stop boundary did not clip the unreachable overlap: baseline=" +
             std::to_string(clipped_engine.dynamicSpeedMetrics().
@@ -587,7 +587,7 @@ int main() {
     frozen_stop_engine.restore(frozen_state);
     frozen_stop_engine.decide(frozen_stop, 0.1, 15.0);
     if (frozen_stop[1].requested_action != VehicleAction::STOP ||
-        frozen_stop[1].reason != "a1_stop_ttc_STOP_V0" ||
+        frozen_stop[1].reason != "departure_cluster_priority" ||
         frozen_stop_engine.snapshot().a1.departure_clusters.empty() ||
         !frozen_stop_engine.snapshot().reservations.empty()) {
         return fail("frozen departure stop boundary protection was weakened");

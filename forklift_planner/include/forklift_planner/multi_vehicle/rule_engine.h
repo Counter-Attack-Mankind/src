@@ -178,6 +178,8 @@ public:
                     nullptr);
     void observeDeadlock(std::vector<VehicleAgent>& vehicles, double dt,
                          bool emit_logs);
+    void observeA1LateOwnerRecovery(
+        const std::vector<VehicleAgent>& vehicles, bool emit_logs);
     void applyRecoveryDirectiveToOutput(
         std::vector<VehicleAgent>& vehicles);
     double speedForAction(VehicleAction action) const;

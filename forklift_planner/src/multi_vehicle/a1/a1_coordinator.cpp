@@ -573,7 +573,7 @@ void A1Coordinator::logFutureA1Transition(
 }
 
 A1Coordinator::Snapshot A1Coordinator::snapshot() const {
-    return Snapshot{departure_cluster_commitments_};
+    return Snapshot{departure_cluster_commitments_, late_owner_recovery_};
 }
 
 void A1Coordinator::restore(const Snapshot& snapshot) {
@@ -601,6 +601,7 @@ void A1Coordinator::restore(const Snapshot& snapshot) {
         }
     }
     departure_cluster_commitments_ = snapshot.departure_clusters;
+    late_owner_recovery_ = snapshot.late_owner_recovery;
 }
 
 A1Coordinator::FutureA1ZoneSelection
@@ -822,6 +823,25 @@ A1Coordinator::A1LaunchAdmission A1Coordinator::checkA1LaunchAdmission(
     const FutureA1ZoneSelection selected = selectFutureA1ProtectedZones(
         blocks, exit_is_lo, service_owner.a1_departure_priority_until_s,
         launch_candidate.path_s);
+    if (selected.upstream_index >= 0) {
+        const ConflictZone& upstream = selected.normalized_zones[
+            static_cast<size_t>(selected.upstream_index)];
+        const std::optional<double> stop_s = futureA1StopS(
+            upstream.s_other_enter, cfg_.a1_stop_margin);
+        if (stop_s) {
+            result.waiter_stop_s = *stop_s;
+            // A parked vehicle must be able to clear its source-slot sweep
+            // before it can stop at the frozen A1 departure boundary.
+            result.spatial_stop_launch_infeasible =
+                *stop_s <= launch_candidate.slot_departure_clear_s + 1e-9;
+            if (result.spatial_stop_launch_infeasible) {
+                result.departure_resource_conflict = true;
+                result.protected_zone_count =
+                    std::max<size_t>(1, selected.protected_indices.size());
+                return result;
+            }
+        }
+    }
     const bool candidate_has_cleared_slot =
         launch_candidate.path_s + 1e-9 >=
         launch_candidate.slot_departure_clear_s;
@@ -854,6 +874,15 @@ void A1Coordinator::refreshDepartureClusterCommitments(
         logDepartureCluster(coord_log_sink_, event, reason, it->second,
                             owner ? owner->path_s : -1.0,
                             other ? other->path_s : -1.0);
+        if (late_owner_recovery_.valid() &&
+            late_owner_recovery_.owner_id == it->second.owner_id &&
+            late_owner_recovery_.owner_path_gen ==
+                it->second.owner_path_gen &&
+            late_owner_recovery_.intruder_id == it->second.other_id &&
+            late_owner_recovery_.intruder_path_gen ==
+                it->second.other_path_gen) {
+            late_owner_recovery_ = {};
+        }
         return departure_cluster_commitments_.erase(it);
     };
 
@@ -1012,7 +1041,7 @@ void A1Coordinator::enforceFutureA1Admission(
             staged.waiter_stop_s = *selected_stop_s;
             staged.active = true;
             staged.handed_off_from_future = true;
-            staged.handoff_already_inside = false;
+            staged.handoff_already_inside = already_inside;
             for (size_t index : future_zones.protected_indices) {
                 const ConflictZone& zone =
                     future_zones.normalized_zones[index];
@@ -1031,6 +1060,33 @@ void A1Coordinator::enforceFutureA1Admission(
             logDepartureCluster(coord_log_sink_, "CREATE",
                                 "frozen_transaction", staged,
                                 owner->path_s, waiter_path_s);
+            if (already_inside) {
+                late_owner_recovery_.owner_id = staged.owner_id;
+                late_owner_recovery_.transaction_owner_path_gen =
+                    staged.transaction_owner_path_gen;
+                late_owner_recovery_.owner_path_gen = staged.owner_path_gen;
+                late_owner_recovery_.intruder_id = staged.other_id;
+                late_owner_recovery_.intruder_path_gen =
+                    staged.other_path_gen;
+                late_owner_recovery_.waiter_stop_s = staged.waiter_stop_s;
+                late_owner_recovery_.frozen_owner_track =
+                    staged.frozen_owner_track;
+                late_owner_recovery_.frozen_waiter_track =
+                    staged.frozen_waiter_track;
+                late_owner_recovery_.intervals = staged.intervals;
+                if (coord_log_sink_) {
+                    std::ostringstream line;
+                    line << "[A1_LATE_OWNER] event=REQUIRED owner=V"
+                         << staged.owner_id << " intruder=V"
+                         << staged.other_id << " stop_s="
+                         << staged.waiter_stop_s
+                         << " transaction_owner_gen="
+                         << staged.transaction_owner_path_gen
+                         << " owner_departure_gen=" << staged.owner_path_gen
+                         << " intruder_gen=" << staged.other_path_gen;
+                    coord_log_sink_(line.str());
+                }
+            }
             departure_cluster_commitments_[cluster_key] = std::move(staged);
         }
 
@@ -1090,8 +1146,7 @@ void A1Coordinator::enforceDepartureClusterCommitments(
             waiter_path_s > commitment.waiter_stop_boundary_s + 1e-9;
         const bool waiter_inside_closure = futureA1OtherInsideCluster(
             commitment.intervals, waiter_path_s);
-        if (waiter_identity_changed || waiter_crossed_boundary ||
-            waiter_inside_closure) {
+        if (waiter_identity_changed) {
             if (request_action) {
                 request_action(*owner, VehicleAction::STOP,
                                "a1_admission_invariant_violation", other->id);
@@ -1099,16 +1154,52 @@ void A1Coordinator::enforceDepartureClusterCommitments(
                                "a1_admission_invariant_violation", owner->id);
             }
             if (!commitment.invariant_violation_logged) {
-                const char* reason = waiter_identity_changed
-                    ? "waiter_transaction_identity_changed"
-                    : waiter_crossed_boundary
-                        ? "waiter_crossed_frozen_boundary"
-                        : "waiter_entered_frozen_closure";
+                logAdmissionInvariantViolation(
+                    coord_log_sink_, commitment, *owner, *other,
+                    "waiter_transaction_identity_changed");
+                commitment.invariant_violation_logged = true;
+            }
+            continue;
+        }
+        if (commitment.handoff_already_inside &&
+            (waiter_crossed_boundary || waiter_inside_closure)) {
+            // The dedicated late-owner transaction owns this exceptional
+            // state. Hold only the intruder until DeadlockManager installs
+            // its continuous retreat directive; do not create a mutual STOP.
+            if (request_action) {
+                request_action(*other, VehicleAction::STOP,
+                               "a1_late_owner_recovery_pending", owner->id);
+            }
+            continue;
+        }
+        if (waiter_crossed_boundary || waiter_inside_closure) {
+            if (request_action) {
+                request_action(*owner, VehicleAction::STOP,
+                               "a1_admission_invariant_violation", other->id);
+                request_action(*other, VehicleAction::STOP,
+                               "a1_admission_invariant_violation", owner->id);
+            }
+            if (!commitment.invariant_violation_logged) {
+                const char* reason = waiter_crossed_boundary
+                    ? "waiter_crossed_frozen_boundary"
+                    : "waiter_entered_frozen_closure";
                 logAdmissionInvariantViolation(
                     coord_log_sink_, commitment, *owner, *other, reason);
                 commitment.invariant_violation_logged = true;
             }
             continue;
+        }
+        if (commitment.handoff_already_inside) {
+            commitment.handoff_already_inside = false;
+            if (late_owner_recovery_.valid() &&
+                late_owner_recovery_.owner_id == commitment.owner_id &&
+                late_owner_recovery_.owner_path_gen ==
+                    commitment.owner_path_gen &&
+                late_owner_recovery_.intruder_id == commitment.other_id &&
+                late_owner_recovery_.intruder_path_gen ==
+                    commitment.other_path_gen) {
+                late_owner_recovery_ = {};
+            }
         }
         const double distance = commitment.waiter_stop_s - waiter_path_s;
         const double speed = dwell_waiter

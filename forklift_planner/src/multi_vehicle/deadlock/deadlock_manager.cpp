@@ -60,7 +60,10 @@ RecoveryMotion RecoveryDirective::motionFor(int vehicle_id) const {
     //在死锁解决触发的恢复状态下，retreat车辆执行退让，pass车辆执行hold静止
     if (phase == RecoveryPhase::RETREAT) {
         if (vehicle_id == retreat_vehicle_id) return RecoveryMotion::RETREAT;
-        if (vehicle_id == pass_vehicle_id) return RecoveryMotion::HOLD;
+        if (vehicle_id == pass_vehicle_id &&
+            hold_pass_vehicle_during_retreat) {
+            return RecoveryMotion::HOLD;
+        }
     } else if (phase == RecoveryPhase::PASS) {
         if (vehicle_id == retreat_vehicle_id) return RecoveryMotion::HOLD;
     } else if (phase == RecoveryPhase::UNRESOLVED) {
@@ -144,6 +147,85 @@ bool DeadlockManager::retreatSweepClear(
         }
         return true;
     });
+}
+
+bool DeadlockManager::lateOwnerRetreatSweepClear(
+    const VehicleAgent& intruder, const VehicleAgent& owner,
+    const std::vector<VehicleAgent>& vehicles, double target_s,
+    bool ignore_owner) const {
+    if (intruder.track.empty() || target_s > intruder.path_s + 1e-9) {
+        return false;
+    }
+    const double sweep_step = std::max(
+        0.005, std::min(0.01, config_.path_validation_step));
+    return sampleInterval(intruder.path_s, target_s, sweep_step,
+                          [&](double intruder_s) {
+        const OBB body = makeBody(intruder.track.poseAtS(intruder_s),
+                                  map_param_, 0.0);
+        for (const VehicleAgent& other : vehicles) {
+            if (other.id == intruder.id || other.track.empty() ||
+                other.mode == VehicleMode::NEED_TASK ||
+                (ignore_owner && other.id == owner.id)) {
+                continue;
+            }
+            const OBB obstacle = makeBody(
+                other.track.poseAtS(vehiclePoseS(other)), map_param_, 0.0);
+            if (overlaps(body, obstacle)) return false;
+        }
+        return true;
+    });
+}
+
+bool DeadlockManager::lateOwnerPoseClearsClosure(
+    const PathTrack& intruder_track, double intruder_s,
+    const PathTrack& owner_track,
+    const std::vector<PotentialConflictZone>& closure_zones) const {
+    if (intruder_track.empty() || owner_track.empty() ||
+        closure_zones.empty()) {
+        return false;
+    }
+    const OBB intruder_body = makeBody(
+        intruder_track.poseAtS(intruder_s), map_param_, 0.0);
+    const double step = std::max(
+        0.005, std::min(0.01, config_.path_validation_step));
+    for (const PotentialConflictZone& zone : closure_zones) {
+        if (!sampleInterval(zone.s_self_enter, zone.s_self_exit, step,
+                            [&](double owner_s) {
+            const OBB owner_body = makeBody(owner_track.poseAtS(owner_s),
+                                             map_param_, 0.0);
+            return !overlaps(intruder_body, owner_body);
+        })) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool DeadlockManager::lateOwnerRetreatConflictsWithOwnerPath(
+    const VehicleAgent& intruder, double target_s,
+    const VehicleAgent& owner) const {
+    if (intruder.track.empty() || owner.track.empty() ||
+        owner.mode != VehicleMode::ACTIVE ||
+        owner.mission_phase != MissionPhase::TO_A1) {
+        return true;
+    }
+    const double step = std::max(
+        0.005, std::min(0.01, config_.path_validation_step));
+    bool conflict = false;
+    sampleInterval(intruder.path_s, target_s, step,
+                   [&](double intruder_s) {
+        const OBB intruder_body = makeBody(
+            intruder.track.poseAtS(intruder_s), map_param_, 0.0);
+        return sampleInterval(owner.path_s, owner.track.length(), step,
+                              [&](double owner_s) {
+            const OBB owner_body = makeBody(
+                owner.track.poseAtS(owner_s), map_param_, 0.0);
+            if (!overlaps(intruder_body, owner_body)) return true;
+            conflict = true;
+            return false;
+        }) && !conflict;
+    });
+    return conflict;
 }
 
 DeadlockManager::RetreatEvaluation DeadlockManager::evaluateRetreat(
@@ -291,6 +373,7 @@ DeadlockManager::RetreatEvaluation DeadlockManager::evaluateRetreat(
 
 void DeadlockManager::refreshDirective() {
     directive_ = {};
+    directive_.kind = transaction_.kind;
     directive_.phase = transaction_.phase;
     directive_.retreat_vehicle_id = transaction_.retreat_vehicle_id;
     directive_.pass_vehicle_id = transaction_.pass_vehicle_id;
@@ -303,6 +386,8 @@ void DeadlockManager::refreshDirective() {
     directive_.cooldown_vehicle_id = cooldown_.vehicle_id;
     directive_.cooldown_path_gen = cooldown_.path_gen;
     directive_.cooldown_remaining = cooldown_.remaining;
+    directive_.hold_pass_vehicle_during_retreat =
+        transaction_.hold_pass_vehicle_during_retreat;
     directive_.reason = transaction_.reason;
 }
 
@@ -315,7 +400,8 @@ void DeadlockManager::emit(const char* event, const std::string& details,
     const std::string name(event);
     if (name == "CONFIRMED" || name == "SELECT" ||
         name == "RETREAT_DONE" || name == "PASS_START" ||
-        name == "CLEAR" || name == "UNRESOLVED" || name == "ABORT") {
+        name == "CLEAR" || name == "UNRESOLVED" || name == "ABORT" ||
+        name.rfind("A1_LATE_OWNER_", 0) == 0) {
         ROS_WARN_STREAM(line);
     }
 }
@@ -352,6 +438,123 @@ void DeadlockManager::clearSuccessfulRecovery(
     refreshDirective();
 }
 
+void DeadlockManager::requestA1LateOwnerRecovery(
+    const A1LateOwnerRecoveryRequest& request,
+    const std::vector<VehicleAgent>& vehicles, bool emit_logs) {
+    if (!request.valid()) return;
+    if (transaction_.kind == RecoveryKind::A1_LATE_OWNER &&
+        transaction_.phase != RecoveryPhase::NONE &&
+        transaction_.retreat_vehicle_id == request.intruder_id &&
+        transaction_.pass_vehicle_id == request.owner_id &&
+        transaction_.retreat_path_gen == request.intruder_path_gen &&
+        transaction_.a1_transaction_owner_path_gen ==
+            request.transaction_owner_path_gen &&
+        transaction_.a1_owner_departure_path_gen ==
+            request.owner_departure_path_gen) {
+        return;
+    }
+
+    if (transaction_.phase != RecoveryPhase::NONE) {
+        abort("superseded_by_a1_late_owner", emit_logs);
+    }
+    candidate_ = {};
+    cooldown_ = {};
+
+    const VehicleAgent* intruder = vehicleById(vehicles,
+                                               request.intruder_id);
+    const VehicleAgent* owner = vehicleById(vehicles, request.owner_id);
+    if (intruder == nullptr || owner == nullptr || !intruder->active() ||
+        intruder->path_gen != request.intruder_path_gen) {
+        return;
+    }
+
+    const double margin = std::max(
+        0.005, config_.deadlock_retreat_clearance);
+    double target_s = std::max(0.0, request.waiter_stop_s - margin);
+    const double step = std::max(
+        0.005, std::min(0.01, config_.path_validation_step));
+    while (target_s > 1e-9 && !lateOwnerPoseClearsClosure(
+               request.frozen_intruder_track, target_s,
+               request.frozen_owner_track, request.closure_zones)) {
+        target_s = std::max(0.0, target_s - step);
+    }
+
+    transaction_ = {};
+    transaction_.kind = RecoveryKind::A1_LATE_OWNER;
+    transaction_.retreat_vehicle_id = request.intruder_id;
+    transaction_.pass_vehicle_id = request.owner_id;
+    transaction_.retreat_path_gen = request.intruder_path_gen;
+    transaction_.pass_path_gen = owner->path_gen;
+    transaction_.retreat_target_s = target_s;
+    transaction_.retreat_distance = std::max(
+        0.0, intruder->path_s - target_s);
+    transaction_.estimated_retreat_time =
+        transaction_.retreat_distance /
+        std::max(1e-6, config_.deadlock_retreat_speed);
+    transaction_.a1_transaction_owner_path_gen =
+        request.transaction_owner_path_gen;
+    transaction_.a1_owner_departure_path_gen =
+        request.owner_departure_path_gen;
+    transaction_.a1_waiter_stop_s = request.waiter_stop_s;
+    transaction_.a1_frozen_owner_track = request.frozen_owner_track;
+    transaction_.a1_frozen_intruder_track = request.frozen_intruder_track;
+    transaction_.a1_closure_zones = request.closure_zones;
+
+    const bool target_behind_stop =
+        target_s + 1e-9 < request.waiter_stop_s;
+    const bool target_clears = lateOwnerPoseClearsClosure(
+        request.frozen_intruder_track, target_s,
+        request.frozen_owner_track, request.closure_zones);
+    const bool sweep_clear = lateOwnerRetreatSweepClear(
+        *intruder, *owner, vehicles, target_s, true);
+    const bool owner_current_body_clear = lateOwnerRetreatSweepClear(
+        *intruder, *owner, vehicles, target_s, false);
+    transaction_.hold_pass_vehicle_during_retreat =
+        lateOwnerRetreatConflictsWithOwnerPath(*intruder, target_s, *owner);
+
+    std::ostringstream required;
+    required << "owner=V" << owner->id << " intruder=V" << intruder->id
+             << " stop_s=" << request.waiter_stop_s
+             << " target_s=" << target_s
+             << " transaction_owner_gen="
+             << request.transaction_owner_path_gen
+             << " owner_departure_gen="
+             << request.owner_departure_path_gen
+             << " intruder_gen=" << request.intruder_path_gen;
+    emit("A1_LATE_OWNER_REQUIRED", required.str(), emit_logs);
+
+    if (!target_behind_stop || !target_clears || !sweep_clear ||
+        !owner_current_body_clear) {
+        transaction_.phase = RecoveryPhase::UNRESOLVED;
+        transaction_.hold_pass_vehicle_during_retreat = true;
+        transaction_.reason = !target_behind_stop
+            ? "a1_late_owner_no_space_behind_stop_s"
+            : !target_clears
+                ? "a1_late_owner_target_still_inside_closure"
+                : !sweep_clear
+                    ? "a1_late_owner_retreat_sweep_blocked"
+                    : "a1_late_owner_owner_current_body_blocks_retreat";
+        refreshDirective();
+        emit("A1_LATE_OWNER_UNRESOLVED",
+             required.str() + " reason=" + transaction_.reason,
+             emit_logs);
+        return;
+    }
+
+    transaction_.phase = RecoveryPhase::RETREAT;
+    transaction_.reason = transaction_.hold_pass_vehicle_during_retreat
+        ? "a1_late_owner_retreat_owner_hold"
+        : "a1_late_owner_retreat_owner_parallel";
+    refreshDirective();
+    std::ostringstream selected;
+    selected << required.str()
+             << " distance=" << transaction_.retreat_distance
+             << " estimated_time=" << transaction_.estimated_retreat_time
+             << " owner_hold="
+             << (transaction_.hold_pass_vehicle_during_retreat ? 1 : 0);
+    emit("A1_LATE_OWNER_SELECT", selected.str(), emit_logs);
+}
+
 void DeadlockManager::update(
     const std::vector<VehicleAgent>& vehicles,
     const std::vector<DeadlockPairGeometry>& pair_geometry,
@@ -383,19 +586,107 @@ void DeadlockManager::update(
         const VehicleAgent* passer = vehicleById(
             vehicles, transaction_.pass_vehicle_id);
 
-        // PASS is a one-cycle release confirmation. It is deliberately
-        // evaluated before path/mode identity changes so a passer that has
-        // naturally completed this passage closes recovery instead of ABORT.
+        if (transaction_.kind == RecoveryKind::A1_LATE_OWNER) {
+            if (transaction_.phase == RecoveryPhase::UNRESOLVED) return;
+            const bool owner_identity_ok = passer != nullptr &&
+                (passer->path_gen ==
+                     transaction_.a1_transaction_owner_path_gen ||
+                 passer->path_gen ==
+                     transaction_.a1_owner_departure_path_gen);
+            if (retreat == nullptr || passer == nullptr ||
+                retreat->mode != VehicleMode::ACTIVE ||
+                retreat->path_gen != transaction_.retreat_path_gen ||
+                !owner_identity_ok) {
+                emit("A1_LATE_OWNER_ABORT",
+                     "owner=V" + std::to_string(
+                         transaction_.pass_vehicle_id) +
+                     " intruder=V" + std::to_string(
+                         transaction_.retreat_vehicle_id) +
+                     " reason=vehicle_or_path_identity_changed",
+                     emit_logs);
+                candidate_ = {};
+                transaction_ = {};
+                refreshDirective();
+                return;
+            }
+            if (transaction_.phase != RecoveryPhase::RETREAT) return;
+            if (!lateOwnerRetreatSweepClear(
+                    *retreat, *passer, vehicles,
+                    transaction_.retreat_target_s, true) ||
+                !lateOwnerRetreatSweepClear(
+                    *retreat, *passer, vehicles,
+                    transaction_.retreat_target_s, false)) {
+                transaction_.phase = RecoveryPhase::UNRESOLVED;
+                transaction_.hold_pass_vehicle_during_retreat = true;
+                transaction_.reason =
+                    "a1_late_owner_retreat_sweep_invalidated";
+                refreshDirective();
+                emit("A1_LATE_OWNER_UNRESOLVED",
+                     "owner=V" + std::to_string(passer->id) +
+                     " intruder=V" + std::to_string(retreat->id) +
+                     " reason=" + transaction_.reason,
+                     emit_logs);
+                return;
+            }
+            const double tolerance = std::max(
+                0.005, 0.25 * config_.deadlock_retreat_search_step);
+            if (retreat->path_s <=
+                transaction_.retreat_target_s + tolerance) {
+                const bool behind_stop = retreat->path_s + 1e-9 <
+                    transaction_.a1_waiter_stop_s;
+                const bool clear = lateOwnerPoseClearsClosure(
+                    retreat->track, retreat->path_s,
+                    transaction_.a1_frozen_owner_track,
+                    transaction_.a1_closure_zones);
+                if (!behind_stop || !clear) {
+                    transaction_.reason =
+                        "a1_late_owner_actual_pose_not_clear";
+                    refreshDirective();
+                    return;
+                }
+                std::ostringstream details;
+                details << "owner=V" << passer->id
+                        << " intruder=V" << retreat->id
+                        << " actual_s=" << retreat->path_s
+                        << " target_s=" << transaction_.retreat_target_s
+                        << " stop_s=" << transaction_.a1_waiter_stop_s;
+                emit("A1_LATE_OWNER_CLEAR", details.str(), emit_logs);
+                candidate_ = {};
+                transaction_ = {};
+                cooldown_ = {};
+                refreshDirective();
+            }
+            return;
+        }
+
+        // PASS ends only after the passer has physically cleared the frozen
+        // transaction corridor. Check success before identity changes so a
+        // natural arrival at the end of the same path is not misclassified.
         if (transaction_.phase == RecoveryPhase::PASS) {
             if (passer == nullptr) {
                 abort("pass_vehicle_missing", emit_logs);
                 return;
             }
             transaction_.pass_confirmation_elapsed += std::max(0.0, dt);
-            if (transaction_.pass_confirmation_elapsed > 1e-9) {
+            const bool same_path_cleared =
+                passer->path_gen == transaction_.pass_path_gen &&
+                passer->path_s + 1e-9 >= transaction_.pass_clear_s;
+            const bool natural_path_completion =
+                passer->path_gen != transaction_.pass_path_gen &&
+                transaction_.pass_track_length + 1e-9 >=
+                    transaction_.pass_clear_s;
+            if (same_path_cleared || natural_path_completion) {
                 clearSuccessfulRecovery(
-                    retreat, passer, "passer_released_to_normal_coordination",
+                    retreat, passer, "passer_cleared_pass_corridor",
                     emit_logs);
+                return;
+            }
+            if (retreat == nullptr ||
+                retreat->mode != VehicleMode::ACTIVE ||
+                retreat->path_gen != transaction_.retreat_path_gen ||
+                passer->mode != VehicleMode::ACTIVE ||
+                passer->path_gen != transaction_.pass_path_gen) {
+                abort("vehicle_or_path_identity_changed", emit_logs);
             }
             return;
         }
@@ -610,6 +901,7 @@ void DeadlockManager::update(
     transaction_.pass_path_gen = passer->path_gen;
     transaction_.retreat_target_s = selected->target_s;
     transaction_.pass_clear_s = selected->pass_clear_s;
+    transaction_.pass_track_length = passer->track.length();
     transaction_.retreat_distance = selected->distance;
     const double recovery_speed = std::max(
         1e-6, config_.deadlock_retreat_speed);

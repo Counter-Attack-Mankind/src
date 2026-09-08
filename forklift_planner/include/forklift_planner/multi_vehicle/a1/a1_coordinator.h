@@ -84,9 +84,30 @@ public:
         bool invariant_violation_logged = false;
     };
 
+    struct LateOwnerRecoveryRequest {
+        int owner_id = -1;
+        int transaction_owner_path_gen = -1;
+        int owner_path_gen = -1;
+        int intruder_id = -1;
+        int intruder_path_gen = -1;
+        double waiter_stop_s = 0.0;
+        PathTrack frozen_owner_track;
+        PathTrack frozen_waiter_track;
+        std::vector<FutureA1ConflictInterval> intervals;
+
+        bool valid() const {
+            return owner_id >= 0 && transaction_owner_path_gen >= 0 &&
+                   owner_path_gen >= 0 && intruder_id >= 0 &&
+                   intruder_path_gen >= 0 && waiter_stop_s >= 0.0 &&
+                   !frozen_owner_track.empty() &&
+                   !frozen_waiter_track.empty() && !intervals.empty();
+        }
+    };
+
     struct Snapshot {
         std::map<std::pair<int, int>, DepartureClusterCommitment>
             departure_clusters;
+        LateOwnerRecoveryRequest late_owner_recovery;
     };
 
     struct PairAuthority {
@@ -105,8 +126,10 @@ public:
     struct A1LaunchAdmission {
         bool departure_resource_conflict = false;
         bool actual_occupancy_priority = false;
+        bool spatial_stop_launch_infeasible = false;
         bool owner_uses_pending_preview = false;
         size_t protected_zone_count = 0;
+        double waiter_stop_s = -1.0;
     };
 
     struct WaiterStopConstraint {
@@ -198,6 +221,9 @@ public:
     departureClusters() const {
         return departure_cluster_commitments_;
     }
+    const LateOwnerRecoveryRequest& lateOwnerRecoveryRequest() const {
+        return late_owner_recovery_;
+    }
     bool shouldLogA1Decision(const VehicleAgent& vehicle, int blocker_id);
 
 private:
@@ -246,6 +272,7 @@ private:
     FutureA1Commitment future_a1_commitment_;
     std::map<std::pair<int, int>, DepartureClusterCommitment>
         departure_cluster_commitments_;
+    LateOwnerRecoveryRequest late_owner_recovery_;
     mutable std::map<std::pair<int, int>, ConflictCacheEntry>
         future_a1_conflict_cache_;
     std::set<std::pair<int, int>> future_a1_admission_logged_;

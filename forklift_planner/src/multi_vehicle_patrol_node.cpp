@@ -1512,7 +1512,13 @@ private:
                  << " protected_zones="
                  << admission.a1.protected_zone_count
                  << " actual_occupancy_priority="
-                 << (admission.a1.actual_occupancy_priority ? 1 : 0);
+                 << (admission.a1.actual_occupancy_priority ? 1 : 0)
+                 << " spatial_stop_launch_infeasible="
+                 << (admission.a1.spatial_stop_launch_infeasible ? 1 : 0);
+            if (admission.a1.waiter_stop_s >= 0.0) {
+                line << " waiter_stop_s="
+                     << admission.a1.waiter_stop_s;
+            }
         }
         ROS_WARN("%s", line.str().c_str());
         coordLogWithContext(line.str(), "REAL", sim_plan_id_, -1, -1);
@@ -1540,7 +1546,9 @@ private:
         const bool hold = !admission.clear;
         const std::string hold_reason = admission.ordinary_road_conflict
             ? "ordinary_immediate_conflict"
-            : "a1_departure_prefix_conflict";
+            : admission.a1.spatial_stop_launch_infeasible
+                ? "a1_stop_s_before_slot_clear"
+                : "a1_departure_prefix_conflict";
         auto held = a1_launch_holds_.find(vehicle.id);
         if (hold) {
             const bool changed = held == a1_launch_holds_.end() ||

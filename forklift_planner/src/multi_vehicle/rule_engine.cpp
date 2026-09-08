@@ -1036,68 +1036,11 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         it = conflict_reservations_.erase(it);
     }
 
-    auto predictionTtcToS = [](
-            const VehicleAgent& vehicle,
-            const std::vector<PredictedKinematicSample>& prediction,
-            double target_s) -> std::optional<double> {
-        if (vehicle.path_s >= target_s - 1e-9) return 0.0;
-        if (prediction.empty()) return std::nullopt;
-        const PredictedKinematicSample* previous = &prediction.front();
-        if (previous->s >= target_s - 1e-9) return previous->t;
-        for (size_t index = 1; index < prediction.size(); ++index) {
-            const PredictedKinematicSample& current = prediction[index];
-            if (current.s < target_s - 1e-9) {
-                previous = &current;
-                continue;
-            }
-            const double ds = current.s - previous->s;
-            if (ds <= 1e-9) return current.t;
-            const double ratio = std::max(
-                0.0, std::min(1.0, (target_s - previous->s) / ds));
-            return previous->t + ratio * (current.t - previous->t);
-        }
-        return std::nullopt;
-    };
-
     std::vector<std::optional<A1Coordinator::WaiterStopConstraint>>
         a1_waiter_constraints(vehicles.size());
-    std::vector<std::optional<double>> a1_stop_ttcs(vehicles.size());
     for (size_t index = 0; index < vehicles.size(); ++index) {
-        VehicleAgent& waiter = vehicles[index];
         a1_waiter_constraints[index] =
-            a1_coordinator_.waiterStopConstraint(waiter);
-        if (!a1_waiter_constraints[index]) continue;
-        const auto& constraint = *a1_waiter_constraints[index];
-        a1_stop_ttcs[index] = predictionTtcToS(
-            waiter, predictions[index], constraint.waiter_stop_s);
-        if (!a1_stop_ttcs[index]) continue;
-        const DynamicInterventionBand band =
-            classifyDynamicInterventionBand(*a1_stop_ttcs[index], cfg_);
-        VehicleAction action = selectRollingSpeedAction(band, false);
-        const TtcStopBoundary stop_boundary = evaluateTtcStopBoundary(
-            *a1_stop_ttcs[index], action, cfg_);
-        if (stop_boundary.stop_required) action = VehicleAction::STOP;
-        if (action != VehicleAction::NOMINAL) {
-            applyActionRequest(
-                waiter, action,
-                "a1_stop_ttc_" + std::string(actionName(action)) + "_V" +
-                    std::to_string(constraint.owner_id),
-                constraint.owner_id);
-        }
-        if (coord_log_sink_) {
-            std::ostringstream line;
-            line << std::fixed << std::setprecision(3)
-                 << "[A1-STOP-TTC] owner=V" << constraint.owner_id
-                 << " waiter=V" << waiter.id
-                 << " waiter_path_gen=" << constraint.waiter_path_gen
-                 << " waiter_s=" << waiter.path_s
-                 << " stop_s=" << constraint.waiter_stop_s
-                 << " ttc=" << *a1_stop_ttcs[index]
-                 << " band=" << dynamicInterventionBandName(band)
-                 << " stop_threshold=" << stop_boundary.stop_threshold
-                 << " selected=" << actionName(action);
-            coord_log_sink_(line.str());
-        }
+            a1_coordinator_.waiterStopConstraint(vehicles[index]);
     }
 
     auto eventZone = [&](const PairInteractionResult& interaction,
@@ -2309,19 +2252,23 @@ void RuleEngine::applyRecoveryPolicy(std::vector<VehicleAgent>& vehicles) {
         }
         if (!recovery.active()) continue;
         if (vehicle.id == recovery.retreat_vehicle_id) {
+            const bool late_owner =
+                recovery.kind == RecoveryKind::A1_LATE_OWNER;
             applyActionRequest(vehicle, VehicleAction::STOP,
                                recovery.phase == RecoveryPhase::PASS
                                    ? "deadlock_pass_hold"
-                                   : "deadlock_retreat_override",
+                                   : late_owner
+                                       ? "a1_late_owner_retreat_override"
+                                       : "deadlock_retreat_override",
                                recovery.pass_vehicle_id);
             continue;
         }
         if (vehicle.id != recovery.pass_vehicle_id) continue;
-        if (recovery.phase == RecoveryPhase::RETREAT ||
-            recovery.phase == RecoveryPhase::UNRESOLVED ||
-            recovery.phase == RecoveryPhase::ABORT) {
+        if (recovery.motionFor(vehicle.id) == RecoveryMotion::HOLD) {
             applyActionRequest(vehicle, VehicleAction::STOP,
-                               "deadlock_pair_hold",
+                               recovery.kind == RecoveryKind::A1_LATE_OWNER
+                                   ? "a1_late_owner_hold"
+                                   : "deadlock_pair_hold",
                                recovery.retreat_vehicle_id);
         }
     }
@@ -2378,6 +2325,34 @@ void RuleEngine::observeDeadlock(std::vector<VehicleAgent>& vehicles,
         }
     }
     deadlock_manager_.update(vehicles, geometry_items, dt, emit_logs);
+}
+
+void RuleEngine::observeA1LateOwnerRecovery(
+    const std::vector<VehicleAgent>& vehicles, bool emit_logs) {
+    const A1Coordinator::LateOwnerRecoveryRequest& source =
+        a1_coordinator_.lateOwnerRecoveryRequest();
+    if (!source.valid()) return;
+    A1LateOwnerRecoveryRequest request;
+    request.owner_id = source.owner_id;
+    request.transaction_owner_path_gen =
+        source.transaction_owner_path_gen;
+    request.owner_departure_path_gen = source.owner_path_gen;
+    request.intruder_id = source.intruder_id;
+    request.intruder_path_gen = source.intruder_path_gen;
+    request.waiter_stop_s = source.waiter_stop_s;
+    request.frozen_owner_track = source.frozen_owner_track;
+    request.frozen_intruder_track = source.frozen_waiter_track;
+    request.closure_zones.reserve(source.intervals.size());
+    for (const FutureA1ConflictInterval& interval : source.intervals) {
+        PotentialConflictZone zone;
+        zone.s_self_enter = interval.owner_enter;
+        zone.s_self_exit = interval.owner_exit;
+        zone.s_other_enter = interval.other_enter;
+        zone.s_other_exit = interval.other_exit;
+        request.closure_zones.push_back(zone);
+    }
+    deadlock_manager_.requestA1LateOwnerRecovery(
+        request, vehicles, emit_logs);
 }
 
 void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
@@ -2459,6 +2434,7 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
                              reuse_ordinary_coordination);
     enforceFutureA1Admission(vehicles, dt);
     enforceDepartureClusterCommitments(vehicles, dt);
+    observeA1LateOwnerRecovery(vehicles, debug_log_source_ == "REAL");
     resolveTargetSlotOccupancy(vehicles);  // slot-mouth queueing (spec 6/7)
     applyRecoveryPolicy(vehicles);
     // Safety validation runs after all coordination/special-resource outputs
