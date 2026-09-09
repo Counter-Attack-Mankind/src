@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "forklift_map/map_param.h"
 #include "forklift_planner/multi_vehicle/future_a1_policy.h"
 #include "forklift_planner/multi_vehicle/multi_vehicle_config.h"
 #include "forklift_planner/multi_vehicle/spatiotemporal_interaction.h"
@@ -79,35 +80,29 @@ public:
         double other_release_exit_s = 0.0;
         bool active = false;
         bool handed_off_from_future = false;
-        bool handoff_already_inside = false;
         bool hold_logged = false;
         bool invariant_violation_logged = false;
+        bool intrusion_correction_logged = false;
     };
 
-    struct LateOwnerRecoveryRequest {
-        int owner_id = -1;
-        int transaction_owner_path_gen = -1;
-        int owner_path_gen = -1;
-        int intruder_id = -1;
-        int intruder_path_gen = -1;
-        double waiter_stop_s = 0.0;
-        PathTrack frozen_owner_track;
-        PathTrack frozen_waiter_track;
-        std::vector<FutureA1ConflictInterval> intervals;
+    enum class IntrusionCorrectionMotion {
+        RETREAT,
+        HOLD,
+    };
 
-        bool valid() const {
-            return owner_id >= 0 && transaction_owner_path_gen >= 0 &&
-                   owner_path_gen >= 0 && intruder_id >= 0 &&
-                   intruder_path_gen >= 0 && waiter_stop_s >= 0.0 &&
-                   !frozen_owner_track.empty() &&
-                   !frozen_waiter_track.empty() && !intervals.empty();
-        }
+    struct IntrusionCorrection {
+        int owner_id = -1;
+        int waiter_id = -1;
+        int waiter_path_gen = -1;
+        double target_s = 0.0;
+        IntrusionCorrectionMotion motion =
+            IntrusionCorrectionMotion::HOLD;
+        std::string reason;
     };
 
     struct Snapshot {
         std::map<std::pair<int, int>, DepartureClusterCommitment>
             departure_clusters;
-        LateOwnerRecoveryRequest late_owner_recovery;
     };
 
     struct PairAuthority {
@@ -177,7 +172,8 @@ public:
     using DepartureTransactionIdentity =
         std::tuple<int, int, int, int, int, int, int, bool>;
 
-    A1Coordinator(const MultiVehicleConfig& cfg, Dependencies dependencies);
+    A1Coordinator(const MapParam& map_param, const MultiVehicleConfig& cfg,
+                  Dependencies dependencies);
 
     void setCoordLogSink(const std::function<void(const std::string&)>& sink) {
         coord_log_sink_ = sink;
@@ -196,7 +192,8 @@ public:
     const ServiceMetrics& serviceMetrics() const { return service_metrics_; }
 
     Snapshot snapshot() const;
-    void restore(const Snapshot& snapshot);
+    void restore(const Snapshot& snapshot,
+                 bool clear_intrusion_corrections = true);
 
     PairAuthority authorityForPair(const VehicleAgent& a,
                                    const VehicleAgent& b) const;
@@ -214,15 +211,24 @@ public:
     void enforceDepartureClusterCommitments(
         std::vector<VehicleAgent>& vehicles, double dt,
         const ActionRequest& request_action);
+    void refreshIntrusionCorrections(
+        const std::vector<VehicleAgent>& vehicles);
+    const IntrusionCorrection* intrusionCorrectionFor(int vehicle_id) const;
+    void holdIntrusionCorrection(int vehicle_id,
+                                 const std::string& reason);
+    const std::map<int, IntrusionCorrection>& intrusionCorrections() const {
+        return intrusion_corrections_;
+    }
+    void restoreLiveIntrusionCorrections(
+        const std::map<int, IntrusionCorrection>& corrections) {
+        intrusion_corrections_ = corrections;
+    }
 
     std::vector<DepartureTransactionIdentity>
     departureTransactionIdentity() const;
     const std::map<std::pair<int, int>, DepartureClusterCommitment>&
     departureClusters() const {
         return departure_cluster_commitments_;
-    }
-    const LateOwnerRecoveryRequest& lateOwnerRecoveryRequest() const {
-        return late_owner_recovery_;
     }
     bool shouldLogA1Decision(const VehicleAgent& vehicle, int blocker_id);
 
@@ -265,14 +271,23 @@ private:
                              const VehicleAgent& b) const;
     int departureClusterOwnerForPair(const VehicleAgent& a,
                                      const VehicleAgent& b) const;
+    bool waiterPoseClearsFrozenClosure(
+        const DepartureClusterCommitment& commitment,
+        double waiter_s) const;
+    bool waiterRetreatSweepClear(
+        const DepartureClusterCommitment& commitment,
+        const VehicleAgent& waiter,
+        const std::vector<VehicleAgent>& vehicles,
+        double target_s) const;
     std::string debugLogPrefix() const;
 
+    const MapParam& map_param_;
     const MultiVehicleConfig& cfg_;
     Dependencies dependencies_;
     FutureA1Commitment future_a1_commitment_;
     std::map<std::pair<int, int>, DepartureClusterCommitment>
         departure_cluster_commitments_;
-    LateOwnerRecoveryRequest late_owner_recovery_;
+    std::map<int, IntrusionCorrection> intrusion_corrections_;
     mutable std::map<std::pair<int, int>, ConflictCacheEntry>
         future_a1_conflict_cache_;
     std::set<std::pair<int, int>> future_a1_admission_logged_;

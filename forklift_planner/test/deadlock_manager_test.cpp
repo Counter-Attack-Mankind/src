@@ -85,56 +85,6 @@ int main() {
         return fail("PASS did not clear into retreat-only cooldown");
     }
 
-    VehicleAgent late_owner = b;
-    late_owner.id = 1;
-    late_owner.path_gen = 20;
-    late_owner.mission_phase = MissionPhase::TO_A1;
-    late_owner.path_s = 0.2;
-    late_owner.track.set(RoughPath{
-        RoughWp{-1.0, 10.0, 0.0, WpType::FORWARD},
-        RoughWp{1.0, 10.0, 0.0, WpType::FORWARD}});
-    VehicleAgent intruder = a;
-    intruder.id = 0;
-    intruder.path_gen = 30;
-    intruder.mission_phase = MissionPhase::TO_A1;
-    intruder.path_s = 0.6;
-    intruder.track.set(RoughPath{
-        RoughWp{-1.0, 0.0, 0.0, WpType::FORWARD},
-        RoughWp{1.0, 0.0, 0.0, WpType::FORWARD}});
-    A1LateOwnerRecoveryRequest late;
-    late.owner_id = late_owner.id;
-    late.transaction_owner_path_gen = late_owner.path_gen;
-    late.owner_departure_path_gen = late_owner.path_gen + 1;
-    late.intruder_id = intruder.id;
-    late.intruder_path_gen = intruder.path_gen;
-    late.waiter_stop_s = 0.5;
-    late.frozen_owner_track = late_owner.track;
-    late.frozen_intruder_track = intruder.track;
-    PotentialConflictZone late_zone;
-    late_zone.s_self_enter = 0.8;
-    late_zone.s_self_exit = 1.2;
-    late_zone.s_other_enter = 0.5;
-    late_zone.s_other_exit = 0.9;
-    late.closure_zones.push_back(late_zone);
-    std::vector<VehicleAgent> late_vehicles{intruder, late_owner};
-    DeadlockManager late_manager(map, config);
-    late_manager.requestA1LateOwnerRecovery(late, late_vehicles, false);
-    const RecoveryDirective late_selected = late_manager.directive();
-    if (late_selected.kind != RecoveryKind::A1_LATE_OWNER ||
-        late_selected.phase != RecoveryPhase::RETREAT ||
-        late_selected.retreat_vehicle_id != intruder.id ||
-        late_selected.pass_vehicle_id != late_owner.id ||
-        late_selected.retreat_target_s >= late.waiter_stop_s ||
-        late_selected.motionFor(intruder.id) != RecoveryMotion::RETREAT ||
-        late_selected.motionFor(late_owner.id) != RecoveryMotion::NORMAL) {
-        return fail("late-owner recovery did not preserve fixed roles");
-    }
-    late_vehicles[0].path_s = late_selected.retreat_target_s;
-    late_manager.update(late_vehicles, {}, 0.1, false);
-    if (late_manager.directive().phase != RecoveryPhase::NONE ||
-        late_manager.directive().cooldownActive()) {
-        return fail("late-owner recovery did not clear without cooldown");
-    }
     std::cout << "deadlock_manager_test: PASS\n";
     return 0;
 }

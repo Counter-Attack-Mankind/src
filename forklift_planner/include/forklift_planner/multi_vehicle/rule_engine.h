@@ -178,10 +178,25 @@ public:
                     nullptr);
     void observeDeadlock(std::vector<VehicleAgent>& vehicles, double dt,
                          bool emit_logs);
-    void observeA1LateOwnerRecovery(
-        const std::vector<VehicleAgent>& vehicles, bool emit_logs);
     void applyRecoveryDirectiveToOutput(
         std::vector<VehicleAgent>& vehicles);
+    struct MotionOverride {
+        RecoveryMotion motion = RecoveryMotion::NORMAL;
+        double target_s = 0.0;
+        bool a1_intrusion = false;
+    };
+    MotionOverride motionOverrideFor(int vehicle_id) const;
+    void refreshA1IntrusionCorrections(
+        std::vector<VehicleAgent>& vehicles, double dt);
+    using A1IntrusionCorrections =
+        std::map<int, A1Coordinator::IntrusionCorrection>;
+    A1IntrusionCorrections captureLiveA1IntrusionCorrections() const {
+        return a1_coordinator_.intrusionCorrections();
+    }
+    void restoreLiveA1IntrusionCorrections(
+        const A1IntrusionCorrections& corrections) {
+        a1_coordinator_.restoreLiveIntrusionCorrections(corrections);
+    }
     double speedForAction(VehicleAction action) const;
     const RecoveryDirective& recoveryDirective() const {
         return deadlock_manager_.directive();

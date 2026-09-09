@@ -8,6 +8,8 @@
 #include <sstream>
 #include <utility>
 
+#include "forklift_planner/multi_vehicle/footprint.h"
+
 namespace forklift_planner {
 namespace multi_vehicle {
 namespace {
@@ -66,8 +68,9 @@ bool sameDepartureCluster(
            a.other_release_exit_s == b.other_release_exit_s &&
            a.active == b.active &&
            a.handed_off_from_future == b.handed_off_from_future &&
-           a.handoff_already_inside == b.handoff_already_inside &&
-           a.invariant_violation_logged == b.invariant_violation_logged;
+           a.invariant_violation_logged == b.invariant_violation_logged &&
+           a.intrusion_correction_logged ==
+               b.intrusion_correction_logged;
 }
 
 void logDepartureCluster(
@@ -100,9 +103,7 @@ void logDepartureCluster(
          << " owner_s=" << owner_s
          << " other_s=" << other_s
          << " future_handoff="
-         << (commitment.handed_off_from_future ? "true" : "false")
-         << " already_inside="
-         << (commitment.handoff_already_inside ? "true" : "false");
+         << (commitment.handed_off_from_future ? "true" : "false");
     sink(line.str());
 }
 
@@ -133,9 +134,11 @@ void logAdmissionInvariantViolation(
 
 }  // namespace
 
-A1Coordinator::A1Coordinator(const MultiVehicleConfig& cfg,
+A1Coordinator::A1Coordinator(const MapParam& map_param,
+                             const MultiVehicleConfig& cfg,
                              Dependencies dependencies)
-    : cfg_(cfg), dependencies_(std::move(dependencies)) {}
+    : map_param_(map_param), cfg_(cfg),
+      dependencies_(std::move(dependencies)) {}
 
 void A1Coordinator::setDebugLogContext(const std::string& source,
                                        uint64_t plan_id, int frame_id,
@@ -573,10 +576,11 @@ void A1Coordinator::logFutureA1Transition(
 }
 
 A1Coordinator::Snapshot A1Coordinator::snapshot() const {
-    return Snapshot{departure_cluster_commitments_, late_owner_recovery_};
+    return Snapshot{departure_cluster_commitments_};
 }
 
-void A1Coordinator::restore(const Snapshot& snapshot) {
+void A1Coordinator::restore(const Snapshot& snapshot,
+                            bool clear_intrusion_corrections) {
     for (const auto& current : departure_cluster_commitments_) {
         const auto incoming = snapshot.departure_clusters.find(current.first);
         if (current.second.active &&
@@ -601,7 +605,9 @@ void A1Coordinator::restore(const Snapshot& snapshot) {
         }
     }
     departure_cluster_commitments_ = snapshot.departure_clusters;
-    late_owner_recovery_ = snapshot.late_owner_recovery;
+    // Intrusion correction is live, derived motion state. A rollout snapshot
+    // must never install or complete it for the real executor.
+    if (clear_intrusion_corrections) intrusion_corrections_.clear();
 }
 
 A1Coordinator::FutureA1ZoneSelection
@@ -874,15 +880,6 @@ void A1Coordinator::refreshDepartureClusterCommitments(
         logDepartureCluster(coord_log_sink_, event, reason, it->second,
                             owner ? owner->path_s : -1.0,
                             other ? other->path_s : -1.0);
-        if (late_owner_recovery_.valid() &&
-            late_owner_recovery_.owner_id == it->second.owner_id &&
-            late_owner_recovery_.owner_path_gen ==
-                it->second.owner_path_gen &&
-            late_owner_recovery_.intruder_id == it->second.other_id &&
-            late_owner_recovery_.intruder_path_gen ==
-                it->second.other_path_gen) {
-            late_owner_recovery_ = {};
-        }
         return departure_cluster_commitments_.erase(it);
     };
 
@@ -1041,7 +1038,6 @@ void A1Coordinator::enforceFutureA1Admission(
             staged.waiter_stop_s = *selected_stop_s;
             staged.active = true;
             staged.handed_off_from_future = true;
-            staged.handoff_already_inside = already_inside;
             for (size_t index : future_zones.protected_indices) {
                 const ConflictZone& zone =
                     future_zones.normalized_zones[index];
@@ -1060,33 +1056,6 @@ void A1Coordinator::enforceFutureA1Admission(
             logDepartureCluster(coord_log_sink_, "CREATE",
                                 "frozen_transaction", staged,
                                 owner->path_s, waiter_path_s);
-            if (already_inside) {
-                late_owner_recovery_.owner_id = staged.owner_id;
-                late_owner_recovery_.transaction_owner_path_gen =
-                    staged.transaction_owner_path_gen;
-                late_owner_recovery_.owner_path_gen = staged.owner_path_gen;
-                late_owner_recovery_.intruder_id = staged.other_id;
-                late_owner_recovery_.intruder_path_gen =
-                    staged.other_path_gen;
-                late_owner_recovery_.waiter_stop_s = staged.waiter_stop_s;
-                late_owner_recovery_.frozen_owner_track =
-                    staged.frozen_owner_track;
-                late_owner_recovery_.frozen_waiter_track =
-                    staged.frozen_waiter_track;
-                late_owner_recovery_.intervals = staged.intervals;
-                if (coord_log_sink_) {
-                    std::ostringstream line;
-                    line << "[A1_LATE_OWNER] event=REQUIRED owner=V"
-                         << staged.owner_id << " intruder=V"
-                         << staged.other_id << " stop_s="
-                         << staged.waiter_stop_s
-                         << " transaction_owner_gen="
-                         << staged.transaction_owner_path_gen
-                         << " owner_departure_gen=" << staged.owner_path_gen
-                         << " intruder_gen=" << staged.other_path_gen;
-                    coord_log_sink_(line.str());
-                }
-            }
             departure_cluster_commitments_[cluster_key] = std::move(staged);
         }
 
@@ -1125,9 +1094,152 @@ void A1Coordinator::enforceFutureA1Admission(
     }
 }
 
+bool A1Coordinator::waiterPoseClearsFrozenClosure(
+    const DepartureClusterCommitment& commitment,
+    double waiter_s) const {
+    if (commitment.frozen_waiter_track.empty() ||
+        commitment.frozen_owner_track.empty() ||
+        commitment.intervals.empty()) {
+        return false;
+    }
+    const OBB waiter_body = makeBody(
+        commitment.frozen_waiter_track.poseAtS(waiter_s), map_param_, 0.0);
+    constexpr double kStep = 0.01;
+    for (const FutureA1ConflictInterval& interval : commitment.intervals) {
+        const double distance = std::max(
+            0.0, interval.owner_exit - interval.owner_enter);
+        const int count = std::max(
+            1, static_cast<int>(std::ceil(distance / kStep)));
+        for (int sample = 0; sample <= count; ++sample) {
+            const double ratio = static_cast<double>(sample) / count;
+            const double owner_s = interval.owner_enter + distance * ratio;
+            const OBB owner_body = makeBody(
+                commitment.frozen_owner_track.poseAtS(owner_s),
+                map_param_, 0.0);
+            if (overlaps(waiter_body, owner_body)) return false;
+        }
+    }
+    return true;
+}
+
+bool A1Coordinator::waiterRetreatSweepClear(
+    const DepartureClusterCommitment& commitment,
+    const VehicleAgent& waiter,
+    const std::vector<VehicleAgent>& vehicles,
+    double target_s) const {
+    if (waiter.track.empty() || target_s > waiter.path_s + 1e-9) {
+        return false;
+    }
+    constexpr double kStep = 0.01;
+    const double distance = std::max(0.0, waiter.path_s - target_s);
+    const int count = std::max(
+        1, static_cast<int>(std::ceil(distance / kStep)));
+    for (int sample = 0; sample <= count; ++sample) {
+        const double ratio = static_cast<double>(sample) / count;
+        const double waiter_s = waiter.path_s - distance * ratio;
+        const OBB waiter_body = makeBody(
+            commitment.frozen_waiter_track.poseAtS(waiter_s),
+            map_param_, 0.0);
+        for (const VehicleAgent& other : vehicles) {
+            if (other.id == waiter.id || other.track.empty() ||
+                other.mode == VehicleMode::NEED_TASK) {
+                continue;
+            }
+            const double other_s = other.mode == VehicleMode::DWELL
+                ? other.track.length() : other.path_s;
+            const OBB other_body = makeBody(
+                other.track.poseAtS(other_s), map_param_, 0.0);
+            if (overlaps(waiter_body, other_body)) return false;
+        }
+    }
+    return true;
+}
+
+void A1Coordinator::refreshIntrusionCorrections(
+    const std::vector<VehicleAgent>& vehicles) {
+    std::map<int, IntrusionCorrection> refreshed;
+    constexpr double kSearchStep = 0.01;
+    constexpr double kTargetTolerance = 0.005;
+    constexpr double kStoppedSpeed = 1e-3;
+
+    for (const auto& entry : departure_cluster_commitments_) {
+        const DepartureClusterCommitment& commitment = entry.second;
+        if (!commitment.active) continue;
+        const VehicleAgent* waiter = agentById(vehicles,
+                                                commitment.other_id);
+        if (waiter == nullptr || waiter->mode != VehicleMode::ACTIVE ||
+            waiter->mission_phase != MissionPhase::TO_A1 ||
+            waiter->path_gen != commitment.other_path_gen ||
+            waiter->track.empty()) {
+            continue;
+        }
+        const bool crossed = waiter->path_s >
+            commitment.waiter_stop_boundary_s + 1e-9;
+        const bool inside = futureA1OtherInsideCluster(
+            commitment.intervals, waiter->path_s);
+        const auto previous = intrusion_corrections_.find(waiter->id);
+        const bool correction_active =
+            previous != intrusion_corrections_.end() &&
+            previous->second.waiter_path_gen == waiter->path_gen;
+        if (!crossed && !inside && !correction_active) continue;
+
+        double target_s = std::max(
+            0.0, commitment.waiter_stop_s -
+                     cfg_.deadlock_retreat_clearance);
+        while (target_s > 1e-9 &&
+               !waiterPoseClearsFrozenClosure(commitment, target_s)) {
+            target_s = std::max(0.0, target_s - kSearchStep);
+        }
+
+        IntrusionCorrection correction;
+        correction.owner_id = commitment.owner_id;
+        correction.waiter_id = commitment.other_id;
+        correction.waiter_path_gen = commitment.other_path_gen;
+        correction.target_s = target_s;
+        const bool target_clear =
+            waiterPoseClearsFrozenClosure(commitment, target_s);
+        const bool at_target = waiter->path_s <=
+            target_s + kTargetTolerance;
+        const bool actual_clear = waiterPoseClearsFrozenClosure(
+            commitment, waiter->path_s);
+        if (at_target && actual_clear) {
+            if (waiter->current_speed <= kStoppedSpeed) continue;
+            correction.motion = IntrusionCorrectionMotion::HOLD;
+            correction.reason = "a1_intrusion_target_braking";
+        } else if (!target_clear) {
+            correction.motion = IntrusionCorrectionMotion::HOLD;
+            correction.reason = "a1_intrusion_no_clear_target";
+        } else if (!waiterRetreatSweepClear(
+                       commitment, *waiter, vehicles, target_s)) {
+            correction.motion = IntrusionCorrectionMotion::HOLD;
+            correction.reason = "a1_intrusion_retreat_sweep_blocked";
+        } else {
+            correction.motion = IntrusionCorrectionMotion::RETREAT;
+            correction.reason = "a1_intrusion_retreat";
+        }
+        refreshed[waiter->id] = std::move(correction);
+    }
+    intrusion_corrections_.swap(refreshed);
+}
+
+const A1Coordinator::IntrusionCorrection*
+A1Coordinator::intrusionCorrectionFor(int vehicle_id) const {
+    const auto it = intrusion_corrections_.find(vehicle_id);
+    return it == intrusion_corrections_.end() ? nullptr : &it->second;
+}
+
+void A1Coordinator::holdIntrusionCorrection(
+    int vehicle_id, const std::string& reason) {
+    const auto it = intrusion_corrections_.find(vehicle_id);
+    if (it == intrusion_corrections_.end()) return;
+    it->second.motion = IntrusionCorrectionMotion::HOLD;
+    it->second.reason = reason;
+}
+
 void A1Coordinator::enforceDepartureClusterCommitments(
     std::vector<VehicleAgent>& vehicles, double dt,
     const ActionRequest& request_action) {
+    refreshIntrusionCorrections(vehicles);
     for (auto& entry : departure_cluster_commitments_) {
         DepartureClusterCommitment& commitment = entry.second;
         if (!commitment.active) continue;
@@ -1161,45 +1273,33 @@ void A1Coordinator::enforceDepartureClusterCommitments(
             }
             continue;
         }
-        if (commitment.handoff_already_inside &&
-            (waiter_crossed_boundary || waiter_inside_closure)) {
-            // The dedicated late-owner transaction owns this exceptional
-            // state. Hold only the intruder until DeadlockManager installs
-            // its continuous retreat directive; do not create a mutual STOP.
-            if (request_action) {
-                request_action(*other, VehicleAction::STOP,
-                               "a1_late_owner_recovery_pending", owner->id);
-            }
-            continue;
-        }
         if (waiter_crossed_boundary || waiter_inside_closure) {
+            const IntrusionCorrection* correction =
+                intrusionCorrectionFor(other->id);
             if (request_action) {
-                request_action(*owner, VehicleAction::STOP,
-                               "a1_admission_invariant_violation", other->id);
                 request_action(*other, VehicleAction::STOP,
-                               "a1_admission_invariant_violation", owner->id);
+                               correction != nullptr
+                                   ? correction->reason
+                                   : "a1_intrusion_correction_unavailable",
+                               -1);
             }
-            if (!commitment.invariant_violation_logged) {
-                const char* reason = waiter_crossed_boundary
-                    ? "waiter_crossed_frozen_boundary"
-                    : "waiter_entered_frozen_closure";
-                logAdmissionInvariantViolation(
-                    coord_log_sink_, commitment, *owner, *other, reason);
-                commitment.invariant_violation_logged = true;
+            if (!commitment.intrusion_correction_logged &&
+                coord_log_sink_) {
+                std::ostringstream line;
+                line << std::fixed << std::setprecision(3)
+                     << "[A1_INTRUSION_CORRECTION] owner=V" << owner->id
+                     << " waiter=V" << other->id
+                     << " waiter_s=" << other->path_s
+                     << " stop_s=" << commitment.waiter_stop_s
+                     << " target_s="
+                     << (correction != nullptr ? correction->target_s : -1.0)
+                     << " reason="
+                     << (correction != nullptr ? correction->reason
+                                               : "unavailable");
+                coord_log_sink_(line.str());
+                commitment.intrusion_correction_logged = true;
             }
             continue;
-        }
-        if (commitment.handoff_already_inside) {
-            commitment.handoff_already_inside = false;
-            if (late_owner_recovery_.valid() &&
-                late_owner_recovery_.owner_id == commitment.owner_id &&
-                late_owner_recovery_.owner_path_gen ==
-                    commitment.owner_path_gen &&
-                late_owner_recovery_.intruder_id == commitment.other_id &&
-                late_owner_recovery_.intruder_path_gen ==
-                    commitment.other_path_gen) {
-                late_owner_recovery_ = {};
-            }
         }
         const double distance = commitment.waiter_stop_s - waiter_path_s;
         const double speed = dwell_waiter

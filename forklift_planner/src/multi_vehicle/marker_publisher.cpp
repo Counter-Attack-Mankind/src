@@ -432,9 +432,8 @@ void MarkerPublisher::addDeadlockRetreatTargetMarkers(
         arr.markers.push_back(marker);
     };
 
-    const bool visible = recovery.kind == RecoveryKind::NORMAL_DEADLOCK &&
-        (recovery.phase == RecoveryPhase::RETREAT ||
-         recovery.phase == RecoveryPhase::PASS);
+    const bool visible = recovery.phase == RecoveryPhase::RETREAT ||
+        recovery.phase == RecoveryPhase::PASS;
     const auto retreat = std::find_if(
         vehicles.begin(), vehicles.end(), [&](const VehicleAgent& vehicle) {
             return vehicle.id == recovery.retreat_vehicle_id;

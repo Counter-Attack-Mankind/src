@@ -27,33 +27,7 @@ enum class RecoveryMotion {
     RETREAT,
 };
 
-enum class RecoveryKind {
-    NORMAL_DEADLOCK,
-    A1_LATE_OWNER,
-};
-
-struct A1LateOwnerRecoveryRequest {
-    int owner_id = -1;
-    int transaction_owner_path_gen = -1;
-    int owner_departure_path_gen = -1;
-    int intruder_id = -1;
-    int intruder_path_gen = -1;
-    double waiter_stop_s = 0.0;
-    PathTrack frozen_owner_track;
-    PathTrack frozen_intruder_track;
-    std::vector<PotentialConflictZone> closure_zones;
-
-    bool valid() const {
-        return owner_id >= 0 && transaction_owner_path_gen >= 0 &&
-               owner_departure_path_gen >= 0 && intruder_id >= 0 &&
-               intruder_path_gen >= 0 && waiter_stop_s >= 0.0 &&
-               !frozen_owner_track.empty() &&
-               !frozen_intruder_track.empty() && !closure_zones.empty();
-    }
-};
-
 struct RecoveryDirective {
-    RecoveryKind kind = RecoveryKind::NORMAL_DEADLOCK;
     RecoveryPhase phase = RecoveryPhase::NONE;
     int retreat_vehicle_id = -1;
     int pass_vehicle_id = -1;
@@ -100,7 +74,6 @@ public:
     };
 
     struct TransactionState {
-        RecoveryKind kind = RecoveryKind::NORMAL_DEADLOCK;
         RecoveryPhase phase = RecoveryPhase::NONE;
         int retreat_vehicle_id = -1;
         int pass_vehicle_id = -1;
@@ -113,12 +86,6 @@ public:
         double pass_confirmation_elapsed = 0.0;
         double pass_track_length = 0.0;
         bool hold_pass_vehicle_during_retreat = true;
-        int a1_transaction_owner_path_gen = -1;
-        int a1_owner_departure_path_gen = -1;
-        double a1_waiter_stop_s = 0.0;
-        PathTrack a1_frozen_owner_track;
-        PathTrack a1_frozen_intruder_track;
-        std::vector<PotentialConflictZone> a1_closure_zones;
         std::string reason;
     };
 
@@ -145,10 +112,6 @@ public:
     void update(const std::vector<VehicleAgent>& vehicles,
                 const std::vector<DeadlockPairGeometry>& pair_geometry,
                 double dt, bool emit_logs);
-
-    void requestA1LateOwnerRecovery(
-        const A1LateOwnerRecoveryRequest& request,
-        const std::vector<VehicleAgent>& vehicles, bool emit_logs);
 
     const RecoveryDirective& directive() const { return directive_; }
 
@@ -182,17 +145,6 @@ private:
                                        const VehicleAgent& passer,
                                        double retreat_s,
                                        double pass_clear_s) const;
-    bool lateOwnerRetreatSweepClear(
-        const VehicleAgent& intruder, const VehicleAgent& owner,
-        const std::vector<VehicleAgent>& vehicles, double target_s,
-        bool ignore_owner) const;
-    bool lateOwnerPoseClearsClosure(
-        const PathTrack& intruder_track, double intruder_s,
-        const PathTrack& owner_track,
-        const std::vector<PotentialConflictZone>& closure_zones) const;
-    bool lateOwnerRetreatConflictsWithOwnerPath(
-        const VehicleAgent& intruder, double target_s,
-        const VehicleAgent& owner) const;
     void refreshDirective();
     void emit(const char* event, const std::string& details, bool enabled) const;
     void abort(const std::string& reason, bool emit_logs);

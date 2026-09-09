@@ -20,7 +20,7 @@ namespace multi_vehicle {
 RuleEngine::RuleEngine(const MapParam& mp, const MultiVehicleConfig& cfg)
     : mp_(mp), cfg_(cfg),
       a1_coordinator_(
-          cfg,
+          mp, cfg,
           A1Coordinator::Dependencies{
               [this](const VehicleAgent& a, const VehicleAgent& b) {
                   return computeConflictZonesFull(a, b);
@@ -169,7 +169,7 @@ void RuleEngine::restore(const SimSnapshot& s, bool restore_deadlock) {
         }
     }
     conflict_reservations_ = s.reservations;
-    a1_coordinator_.restore(s.a1);
+    a1_coordinator_.restore(s.a1, restore_deadlock);
     following_pairs_ = s.following_pairs;
     tokens_ = s.tokens;
     conflicts_ = s.conflicts;
@@ -1958,7 +1958,11 @@ void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles,
             return v.mode == VehicleMode::DWELL
                 ? v.track.length() : v.path_s;
         }
-        const double desired = speedForAction(v.requested_action);
+        const MotionOverride motion = motionOverrideFor(v.id);
+        if (motion.motion == RecoveryMotion::HOLD) return v.path_s;
+        const double desired = motion.motion == RecoveryMotion::RETREAT
+            ? cfg_.deadlock_retreat_speed
+            : speedForAction(v.requested_action);
         double next_speed = std::max(0.0, v.current_speed);
         if (desired > next_speed) {
             next_speed = std::min(
@@ -1967,11 +1971,15 @@ void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles,
             next_speed = std::max(
                 desired, next_speed - cfg_.max_decel * dt);
         }
-        return std::min(v.track.length(), v.path_s + next_speed * dt);
+        return motion.motion == RecoveryMotion::RETREAT
+            ? std::max(motion.target_s, v.path_s - next_speed * dt)
+            : std::min(v.track.length(), v.path_s + next_speed * dt);
     };
     for (VehicleAgent& v : vehicles) {
         if (!v.active()) continue;
-        if (v.requested_action == VehicleAction::STOP) continue;
+        const MotionOverride motion = motionOverrideFor(v.id);
+        if (v.requested_action == VehicleAction::STOP &&
+            motion.motion != RecoveryMotion::RETREAT) continue;
         // 前探距离必须足够远,让车「早早停在冲突区外、留出间隙」,而不是冲到贴上才刹
         // (低速时 brake_dist 极小,只算它会一直蹭到接触才停=楔死)。故在刹车距离之外
         // 再加:车头前伸 + 一个固定安全间隙 kStandoff。kStandoff 同时是「干净对停」后
@@ -1989,6 +1997,13 @@ void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles,
             }
         }
         if (block_id >= 0) {
+            if (motion.a1_intrusion) {
+                a1_coordinator_.holdIntrusionCorrection(
+                    v.id, "a1_intrusion_next_step_blocked");
+                applyActionRequest(v, VehicleAction::STOP,
+                                   "a1_intrusion_next_step_blocked", -1);
+                continue;
+            }
             const std::pair<int, int> key{
                 std::min(v.id, block_id), std::max(v.id, block_id)};
             const int committed_frames = std::max(
@@ -2252,25 +2267,55 @@ void RuleEngine::applyRecoveryPolicy(std::vector<VehicleAgent>& vehicles) {
         }
         if (!recovery.active()) continue;
         if (vehicle.id == recovery.retreat_vehicle_id) {
-            const bool late_owner =
-                recovery.kind == RecoveryKind::A1_LATE_OWNER;
             applyActionRequest(vehicle, VehicleAction::STOP,
                                recovery.phase == RecoveryPhase::PASS
                                    ? "deadlock_pass_hold"
-                                   : late_owner
-                                       ? "a1_late_owner_retreat_override"
-                                       : "deadlock_retreat_override",
+                                   : "deadlock_retreat_override",
                                recovery.pass_vehicle_id);
             continue;
         }
         if (vehicle.id != recovery.pass_vehicle_id) continue;
         if (recovery.motionFor(vehicle.id) == RecoveryMotion::HOLD) {
             applyActionRequest(vehicle, VehicleAction::STOP,
-                               recovery.kind == RecoveryKind::A1_LATE_OWNER
-                                   ? "a1_late_owner_hold"
-                                   : "deadlock_pair_hold",
+                               "deadlock_pair_hold",
                                recovery.retreat_vehicle_id);
         }
+    }
+}
+
+RuleEngine::MotionOverride RuleEngine::motionOverrideFor(
+    int vehicle_id) const {
+    if (const A1Coordinator::IntrusionCorrection* correction =
+            a1_coordinator_.intrusionCorrectionFor(vehicle_id)) {
+        return MotionOverride{
+            correction->motion ==
+                    A1Coordinator::IntrusionCorrectionMotion::RETREAT
+                ? RecoveryMotion::RETREAT : RecoveryMotion::HOLD,
+            correction->target_s, true};
+    }
+    const RecoveryDirective& recovery = deadlock_manager_.directive();
+    return MotionOverride{recovery.motionFor(vehicle_id),
+                          recovery.retreat_target_s, false};
+}
+
+void RuleEngine::refreshA1IntrusionCorrections(
+    std::vector<VehicleAgent>& vehicles, double dt) {
+    a1_coordinator_.refreshIntrusionCorrections(vehicles);
+    for (VehicleAgent& vehicle : vehicles) {
+        const A1Coordinator::IntrusionCorrection* correction =
+            a1_coordinator_.intrusionCorrectionFor(vehicle.id);
+        if (correction == nullptr) continue;
+        applyActionRequest(vehicle, VehicleAction::STOP,
+                           correction->reason, -1);
+    }
+    enforceForwardClearance(vehicles, dt);
+    for (VehicleAgent& vehicle : vehicles) {
+        if (a1_coordinator_.intrusionCorrectionFor(vehicle.id) == nullptr) {
+            continue;
+        }
+        vehicle.action = VehicleAction::STOP;
+        vehicle.requested_action = VehicleAction::STOP;
+        vehicle.blocker_id = -1;
     }
 }
 
@@ -2324,34 +2369,6 @@ void RuleEngine::observeDeadlock(std::vector<VehicleAgent>& vehicles,
         }
     }
     deadlock_manager_.update(vehicles, geometry_items, dt, emit_logs);
-}
-
-void RuleEngine::observeA1LateOwnerRecovery(
-    const std::vector<VehicleAgent>& vehicles, bool emit_logs) {
-    const A1Coordinator::LateOwnerRecoveryRequest& source =
-        a1_coordinator_.lateOwnerRecoveryRequest();
-    if (!source.valid()) return;
-    A1LateOwnerRecoveryRequest request;
-    request.owner_id = source.owner_id;
-    request.transaction_owner_path_gen =
-        source.transaction_owner_path_gen;
-    request.owner_departure_path_gen = source.owner_path_gen;
-    request.intruder_id = source.intruder_id;
-    request.intruder_path_gen = source.intruder_path_gen;
-    request.waiter_stop_s = source.waiter_stop_s;
-    request.frozen_owner_track = source.frozen_owner_track;
-    request.frozen_intruder_track = source.frozen_waiter_track;
-    request.closure_zones.reserve(source.intervals.size());
-    for (const FutureA1ConflictInterval& interval : source.intervals) {
-        PotentialConflictZone zone;
-        zone.s_self_enter = interval.owner_enter;
-        zone.s_self_exit = interval.owner_exit;
-        zone.s_other_enter = interval.other_enter;
-        zone.s_other_exit = interval.other_exit;
-        request.closure_zones.push_back(zone);
-    }
-    deadlock_manager_.requestA1LateOwnerRecovery(
-        request, vehicles, emit_logs);
 }
 
 void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
@@ -2433,7 +2450,6 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
                              reuse_ordinary_coordination);
     enforceFutureA1Admission(vehicles, dt);
     enforceDepartureClusterCommitments(vehicles, dt);
-    observeA1LateOwnerRecovery(vehicles, debug_log_source_ == "REAL");
     resolveTargetSlotOccupancy(vehicles);  // slot-mouth queueing (spec 6/7)
     applyRecoveryPolicy(vehicles);
     // Safety validation runs after all coordination/special-resource outputs

@@ -218,6 +218,9 @@ private:
         double wait_time = 0.0;
         double action_hold_remaining = 0.0;
         double ttc_stop_hold_remaining = 0.0;
+        forklift_planner::multi_vehicle::RecoveryMotion planned_motion =
+            forklift_planner::multi_vehicle::RecoveryMotion::NORMAL;
+        double planned_motion_target_s = 0.0;
         std::string reason;
     };
 
@@ -741,6 +744,8 @@ private:
         }
         const std::vector<bool> sv = visited_slots_;
         const auto sr = rule_engine_->snapshot();       //保存规则引擎状态
+        const auto live_a1_intrusion_corrections =
+            rule_engine_->captureLiveA1IntrusionCorrections();
         const auto sl = allocator_->snapshot();         //保存任务分配器状态
         const bool prev = sim_mode_;                    //保存现在模式（仿真或是实际）
         sim_mode_ = true;       //切换到仿真模式，因为现在属于提前规划，必须视为仿真
@@ -756,7 +761,7 @@ private:
                 sandbox_msgs::TrajectoryPoint tp;
                 tp.x = p.x; tp.y = p.y; tp.yaw = p.theta;                          // 车头朝向
                 const bool retreat =
-                    rule_engine_->recoveryDirective().motionFor(v.id) ==
+                    rule_engine_->motionOverrideFor(v.id).motion ==
                     forklift_planner::multi_vehicle::RecoveryMotion::RETREAT;
                 const double motion_sign =
                     forklift_planner::multi_vehicle::signedPathMotionDirection(
@@ -828,6 +833,9 @@ private:
                     d.action_hold_remaining = v.action_hold_remaining;
                     d.ttc_stop_hold_remaining =
                         v.ttc_stop_hold_remaining;
+                    const auto motion = rule_engine_->motionOverrideFor(v.id);
+                    d.planned_motion = motion.motion;
+                    d.planned_motion_target_s = motion.target_s;
                     d.reason = v.reason;
                     frame.agents.push_back(std::move(d));
                 }
@@ -847,6 +855,8 @@ private:
         visited_slots_ = sv;
         coord_log_suppressed_ = true;
         rule_engine_->restore(sr);
+        rule_engine_->restoreLiveA1IntrusionCorrections(
+            live_a1_intrusion_corrections);
         allocator_->restore(sl);
         coord_log_suppressed_ = false;
         sim_mode_ = prev;
@@ -1105,6 +1115,18 @@ private:
         }
         const RecoveryIdentity recovery_before = captureRecoveryIdentity();
         const double live_dt = 1.0 / pp_.update_rate;
+        rule_engine_->refreshA1IntrusionCorrections(agents_, live_dt);
+        for (size_t i = 0; i < agents_.size(); ++i) {
+            const auto live_motion =
+                rule_engine_->motionOverrideFor(agents_[i].id);
+            if (live_motion.motion != frame.agents[i].planned_motion ||
+                (live_motion.motion == forklift_planner::multi_vehicle::
+                                           RecoveryMotion::RETREAT &&
+                 std::abs(live_motion.target_s -
+                          frame.agents[i].planned_motion_target_s) > 1e-9)) {
+                force_horizon_refresh_ = true;
+            }
+        }
         rule_engine_->observeDeadlock(agents_, live_dt, true);
         rule_engine_->applyRecoveryDirectiveToOutput(agents_);
         if (captureRecoveryIdentity() != recovery_before) {
@@ -1203,6 +1225,14 @@ private:
     bool executeRealRollingDecision(double dt) {
         if (!real_plan_valid_) return false;
 
+        std::vector<std::tuple<bool, int, double>> motion_before;
+        motion_before.reserve(agents_.size());
+        for (const VehicleAgent& vehicle : agents_) {
+            const auto motion = rule_engine_->motionOverrideFor(vehicle.id);
+            motion_before.emplace_back(
+                motion.a1_intrusion, static_cast<int>(motion.motion),
+                motion.target_s);
+        }
         const double elapsed =
             std::max(0.0, sim_time_ - real_plan_start_time_);
         const double remaining_horizon =
@@ -1210,6 +1240,16 @@ private:
         rule_engine_->decide(agents_, dt, remaining_horizon,
                              /*reuse_ordinary_coordination=*/true,
                              &real_period_ordinary_decision_);
+        for (size_t i = 0; i < agents_.size(); ++i) {
+            const auto motion = rule_engine_->motionOverrideFor(agents_[i].id);
+            const auto motion_after = std::make_tuple(
+                motion.a1_intrusion, static_cast<int>(motion.motion),
+                motion.target_s);
+            if (motion_after != motion_before[i]) {
+                force_horizon_refresh_ = true;
+                break;
+            }
+        }
         marker_pub_->setRollingDecision(real_period_ordinary_decision_);
 
         // A1 departure transactions are live state. If one is created,
@@ -1805,8 +1845,8 @@ private:
             next_speed[i] = v.current_speed;
             if (!v.active()) continue;
 
-            const auto recovery_motion =
-                rule_engine_->recoveryDirective().motionFor(v.id);
+            const auto motion_override = rule_engine_->motionOverrideFor(v.id);
+            const auto recovery_motion = motion_override.motion;
             if (recovery_motion ==
                 forklift_planner::multi_vehicle::RecoveryMotion::HOLD) {
                 next_speed[i] = 0.0;
@@ -1828,7 +1868,7 @@ private:
             if (recovery_motion ==
                 forklift_planner::multi_vehicle::RecoveryMotion::RETREAT) {
                 next_s[i] = std::max(
-                    rule_engine_->recoveryDirective().retreat_target_s,
+                    motion_override.target_s,
                     v.path_s - next_speed[i] * dt);
             } else {
                 next_s[i] = std::min(v.track.length(),
@@ -1879,7 +1919,7 @@ private:
         auto tryClearBlocker = [&](size_t idx, int blocker_id) {
             VehicleAgent& v = agents_[idx];
             if (!v.active()) return false;
-            if (rule_engine_->recoveryDirective().motionFor(v.id) !=
+            if (rule_engine_->motionOverrideFor(v.id).motion !=
                 forklift_planner::multi_vehicle::RecoveryMotion::NORMAL) {
                 return false;
             }
@@ -2762,21 +2802,21 @@ private:
             const auto speed_identity = std::make_tuple(
                 v.path_gen, static_cast<int>(v.mission_phase),
                 static_cast<int>(v.leg_target) + 10 * static_cast<int>(
-                    rule_engine_->recoveryDirective().motionFor(v.id)));
+                    rule_engine_->motionOverrideFor(v.id).motion));
             if (rb_speed_identity_[i] != speed_identity) {
                 rb_speed_windows_[i].clear(0.0);
                 rb_speed_identity_[i] = speed_identity;
                 rb_motion_pose_valid_[i] = false;
             }
             const double previous_path_s = rb_prev_path_s_[i];
-            const auto recovery_motion =
-                rule_engine_->recoveryDirective().motionFor(v.id);
+            const auto motion_override = rule_engine_->motionOverrideFor(v.id);
+            const auto recovery_motion = motion_override.motion;
             const int progress_direction =
                 recovery_motion ==
                     forklift_planner::multi_vehicle::RecoveryMotion::RETREAT
                     ? -1 : 1;
             const double lo = progress_direction < 0
-                ? std::max(rule_engine_->recoveryDirective().retreat_target_s,
+                ? std::max(motion_override.target_s,
                            rb_prev_path_s_[i] - 0.50)
                 : std::max(0.0, rb_prev_path_s_[i] - 0.10);
             const double hi = progress_direction < 0
@@ -2908,7 +2948,7 @@ private:
             // 注:几何 /traj 已由 publishHorizon(滚动时域时间参数化轨迹)发布,这里不再发 /traj。
             // 速度幅值=协调动作档,再被曲率限速卡住(规划侧运动学:弯道降速)。方向=路径段(倒车负)。STOP→0。
             const auto recovery_motion =
-                rule_engine_->recoveryDirective().motionFor(v.id);
+                rule_engine_->motionOverrideFor(v.id).motion;
             const VehicleAction motion_action =
                 recovery_motion ==
                         forklift_planner::multi_vehicle::RecoveryMotion::RETREAT
