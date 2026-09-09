@@ -292,6 +292,7 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
     TurnCurve initial_reverse_curve;
     Pt initial_reverse_curve_start{src.pre_dock_x, src.pre_dock_y};
     double initial_reverse_motion_heading = 0.0;
+    constexpr double kInitialReverseStraightExtension = 0.3;
     bool force_first_transition_x = false;
     double first_transition_x = 0.0;
     bool row1_upper_forward_start_active = false;
@@ -318,7 +319,10 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
                     : row1_left_up_x;
             } else if (tgt.row_id == 4 ||
                        tgt.row_id == 5 || tgt.row_id == 6 || tgt.row_id == 7) {
-                start_ref_x = (tgt.pre_dock_x < spine_x_) ? left_outer_x : right_outer_x;
+                // row4/5/6/7: use the inner vertical connector between corridor 1 and 2.
+                start_ref_x = (tgt.pre_dock_x < spine_x_)
+                    ? row1_left_up_x
+                    : row1_right_down_x;
             } else {
                 const double left_gap = std::abs(tgt.pre_dock_x - left_outer_x);
                 const double right_gap = std::abs(tgt.pre_dock_x - right_outer_x);
@@ -430,6 +434,10 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
             if (minimize_tail) {
                 desired_end_x = curve_end.x;
             }
+            // Keep reversing after the initial A1 exit curve before the first cusp,
+            // giving the real vehicle a straight alignment / steering-settling region.
+            desired_end_x +=
+                reverse_end_dir.x * kInitialReverseStraightExtension;
             const double post_curve_len =
                 (desired_end_x - curve_end.x) * reverse_end_dir.x;
             if (straight_len >= -sample_ds &&
@@ -1293,6 +1301,35 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
             use_a1_to_b_rules && terminal_lane_shift &&
             src.id >= 0 && src_corr == tgt_corr &&
             src_corr == 1 && tgt.row_id == 1;
+
+        // A1 -> row4/5/6/7: keep the first two corridor connectors explicit.
+        // Do not replace the inner 1->2 vertical connector + corridor-2 horizontal
+        // segment + 2->3 spine connector with a quintic lane shift.  This keeps
+        // the two local 90-degree turns available for the normal clothoid/arc logic
+        // and avoids sweeping toward the neighboring shelf slots.
+        const double first_inner_connector_x =
+            (tgt.pre_dock_x < spine_x_) ? row1_left_up_x : row1_right_down_x;
+        const double connector_match_tol = std::max(1e-4, sample_ds * 0.25);
+        const bool a1_first_inner_connector_keep_turn =
+            use_a1_to_b_rules &&
+            src.id >= 0 &&
+            src_corr == 1 &&
+            tgt_corr >= 3 &&
+            (tgt.row_id == 4 || tgt.row_id == 5 ||
+             tgt.row_id == 6 || tgt.row_id == 7) &&
+            std::abs(simplified[j - 1].x - first_inner_connector_x) <= connector_match_tol &&
+            std::abs(simplified[j].x     - first_inner_connector_x) <= connector_match_tol &&
+            std::abs(simplified[j + 1].x - spine_x_) <= connector_match_tol &&
+            std::abs(simplified[j + 2].x - spine_x_) <= connector_match_tol;
+        if (a1_first_inner_connector_keep_turn) {
+            if (debug_row1_target) {
+                ROS_WARN("[planner][row1-debug] lane_shift skipped tgt=%d j=%zu "
+                         "terminal=%d lateral=%.3f: keep inner 1->2 connector, "
+                         "corridor-2 straight, and 2->3 spine connector",
+                         tgt.id, j, terminal_lane_shift ? 1 : 0, lateral);
+            }
+            continue;
+        }
         if (row1_upper_terminal_keep_turn) {
             if (debug_row1_target) {
                 ROS_WARN("[planner][row1-debug] lane_shift skipped tgt=%d j=%zu "

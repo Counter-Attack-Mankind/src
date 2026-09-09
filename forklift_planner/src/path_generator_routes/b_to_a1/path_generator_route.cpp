@@ -297,6 +297,7 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
     TurnCurve initial_reverse_curve;
     Pt initial_reverse_curve_start{src.pre_dock_x, src.pre_dock_y};
     double initial_reverse_motion_heading = 0.0;
+    constexpr double kInitialReverseStraightExtension = 0.30;
     bool force_first_transition_x = false;
     double first_transition_x = 0.0;
     const bool row1_upper_source_to_a1 =
@@ -312,9 +313,13 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
     const bool row2_upper_right_edge_to_a1 =
         target_is_depot_a1 && src.row_id == 3 && src.col >= 8;
     const bool row2_lower_left_to_a1 =
-        target_is_depot_a1 && src.row_id == 4 && src.col <= 4;
+        target_is_depot_a1 && src.row_id == 4 &&
+        (src.id == 21 || src.id == 23 || src.id == 25 ||
+         src.id == 27 || src.id == 29);
     const bool row2_lower_right_to_a1 =
-        target_is_depot_a1 && src.row_id == 4 && src.col >= 5;
+        target_is_depot_a1 && src.row_id == 4 &&
+        (src.id == 31 || src.id == 33 || src.id == 35 ||
+         src.id == 37 || src.id == 39);
     const bool row3_upper_left_to_a1 =
         target_is_depot_a1 && src.row_id == 5 && src.col <= 3;
     const bool row3_upper_right_to_a1 =
@@ -379,10 +384,14 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
         } else if (row4_bottom_right_to_a1) {
             start_to_right = true;
         }
+        // row0: B0~B4 follow the same left-side generation rule;
+        // B5~B9 follow the same right-side generation rule.
         const bool row0_left_outer_to_a1 =
-            target_is_depot_a1 && src.row_id == 0 && src.col <= 1;
+            target_is_depot_a1 && src.row_id == 0 &&
+            src.id >= 0 && src.id <= 4;
         const bool row0_right_outer_to_a1 =
-            target_is_depot_a1 && src.row_id == 0 && src.col >= 8;
+            target_is_depot_a1 && src.row_id == 0 &&
+            src.id >= 5 && src.id <= 9;
         const bool row0_outer_to_a1 =
             row0_left_outer_to_a1 || row0_right_outer_to_a1;
         const bool row1_upper_to_a1 = row1_upper_source_to_a1;
@@ -529,6 +538,10 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
             if (minimize_tail) {
                 desired_end_x = curve_end.x;
             }
+            // After the initial reverse curve, keep reversing on the final
+            // reverse heading before the first REVERSE->FORWARD cusp.
+            desired_end_x +=
+                reverse_end_dir.x * kInitialReverseStraightExtension;
             const double post_curve_len =
                 (desired_end_x - curve_end.x) * reverse_end_dir.x;
             const double min_straight_len =
@@ -722,22 +735,32 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
             }
         }
         if (current_corr == 2 && next_corr == 1) {
-            if (row2_upper_left_to_a1) {
+            // B->A1: row2/row4/row5/row6/row7 use the OUTER 1/2
+            // vertical connectors. row3 keeps its existing rule.
+            if (target_is_depot_a1 && src.row_id == 2) {
+                connector_x = row1_lower_right_source_to_a1
+                    ? row1_right_up_x
+                    : row1_left_down_x;
+            } else if (row2_upper_left_to_a1) {
                 connector_x = row1_left_down_x;
             } else if (row2_upper_right_to_a1) {
                 connector_x = row1_right_up_x;
+            } else if (row2_lower_left_to_a1) {
+                connector_x = row1_left_down_x;
+            } else if (row2_lower_right_to_a1) {
+                connector_x = row1_right_up_x;
             } else if (row3_upper_left_to_a1) {
-                connector_x = row1_left_up_x;
+                connector_x = row1_left_down_x;
             } else if (row3_upper_right_to_a1) {
-                connector_x = row1_right_down_x;
+                connector_x = row1_right_up_x;
             } else if (row3_lower_left_to_a1) {
-                connector_x = row1_left_up_x;
+                connector_x = row1_left_down_x;
             } else if (row3_lower_right_to_a1) {
-                connector_x = row1_right_down_x;
+                connector_x = row1_right_up_x;
             } else if (row4_bottom_left_to_a1) {
-                connector_x = row1_left_up_x;
+                connector_x = row1_left_down_x;
             } else if (row4_bottom_right_to_a1) {
-                connector_x = row1_right_down_x;
+                connector_x = row1_right_up_x;
             }
         }
 
@@ -1539,6 +1562,10 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
     std::vector<double> lane_shift_lead_in(n, 0.0);
     std::vector<double> lane_shift_lead_out(n, 0.0);
     std::vector<bool> suppress_turn(n, false);
+
+    // B->A1: the outer 1/2 vertical connector and the 2/3 spine connector
+    // are joined through corridor 2 by two explicit local circular arcs.
+    std::vector<bool> force_local_arc(n, false);
     for (size_t j = 1; j + 2 < n; ++j) {
         if (suppress_turn[j] || suppress_turn[j + 1]) continue;
         if (!is_short_parallel_shift(simplified[j - 1], simplified[j],
@@ -1558,6 +1585,41 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
         const Pt u = normalize(simplified[j] - simplified[j - 1]);
         const double lateral = std::abs(dot(simplified[j + 1] - simplified[j],
                                             left_normal(u)));
+
+        const double connector_tol = std::max(0.03, sample_ds * 2.0);
+        const bool first_vertical_is_outer =
+            (std::abs(simplified[j - 1].x - row1_left_down_x) < connector_tol &&
+             std::abs(simplified[j].x     - row1_left_down_x) < connector_tol) ||
+            (std::abs(simplified[j - 1].x - row1_right_up_x) < connector_tol &&
+             std::abs(simplified[j].x     - row1_right_up_x) < connector_tol);
+        const bool second_vertical_is_outer =
+            (std::abs(simplified[j + 1].x - row1_left_down_x) < connector_tol &&
+             std::abs(simplified[j + 2].x - row1_left_down_x) < connector_tol) ||
+            (std::abs(simplified[j + 1].x - row1_right_up_x) < connector_tol &&
+             std::abs(simplified[j + 2].x - row1_right_up_x) < connector_tol);
+        const bool first_vertical_is_spine =
+            std::abs(simplified[j - 1].x - spine_x_) < connector_tol &&
+            std::abs(simplified[j].x     - spine_x_) < connector_tol;
+        const bool second_vertical_is_spine =
+            std::abs(simplified[j + 1].x - spine_x_) < connector_tol &&
+            std::abs(simplified[j + 2].x - spine_x_) < connector_tol;
+        const bool row12_row23_connector_pair =
+            target_is_depot_a1 &&
+            ((first_vertical_is_outer && second_vertical_is_spine) ||
+             (first_vertical_is_spine && second_vertical_is_outer));
+
+        if (row12_row23_connector_pair) {
+            force_local_arc[j] = true;
+            force_local_arc[j + 1] = true;
+            if (debug_row1_target) {
+                ROS_WARN("[planner][row1-debug] lane_shift skipped tgt=%d j=%zu "
+                         "outer 1/2 <-> spine 2/3 connector uses two local arcs "
+                         "lateral=%.3f",
+                         tgt.id, j, lateral);
+            }
+            continue;
+        }
+
         const bool row12_right_inner_corr2_to_corr1_shift =
             target_is_depot_a1 &&
             std::abs(simplified[j].y -
@@ -1722,6 +1784,11 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
     for (int iter = 0; iter < 12; ++iter) {
         for (size_t j = 1; j + 1 < n; ++j) {
             if (!active_turn[j]) continue;
+            if (force_local_arc[j]) {
+                planned[j].active = false;
+                planned[j].curve = TurnCurve{};
+                continue;
+            }
             TurnCurve curve = fit_clear_turn(j, turn_limits[j]);
             planned[j].active = !curve.pts.empty();
             planned[j].curve = std::move(curve);
@@ -1762,7 +1829,7 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
     }
     std::vector<size_t> infeasible_turns;
     for (size_t j = 1; j + 1 < n; ++j) {
-        if (active_turn[j] && !planned[j].active) {
+        if (active_turn[j] && !planned[j].active && !force_local_arc[j]) {
             infeasible_turns.push_back(j);
         }
     }
@@ -1898,9 +1965,12 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
                         info, DebugPathLayerType::ARC_FALLBACK,
                         "local_arc_fallback", dense, debug_begin);
                     if (debug_row1_target) {
-                        ROS_WARN("[planner][row1-debug] local arc fallback "
+                        ROS_WARN("[planner][row1-debug] %s "
                                  "tgt=%d j=%zu radius=%.3f max_radius=%.3f "
                                  "pts=%zu",
+                                 force_local_arc[i]
+                                     ? "forced connector local arc"
+                                     : "local arc fallback",
                                  tgt.id, i, local_radius,
                                  max_local_radius,
                                  dense.size() - debug_begin);
