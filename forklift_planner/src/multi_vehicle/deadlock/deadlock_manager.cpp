@@ -225,6 +225,7 @@ DeadlockManager::RetreatEvaluation DeadlockManager::evaluateRetreat(
         }
     }
     if (seed == overlap_grid.size()) {
+        result.outcome = RetreatOutcome::NO_COMPONENT;
         result.reason = "no_obb_overlap_component";
         return result;
     }
@@ -274,6 +275,7 @@ DeadlockManager::RetreatEvaluation DeadlockManager::evaluateRetreat(
     }
 
     result.feasible = true;
+    result.outcome = RetreatOutcome::FEASIBLE_RETREAT;
     result.distance = retreat.path_s - result.target_s;
     result.reason = "clear";
     return result;
@@ -353,7 +355,22 @@ void DeadlockManager::update(
         transaction_ = {};
         cooldown_ = {};
         directive_ = {};
+        priority_override_ = {};
         return;
+    }
+
+    if (priority_override_.active) {
+        const VehicleAgent* override_a = vehicleById(
+            vehicles, priority_override_.vehicle_a);
+        const VehicleAgent* override_b = vehicleById(
+            vehicles, priority_override_.vehicle_b);
+        if (override_a == nullptr || override_b == nullptr ||
+            override_a->mode != VehicleMode::ACTIVE ||
+            override_b->mode != VehicleMode::ACTIVE ||
+            override_a->path_gen != priority_override_.path_gen_a ||
+            override_b->path_gen != priority_override_.path_gen_b) {
+            priority_override_ = {};
+        }
     }
 
     if (cooldown_.remaining > 1e-9) {
@@ -477,6 +494,13 @@ void DeadlockManager::update(
         if (cooldown_.remaining > 1e-9 &&
             b->id == cooldown_.vehicle_id) continue;
         if (a.id < b->id) {
+            if (priority_override_.active &&
+                priority_override_.vehicle_a == a.id &&
+                priority_override_.vehicle_b == b->id &&
+                priority_override_.path_gen_a == a.path_gen &&
+                priority_override_.path_gen_b == b->path_gen) {
+                continue;
+            }
             candidate_a = &a;
             candidate_b = b;
             break;
@@ -593,6 +617,38 @@ void DeadlockManager::update(
 
     candidate_ = {};
     if (selected == nullptr) {
+        const bool a_no_component =
+            a_retreat.outcome == RetreatOutcome::NO_COMPONENT;
+        const bool b_no_component =
+            b_retreat.outcome == RetreatOutcome::NO_COMPONENT;
+        if (a_no_component || b_no_component) {
+            int override_winner = -1;
+            if (a_no_component != b_no_component) {
+                override_winner = a_no_component
+                    ? a_retreat.pass_vehicle_id
+                    : b_retreat.pass_vehicle_id;
+            } else if (preferred_priority_id == candidate_a->id) {
+                override_winner = candidate_b->id;
+            } else if (preferred_priority_id == candidate_b->id) {
+                override_winner = candidate_a->id;
+            } else {
+                override_winner = std::min(candidate_a->id, candidate_b->id);
+            }
+            transaction_ = {};
+            priority_override_.active = true;
+            priority_override_.vehicle_a = candidate_a->id;
+            priority_override_.vehicle_b = candidate_b->id;
+            priority_override_.path_gen_a = candidate_a->path_gen;
+            priority_override_.path_gen_b = candidate_b->path_gen;
+            priority_override_.winner_id = override_winner;
+            refreshDirective();
+            std::ostringstream selection;
+            selection << "pair=V" << candidate_a->id << "-V"
+                      << candidate_b->id << " pass=V" << override_winner
+                      << " selection_reason=no_component_priority_swap";
+            emit("SELECT", selection.str(), emit_logs);
+            return;
+        }
         transaction_.phase = RecoveryPhase::UNRESOLVED;
         transaction_.retreat_vehicle_id = candidate_a->id;
         transaction_.pass_vehicle_id = candidate_b->id;
@@ -634,7 +690,8 @@ void DeadlockManager::update(
 }
 
 DeadlockManager::Snapshot DeadlockManager::snapshot() const {
-    return Snapshot{candidate_, transaction_, cooldown_, directive_};
+    return Snapshot{candidate_, transaction_, cooldown_, directive_,
+                    priority_override_};
 }
 
 void DeadlockManager::restore(const Snapshot& snapshot) {
@@ -642,6 +699,12 @@ void DeadlockManager::restore(const Snapshot& snapshot) {
     transaction_ = snapshot.transaction;
     cooldown_ = snapshot.cooldown;
     directive_ = snapshot.directive;
+    priority_override_ = snapshot.priority_override;
+}
+
+void DeadlockManager::clearPriorityOverride() {
+    priority_override_ = {};
+    candidate_ = {};
 }
 
 }  // namespace multi_vehicle

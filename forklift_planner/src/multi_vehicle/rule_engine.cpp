@@ -1144,21 +1144,27 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             PriorityPhysicalTtcEvaluation priority_physical;
             if (ordinary && !reuse_ordinary_coordination) {
                 ordinary_priority_id = priorityWinner(a, b);
-                const bool a_is_priority = ordinary_priority_id == a.id;
-                const VehicleAgent& priority_vehicle = a_is_priority ? a : b;
-                const VehicleAgent& other_vehicle = a_is_priority ? b : a;
-                const auto& priority_prediction =
-                    a_is_priority ? predictions[i] : predictions[j];
-                if (priority_vehicle.ttc_stop_hold_remaining <= 1e-9) {
-                    priority_physical = evaluatePriorityPhysicalTtc(
-                        priority_vehicle, other_vehicle, priority_prediction,
-                        mp_, cfg_);
-                }
             }
 
             const TimedConflictEvent& event = interaction.event;
             if (!event.valid) {
                 bool priority_physical_stop = false;
+                if (ordinary && !reuse_ordinary_coordination &&
+                    (ordinary_priority_id == a.id ||
+                     ordinary_priority_id == b.id)) {
+                    const bool a_is_priority = ordinary_priority_id == a.id;
+                    const VehicleAgent& priority_vehicle =
+                        a_is_priority ? a : b;
+                    const VehicleAgent& other_vehicle =
+                        a_is_priority ? b : a;
+                    const auto& priority_prediction =
+                        a_is_priority ? predictions[i] : predictions[j];
+                    if (priority_vehicle.ttc_stop_hold_remaining <= 1e-9) {
+                        priority_physical = evaluatePriorityPhysicalTtc(
+                            priority_vehicle, other_vehicle,
+                            priority_prediction, mp_, cfg_);
+                    }
+                }
                 if (ordinary && priority_physical.valid) {
                     const TtcStopBoundary boundary = evaluateTtcStopBoundary(
                         priority_physical.safety_ttc,
@@ -1314,6 +1320,74 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 continue;
             }
 
+            int preferred_winner = ordinary_priority_id;
+            constexpr double kBridgeEntryEpsilon = 0.01;
+            if (ordinary &&
+                bridge_correction.a.bridge_related &&
+                bridge_correction.b.bridge_related) {
+                const bool a_entered =
+                    a.path_s >= bridge_correction.a.near_boundary_s -
+                                    kBridgeEntryEpsilon;
+                const bool b_entered =
+                    b.path_s >= bridge_correction.b.near_boundary_s -
+                                    kBridgeEntryEpsilon;
+                if (ordinary_priority_id == a.id && b_entered && !a_entered) {
+                    preferred_winner = b.id;
+                } else if (ordinary_priority_id == b.id && a_entered &&
+                           !b_entered) {
+                    preferred_winner = a.id;
+                }
+            }
+
+            const DeadlockPriorityOverride& deadlock_override =
+                deadlock_manager_.priorityOverride();
+            const bool deadlock_direct_match =
+                deadlock_override.active &&
+                deadlock_override.vehicle_a == a.id &&
+                deadlock_override.vehicle_b == b.id &&
+                deadlock_override.path_gen_a == a.path_gen &&
+                deadlock_override.path_gen_b == b.path_gen;
+            const bool deadlock_reverse_match =
+                deadlock_override.active &&
+                deadlock_override.vehicle_a == b.id &&
+                deadlock_override.vehicle_b == a.id &&
+                deadlock_override.path_gen_a == b.path_gen &&
+                deadlock_override.path_gen_b == a.path_gen;
+            if (deadlock_direct_match || deadlock_reverse_match) {
+                preferred_winner = deadlock_override.winner_id;
+            }
+
+            const RecoveryDirective& recovery = deadlock_manager_.directive();
+            const bool pass_direct_match =
+                ordinary && recovery.phase == RecoveryPhase::PASS &&
+                recovery.retreat_vehicle_id == a.id &&
+                recovery.pass_vehicle_id == b.id &&
+                recovery.retreat_path_gen == a.path_gen &&
+                recovery.pass_path_gen == b.path_gen;
+            const bool pass_reverse_match =
+                ordinary && recovery.phase == RecoveryPhase::PASS &&
+                recovery.retreat_vehicle_id == b.id &&
+                recovery.pass_vehicle_id == a.id &&
+                recovery.retreat_path_gen == b.path_gen &&
+                recovery.pass_path_gen == a.path_gen;
+            if (pass_direct_match || pass_reverse_match) {
+                preferred_winner = recovery.pass_vehicle_id;
+            }
+
+            if (ordinary &&
+                (preferred_winner == a.id || preferred_winner == b.id)) {
+                const bool a_is_priority = preferred_winner == a.id;
+                const VehicleAgent& priority_vehicle = a_is_priority ? a : b;
+                const VehicleAgent& other_vehicle = a_is_priority ? b : a;
+                const auto& priority_prediction =
+                    a_is_priority ? predictions[i] : predictions[j];
+                if (priority_vehicle.ttc_stop_hold_remaining <= 1e-9) {
+                    priority_physical = evaluatePriorityPhysicalTtc(
+                        priority_vehicle, other_vehicle, priority_prediction,
+                        mp_, cfg_);
+                }
+            }
+
             if (dynamic_speed_enabled) {
                 ++dynamic_speed_metrics_.baseline_conflicts;
                 if (ordinary) {
@@ -1348,11 +1422,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         ++dynamic_speed_metrics_.crossing_conflicts;
                     }
                 }
-                int preferred_winner = -1;
-                if (ordinary) {
-                    preferred_winner = ordinary_priority_id;
-                }
-
                 PairSpeedCoordinationResult speed_result;
                 if (ordinary) {
                     const bool a_is_priority = preferred_winner == a.id;
@@ -1794,6 +1863,39 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     continue;
                 }
             }
+        }
+    }
+
+    const DeadlockPriorityOverride& active_override =
+        deadlock_manager_.priorityOverride();
+    if (active_override.active) {
+        const VehicleAgent* override_a = nullptr;
+        const VehicleAgent* override_b = nullptr;
+        for (const VehicleAgent& vehicle : vehicles) {
+            if (vehicle.id == active_override.vehicle_a) {
+                override_a = &vehicle;
+            } else if (vehicle.id == active_override.vehicle_b) {
+                override_b = &vehicle;
+            }
+        }
+        const bool identity_changed =
+            override_a == nullptr || override_b == nullptr ||
+            override_a->mode != VehicleMode::ACTIVE ||
+            override_b->mode != VehicleMode::ACTIVE ||
+            override_a->path_gen != active_override.path_gen_a ||
+            override_b->path_gen != active_override.path_gen_b;
+        const std::pair<int, int> override_key{
+            std::min(active_override.vehicle_a, active_override.vehicle_b),
+            std::max(active_override.vehicle_a, active_override.vehicle_b)};
+        const bool stop_holds_expired =
+            !identity_changed &&
+            override_a->ttc_stop_hold_remaining <= 1e-9 &&
+            override_b->ttc_stop_hold_remaining <= 1e-9;
+        const bool timed_conflict_cleared =
+            stop_holds_expired &&
+            ordinary_dynamic_pairs_.count(override_key) == 0;
+        if (identity_changed || timed_conflict_cleared) {
+            deadlock_manager_.clearPriorityOverride();
         }
     }
 }
@@ -2281,6 +2383,7 @@ void RuleEngine::applyRecoveryPolicy(std::vector<VehicleAgent>& vehicles) {
                                recovery.retreat_vehicle_id);
         }
     }
+
 }
 
 RuleEngine::MotionOverride RuleEngine::motionOverrideFor(
