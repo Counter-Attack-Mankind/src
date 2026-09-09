@@ -1562,10 +1562,6 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
     std::vector<double> lane_shift_lead_in(n, 0.0);
     std::vector<double> lane_shift_lead_out(n, 0.0);
     std::vector<bool> suppress_turn(n, false);
-
-    // B->A1: the outer 1/2 vertical connector and the 2/3 spine connector
-    // are joined through corridor 2 by two explicit local circular arcs.
-    std::vector<bool> force_local_arc(n, false);
     for (size_t j = 1; j + 2 < n; ++j) {
         if (suppress_turn[j] || suppress_turn[j + 1]) continue;
         if (!is_short_parallel_shift(simplified[j - 1], simplified[j],
@@ -1586,6 +1582,10 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
         const double lateral = std::abs(dot(simplified[j + 1] - simplified[j],
                                             left_normal(u)));
 
+        // B->A1: for the connector pair
+        // outer 1/2 vertical -> corridor-2 horizontal -> 2/3 spine vertical,
+        // disable lane shift only.  Keep both corners available to the normal
+        // turn planner (clothoid first, local arc only as fallback).
         const double connector_tol = std::max(0.03, sample_ds * 2.0);
         const bool first_vertical_is_outer =
             (std::abs(simplified[j - 1].x - row1_left_down_x) < connector_tol &&
@@ -1609,11 +1609,9 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
              (first_vertical_is_spine && second_vertical_is_outer));
 
         if (row12_row23_connector_pair) {
-            force_local_arc[j] = true;
-            force_local_arc[j + 1] = true;
             if (debug_row1_target) {
                 ROS_WARN("[planner][row1-debug] lane_shift skipped tgt=%d j=%zu "
-                         "outer 1/2 <-> spine 2/3 connector uses two local arcs "
+                         "outer 1/2 <-> spine 2/3 connector keeps normal turn planning "
                          "lateral=%.3f",
                          tgt.id, j, lateral);
             }
@@ -1784,11 +1782,6 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
     for (int iter = 0; iter < 12; ++iter) {
         for (size_t j = 1; j + 1 < n; ++j) {
             if (!active_turn[j]) continue;
-            if (force_local_arc[j]) {
-                planned[j].active = false;
-                planned[j].curve = TurnCurve{};
-                continue;
-            }
             TurnCurve curve = fit_clear_turn(j, turn_limits[j]);
             planned[j].active = !curve.pts.empty();
             planned[j].curve = std::move(curve);
@@ -1829,7 +1822,7 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
     }
     std::vector<size_t> infeasible_turns;
     for (size_t j = 1; j + 1 < n; ++j) {
-        if (active_turn[j] && !planned[j].active && !force_local_arc[j]) {
+        if (active_turn[j] && !planned[j].active) {
             infeasible_turns.push_back(j);
         }
     }
@@ -1965,12 +1958,9 @@ RoughPath PathGenerator::generateRouteBToA1(const Slot& src, const Slot& tgt,
                         info, DebugPathLayerType::ARC_FALLBACK,
                         "local_arc_fallback", dense, debug_begin);
                     if (debug_row1_target) {
-                        ROS_WARN("[planner][row1-debug] %s "
+                        ROS_WARN("[planner][row1-debug] local arc fallback "
                                  "tgt=%d j=%zu radius=%.3f max_radius=%.3f "
                                  "pts=%zu",
-                                 force_local_arc[i]
-                                     ? "forced connector local arc"
-                                     : "local arc fallback",
                                  tgt.id, i, local_radius,
                                  max_local_radius,
                                  dense.size() - debug_begin);
