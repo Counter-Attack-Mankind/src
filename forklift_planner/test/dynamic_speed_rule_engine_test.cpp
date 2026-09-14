@@ -197,6 +197,7 @@ int main() {
     // work and must not hold the parked vehicle.
     RuleEngine admission_engine(map_param, config);
     VehicleAgent launch_candidate = crossingVehicle(20, 0.0, false);
+    launch_candidate.current_slot = 20;
     launch_candidate.track.set(RoughPath{
         wp(0.0, 0.0, 0.0), wp(2.0, 0.0, 0.0)});
     launch_candidate.slot_departure_clear_s = 0.5;
@@ -236,6 +237,15 @@ int main() {
         service_owner, launch_candidate);
     if (far_a1.departure_resource_conflict) {
         return fail("far A1 departure closure over-held slot launch");
+    }
+    VehicleAgent b0_b9_candidate = launch_candidate;
+    b0_b9_candidate.current_slot = 6;
+    const auto source_slot_a1 = admission_engine.checkA1LaunchAdmission(
+        service_owner, b0_b9_candidate);
+    if (!source_slot_a1.departure_resource_conflict ||
+        !source_slot_a1.source_slot_hold ||
+        source_slot_a1.protected_zone_count == 0) {
+        return fail("B0-B9 A1 departure resource did not hold at source");
     }
     service_owner.pending_dropoff_track = immediate_occupant.track;
     service_owner.a1_departure_priority_until_s =
@@ -368,6 +378,36 @@ int main() {
         !hasDynamicReason(bridge_pair, VehicleAction::STOP) ||
         !bridge_engine.snapshot().reservations.empty()) {
         return fail("head-on bridge TTC did not drive reservation-free action");
+    }
+
+    // Entering the corrected near-boundary first is diagnostic only. It must
+    // not turn the ordinary yielding vehicle into an effective winner.
+    RuleEngine entered_bridge_engine(map_param, config);
+    std::vector<std::string> entered_bridge_logs;
+    entered_bridge_engine.setCoordLogSink(
+        [&](const std::string& line) { entered_bridge_logs.push_back(line); });
+    VehicleAgent bridge_priority = crossingVehicle(0, 0.0, false);
+    bridge_priority.track.set(RoughPath{
+        wp(0.0, -1.0, 1.5707963267948966),
+        wp(0.0, 0.0, 0.0), wp(4.0, 0.0, 0.0)});
+    VehicleAgent bridge_yielding = crossingVehicle(1, 0.0, false);
+    bridge_yielding.track.set(RoughPath{
+        wp(4.0, 0.04, 3.14159265358979323846),
+        wp(0.0, 0.04, 3.14159265358979323846),
+        wp(0.0, 1.0, 1.5707963267948966)});
+    bridge_yielding.path_s = 1.0;
+    std::vector<VehicleAgent> entered_bridge_pair{
+        bridge_priority, bridge_yielding};
+    entered_bridge_engine.decide(entered_bridge_pair, 0.1, 15.0);
+    bool kept_ordinary_bridge_priority = false;
+    for (const std::string& line : entered_bridge_logs) {
+        kept_ordinary_bridge_priority = kept_ordinary_bridge_priority ||
+            (line.find("[BRIDGE-TTC]") != std::string::npos &&
+             line.find("priority_vehicle=V0") != std::string::npos &&
+             line.find("yielding_vehicle=V1") != std::string::npos);
+    }
+    if (!kept_ordinary_bridge_priority) {
+        return fail("Bridge near-boundary entry reversed ordinary priority");
     }
 
     // A nominally clear pair does not even enter bridge matching and emits no
@@ -712,6 +752,119 @@ int main() {
         hasDynamicReason(recovery, VehicleAction::CREEP) ||
         !recovery_engine.snapshot().reservations.empty()) {
         return fail("next real rolling decision did not return to NOMINAL");
+    }
+
+    // A late frozen-closure intrusion from B0-B9 retreats to the original
+    // pickup path origin. If another vehicle occupies that reverse sweep, the
+    // correction must HOLD with the concrete blocker for DeadlockManager.
+    VehicleAgent intrusion_owner = laneVehicle(10, 0.0, 0.0);
+    intrusion_owner.mission_phase = MissionPhase::TO_B;
+    intrusion_owner.track.set(
+        RoughPath{wp(10.0, 10.0, 0.0), wp(12.0, 10.0, 0.0)});
+    VehicleAgent intrusion_waiter = laneVehicle(11, 2.30, 0.0);
+    intrusion_waiter.current_slot = 6;
+    intrusion_waiter.mission_phase = MissionPhase::TO_A1;
+    intrusion_waiter.track.set(
+        RoughPath{wp(-2.0, 0.0, 0.0), wp(2.0, 0.0, 0.0)});
+    RuleEngine::DepartureClusterCommitment intrusion_commitment;
+    intrusion_commitment.owner_id = intrusion_owner.id;
+    intrusion_commitment.owner_path_gen = intrusion_owner.path_gen;
+    intrusion_commitment.other_id = intrusion_waiter.id;
+    intrusion_commitment.other_path_gen = intrusion_waiter.path_gen;
+    intrusion_commitment.frozen_owner_track.set(
+        RoughPath{wp(0.0, -1.0, 1.5707963267948966),
+                  wp(0.0, 1.0, 1.5707963267948966)});
+    intrusion_commitment.frozen_waiter_track = intrusion_waiter.track;
+    intrusion_commitment.intervals.push_back(
+        FutureA1ConflictInterval{0.80, 1.20, 1.90, 2.20});
+    intrusion_commitment.waiter_stop_boundary_s = 2.10;
+    intrusion_commitment.waiter_stop_s = 2.00;
+    intrusion_commitment.owner_release_exit_s = 1.20;
+    intrusion_commitment.other_release_exit_s = 2.20;
+    intrusion_commitment.active = true;
+    RuleEngine::SimSnapshot intrusion_state;
+    intrusion_state.a1.departure_clusters[
+        {intrusion_owner.id, intrusion_waiter.id}] = intrusion_commitment;
+
+    RuleEngine intrusion_engine(map_param, config);
+    intrusion_engine.restore(intrusion_state);
+    std::vector<VehicleAgent> intrusion_pair{
+        intrusion_owner, intrusion_waiter};
+    intrusion_engine.refreshA1IntrusionCorrections(intrusion_pair, 0.1);
+    const auto clear_corrections =
+        intrusion_engine.captureLiveA1IntrusionCorrections();
+    const auto clear_correction = clear_corrections.find(intrusion_waiter.id);
+    if (clear_correction == clear_corrections.end() ||
+        clear_correction->second.motion !=
+            A1Coordinator::IntrusionCorrectionMotion::RETREAT ||
+        std::abs(clear_correction->second.target_s) > 1e-9 ||
+        intrusion_engine.motionOverrideFor(intrusion_waiter.id).motion !=
+            RecoveryMotion::RETREAT) {
+        return fail("B0-B9 intrusion did not retreat to path s=0");
+    }
+
+    VehicleAgent sweep_blocker = laneVehicle(12, 0.10, 0.0);
+    sweep_blocker.mode = VehicleMode::DWELL;
+    sweep_blocker.track.set(
+        RoughPath{wp(-1.1, 0.0, 0.0), wp(-1.0, 0.0, 0.0)});
+    RuleEngine blocked_intrusion_engine(map_param, config);
+    blocked_intrusion_engine.restore(intrusion_state);
+    std::vector<VehicleAgent> blocked_intrusion{
+        intrusion_owner, intrusion_waiter, sweep_blocker};
+    blocked_intrusion_engine.refreshA1IntrusionCorrections(
+        blocked_intrusion, 0.1);
+    const auto blocked_corrections =
+        blocked_intrusion_engine.captureLiveA1IntrusionCorrections();
+    const auto blocked_correction =
+        blocked_corrections.find(intrusion_waiter.id);
+    if (blocked_correction == blocked_corrections.end() ||
+        blocked_correction->second.motion !=
+            A1Coordinator::IntrusionCorrectionMotion::HOLD ||
+        blocked_correction->second.blocker_id != sweep_blocker.id ||
+        blocked_intrusion[1].blocker_id != sweep_blocker.id ||
+        blocked_intrusion[1].reason !=
+            "a1_intrusion_retreat_sweep_blocked") {
+        return fail("A1 blocked retreat lost its concrete blocker");
+    }
+    RuleEngine::SimSnapshot deadlock_handoff_state =
+        blocked_intrusion_engine.snapshot();
+    deadlock_handoff_state.deadlock.directive.phase =
+        RecoveryPhase::RETREAT;
+    deadlock_handoff_state.deadlock.directive.retreat_vehicle_id =
+        intrusion_waiter.id;
+    deadlock_handoff_state.deadlock.directive.pass_vehicle_id =
+        intrusion_owner.id;
+    deadlock_handoff_state.deadlock.directive.retreat_target_s = 0.50;
+    blocked_intrusion_engine.restore(deadlock_handoff_state);
+    blocked_intrusion_engine.restoreLiveA1IntrusionCorrections(
+        blocked_corrections);
+    const auto handed_off_motion =
+        blocked_intrusion_engine.motionOverrideFor(intrusion_waiter.id);
+    if (handed_off_motion.motion != RecoveryMotion::RETREAT ||
+        handed_off_motion.a1_intrusion ||
+        std::abs(handed_off_motion.target_s - 0.50) > 1e-9) {
+        return fail("same-pair Deadlock did not take over A1 HOLD");
+    }
+    deadlock_handoff_state.deadlock.directive = RecoveryDirective{};
+    deadlock_handoff_state.deadlock.priority_override.active = true;
+    deadlock_handoff_state.deadlock.priority_override.vehicle_a =
+        intrusion_owner.id;
+    deadlock_handoff_state.deadlock.priority_override.vehicle_b =
+        intrusion_waiter.id;
+    deadlock_handoff_state.deadlock.priority_override.path_gen_a =
+        intrusion_owner.path_gen;
+    deadlock_handoff_state.deadlock.priority_override.path_gen_b =
+        intrusion_waiter.path_gen;
+    deadlock_handoff_state.deadlock.priority_override.winner_id =
+        intrusion_waiter.id;
+    blocked_intrusion_engine.restore(deadlock_handoff_state);
+    blocked_intrusion_engine.restoreLiveA1IntrusionCorrections(
+        blocked_corrections);
+    const auto priority_handoff_motion =
+        blocked_intrusion_engine.motionOverrideFor(intrusion_waiter.id);
+    if (priority_handoff_motion.motion != RecoveryMotion::NORMAL ||
+        priority_handoff_motion.a1_intrusion) {
+        return fail("Deadlock priority pass did not take over A1 HOLD");
     }
 
     std::cout << "dynamic_speed_rule_engine_test: PASS\n";

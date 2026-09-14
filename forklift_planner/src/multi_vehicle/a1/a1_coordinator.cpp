@@ -26,6 +26,10 @@ const char* missionPhaseName(MissionPhase phase) {
     return "UNKNOWN";
 }
 
+bool isB0ToB9Source(const VehicleAgent& vehicle) {
+    return vehicle.current_slot >= 0 && vehicle.current_slot <= 9;
+}
+
 std::string readableSimTime(double seconds) {
     const double nonnegative = std::max(0.0, seconds);
     const long long tenths =
@@ -829,6 +833,21 @@ A1Coordinator::A1LaunchAdmission A1Coordinator::checkA1LaunchAdmission(
     const FutureA1ZoneSelection selected = selectFutureA1ProtectedZones(
         blocks, exit_is_lo, service_owner.a1_departure_priority_until_s,
         launch_candidate.path_s);
+    if (isB0ToB9Source(launch_candidate)) {
+        for (size_t index : selected.protected_indices) {
+            const ConflictZone& zone = selected.normalized_zones[index];
+            if (!result.owner_uses_pending_preview &&
+                service_owner.path_s > zone.s_self_exit + 1e-9) {
+                continue;
+            }
+            ++result.protected_zone_count;
+        }
+        if (result.protected_zone_count > 0) {
+            result.departure_resource_conflict = true;
+            result.source_slot_hold = true;
+            return result;
+        }
+    }
     if (selected.upstream_index >= 0) {
         const ConflictZone& upstream = selected.normalized_zones[
             static_cast<size_t>(selected.upstream_index)];
@@ -1126,7 +1145,8 @@ bool A1Coordinator::waiterRetreatSweepClear(
     const DepartureClusterCommitment& commitment,
     const VehicleAgent& waiter,
     const std::vector<VehicleAgent>& vehicles,
-    double target_s) const {
+    double target_s, int* blocker_id) const {
+    if (blocker_id != nullptr) *blocker_id = -1;
     if (waiter.track.empty() || target_s > waiter.path_s + 1e-9) {
         return false;
     }
@@ -1149,7 +1169,10 @@ bool A1Coordinator::waiterRetreatSweepClear(
                 ? other.track.length() : other.path_s;
             const OBB other_body = makeBody(
                 other.track.poseAtS(other_s), map_param_, 0.0);
-            if (overlaps(waiter_body, other_body)) return false;
+            if (overlaps(waiter_body, other_body)) {
+                if (blocker_id != nullptr) *blocker_id = other.id;
+                return false;
+            }
         }
     }
     return true;
@@ -1183,10 +1206,12 @@ void A1Coordinator::refreshIntrusionCorrections(
             previous->second.waiter_path_gen == waiter->path_gen;
         if (!crossed && !inside && !correction_active) continue;
 
-        double target_s = std::max(
-            0.0, commitment.waiter_stop_s -
-                     cfg_.deadlock_retreat_clearance);
-        while (target_s > 1e-9 &&
+        const bool return_to_source_slot = isB0ToB9Source(*waiter);
+        double target_s = return_to_source_slot
+            ? 0.0
+            : std::max(0.0, commitment.waiter_stop_s -
+                                cfg_.deadlock_retreat_clearance);
+        while (!return_to_source_slot && target_s > 1e-9 &&
                !waiterPoseClearsFrozenClosure(commitment, target_s)) {
             target_s = std::max(0.0, target_s - kSearchStep);
         }
@@ -1210,7 +1235,8 @@ void A1Coordinator::refreshIntrusionCorrections(
             correction.motion = IntrusionCorrectionMotion::HOLD;
             correction.reason = "a1_intrusion_no_clear_target";
         } else if (!waiterRetreatSweepClear(
-                       commitment, *waiter, vehicles, target_s)) {
+                       commitment, *waiter, vehicles, target_s,
+                       &correction.blocker_id)) {
             correction.motion = IntrusionCorrectionMotion::HOLD;
             correction.reason = "a1_intrusion_retreat_sweep_blocked";
         } else {
@@ -1229,11 +1255,12 @@ A1Coordinator::intrusionCorrectionFor(int vehicle_id) const {
 }
 
 void A1Coordinator::holdIntrusionCorrection(
-    int vehicle_id, const std::string& reason) {
+    int vehicle_id, const std::string& reason, int blocker_id) {
     const auto it = intrusion_corrections_.find(vehicle_id);
     if (it == intrusion_corrections_.end()) return;
     it->second.motion = IntrusionCorrectionMotion::HOLD;
     it->second.reason = reason;
+    it->second.blocker_id = blocker_id;
 }
 
 void A1Coordinator::enforceDepartureClusterCommitments(
@@ -1281,7 +1308,8 @@ void A1Coordinator::enforceDepartureClusterCommitments(
                                correction != nullptr
                                    ? correction->reason
                                    : "a1_intrusion_correction_unavailable",
-                               -1);
+                               correction != nullptr
+                                   ? correction->blocker_id : -1);
             }
             if (!commitment.intrusion_correction_logged &&
                 coord_log_sink_) {
@@ -1293,6 +1321,14 @@ void A1Coordinator::enforceDepartureClusterCommitments(
                      << " stop_s=" << commitment.waiter_stop_s
                      << " target_s="
                      << (correction != nullptr ? correction->target_s : -1.0)
+                     << " motion="
+                     << (correction != nullptr &&
+                                 correction->motion ==
+                                     IntrusionCorrectionMotion::RETREAT
+                             ? "RETREAT" : "HOLD")
+                     << " blocker=V"
+                     << (correction != nullptr
+                             ? correction->blocker_id : -1)
                      << " reason="
                      << (correction != nullptr ? correction->reason
                                                : "unavailable");

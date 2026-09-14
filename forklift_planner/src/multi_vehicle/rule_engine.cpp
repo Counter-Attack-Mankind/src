@@ -956,6 +956,10 @@ void RuleEngine::enforceDepartureClusterCommitments(
         vehicles, dt,
         [this](VehicleAgent& vehicle, VehicleAction action,
                const std::string& reason, int blocker_id) {
+            if (a1_coordinator_.intrusionCorrectionFor(vehicle.id) != nullptr &&
+                !motionOverrideFor(vehicle.id).a1_intrusion) {
+                return;
+            }
             applyActionRequest(vehicle, action, reason, blocker_id);
         });
 }
@@ -1321,23 +1325,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             }
 
             int preferred_winner = ordinary_priority_id;
-            constexpr double kBridgeEntryEpsilon = 0.01;
-            if (ordinary &&
-                bridge_correction.a.bridge_related &&
-                bridge_correction.b.bridge_related) {
-                const bool a_entered =
-                    a.path_s >= bridge_correction.a.near_boundary_s -
-                                    kBridgeEntryEpsilon;
-                const bool b_entered =
-                    b.path_s >= bridge_correction.b.near_boundary_s -
-                                    kBridgeEntryEpsilon;
-                if (ordinary_priority_id == a.id && b_entered && !a_entered) {
-                    preferred_winner = b.id;
-                } else if (ordinary_priority_id == b.id && a_entered &&
-                           !b_entered) {
-                    preferred_winner = a.id;
-                }
-            }
 
             const DeadlockPriorityOverride& deadlock_override =
                 deadlock_manager_.priorityOverride();
@@ -2101,9 +2088,9 @@ void RuleEngine::enforceForwardClearance(std::vector<VehicleAgent>& vehicles,
         if (block_id >= 0) {
             if (motion.a1_intrusion) {
                 a1_coordinator_.holdIntrusionCorrection(
-                    v.id, "a1_intrusion_next_step_blocked");
+                    v.id, "a1_intrusion_next_step_blocked", block_id);
                 applyActionRequest(v, VehicleAction::STOP,
-                                   "a1_intrusion_next_step_blocked", -1);
+                                   "a1_intrusion_next_step_blocked", block_id);
                 continue;
             }
             const std::pair<int, int> key{
@@ -2390,6 +2377,34 @@ RuleEngine::MotionOverride RuleEngine::motionOverrideFor(
     int vehicle_id) const {
     if (const A1Coordinator::IntrusionCorrection* correction =
             a1_coordinator_.intrusionCorrectionFor(vehicle_id)) {
+        const RecoveryDirective& recovery = deadlock_manager_.directive();
+        const bool same_deadlock_pair = recovery.active() &&
+            ((recovery.retreat_vehicle_id == correction->owner_id &&
+              recovery.pass_vehicle_id == correction->waiter_id) ||
+             (recovery.retreat_vehicle_id == correction->waiter_id &&
+              recovery.pass_vehicle_id == correction->owner_id));
+        if (correction->motion ==
+                A1Coordinator::IntrusionCorrectionMotion::HOLD) {
+            if (same_deadlock_pair) {
+                return MotionOverride{recovery.motionFor(vehicle_id),
+                                      recovery.retreat_target_s, false};
+            }
+            const DeadlockPriorityOverride& priority_override =
+                deadlock_manager_.priorityOverride();
+            const bool direct_priority_match = priority_override.active &&
+                priority_override.vehicle_a == correction->owner_id &&
+                priority_override.vehicle_b == correction->waiter_id &&
+                priority_override.path_gen_b == correction->waiter_path_gen;
+            const bool reverse_priority_match = priority_override.active &&
+                priority_override.vehicle_b == correction->owner_id &&
+                priority_override.vehicle_a == correction->waiter_id &&
+                priority_override.path_gen_a == correction->waiter_path_gen;
+            if ((direct_priority_match || reverse_priority_match) &&
+                priority_override.winner_id == correction->waiter_id) {
+                return MotionOverride{RecoveryMotion::NORMAL,
+                                      correction->target_s, false};
+            }
+        }
         return MotionOverride{
             correction->motion ==
                     A1Coordinator::IntrusionCorrectionMotion::RETREAT
@@ -2403,22 +2418,60 @@ RuleEngine::MotionOverride RuleEngine::motionOverrideFor(
 
 void RuleEngine::refreshA1IntrusionCorrections(
     std::vector<VehicleAgent>& vehicles, double dt) {
+    const A1IntrusionCorrections previous_corrections =
+        a1_coordinator_.intrusionCorrections();
     a1_coordinator_.refreshIntrusionCorrections(vehicles);
+    if (coord_log_sink_) {
+        for (const auto& entry : a1_coordinator_.intrusionCorrections()) {
+            const A1Coordinator::IntrusionCorrection& correction =
+                entry.second;
+            const auto previous = previous_corrections.find(entry.first);
+            const bool changed = previous == previous_corrections.end() ||
+                previous->second.motion != correction.motion ||
+                previous->second.target_s != correction.target_s ||
+                previous->second.blocker_id != correction.blocker_id ||
+                previous->second.reason != correction.reason;
+            if (!changed) continue;
+            const auto waiter = std::find_if(
+                vehicles.begin(), vehicles.end(),
+                [&](const VehicleAgent& vehicle) {
+                    return vehicle.id == correction.waiter_id;
+                });
+            std::ostringstream line;
+            line << std::fixed << std::setprecision(3)
+                 << "[A1_INTRUSION_REAL] owner=V" << correction.owner_id
+                 << " waiter=V" << correction.waiter_id
+                 << " waiter_s="
+                 << (waiter != vehicles.end() ? waiter->path_s : -1.0)
+                 << " target_s=" << correction.target_s
+                 << " motion="
+                 << (correction.motion == A1Coordinator::
+                            IntrusionCorrectionMotion::RETREAT
+                         ? "RETREAT" : "HOLD")
+                 << " blocker=V" << correction.blocker_id
+                 << " reason=" << correction.reason;
+            coord_log_sink_(line.str());
+        }
+    }
     for (VehicleAgent& vehicle : vehicles) {
         const A1Coordinator::IntrusionCorrection* correction =
             a1_coordinator_.intrusionCorrectionFor(vehicle.id);
         if (correction == nullptr) continue;
+        if (!motionOverrideFor(vehicle.id).a1_intrusion) continue;
         applyActionRequest(vehicle, VehicleAction::STOP,
-                           correction->reason, -1);
+                           correction->reason, correction->blocker_id);
     }
     enforceForwardClearance(vehicles, dt);
     for (VehicleAgent& vehicle : vehicles) {
-        if (a1_coordinator_.intrusionCorrectionFor(vehicle.id) == nullptr) {
+        const A1Coordinator::IntrusionCorrection* correction =
+            a1_coordinator_.intrusionCorrectionFor(vehicle.id);
+        if (correction == nullptr) {
             continue;
         }
+        if (!motionOverrideFor(vehicle.id).a1_intrusion) continue;
         vehicle.action = VehicleAction::STOP;
         vehicle.requested_action = VehicleAction::STOP;
-        vehicle.blocker_id = -1;
+        vehicle.blocker_id = correction->blocker_id;
     }
 }
 

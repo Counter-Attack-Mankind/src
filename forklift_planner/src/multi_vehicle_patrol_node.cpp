@@ -637,7 +637,10 @@ private:
         for (VehicleAgent& v : agents_) {
             if (targetEnabled(v.id)) {
                 ++enabled_count;
-                if (allocator_->assignNextTask(v, agents_)) {
+                const bool assigned = cfg_.use_a1_cycle
+                    ? launchPickupLegWithA1Admission(v)
+                    : allocator_->assignNextTask(v, agents_);
+                if (assigned) {
                     ++assigned_count;
                 }
             }
@@ -1554,7 +1557,9 @@ private:
                  << " actual_occupancy_priority="
                  << (admission.a1.actual_occupancy_priority ? 1 : 0)
                  << " spatial_stop_launch_infeasible="
-                 << (admission.a1.spatial_stop_launch_infeasible ? 1 : 0);
+                 << (admission.a1.spatial_stop_launch_infeasible ? 1 : 0)
+                 << " source_slot_hold="
+                 << (admission.a1.source_slot_hold ? 1 : 0);
             if (admission.a1.waiter_stop_s >= 0.0) {
                 line << " waiter_stop_s="
                      << admission.a1.waiter_stop_s;
@@ -1570,7 +1575,7 @@ private:
             vehicle.mission_phase = MissionPhase::TO_A1;
             vehicle.leg_target = LegTargetKind::A1;
             vehicle.mode = VehicleMode::NEED_TASK;
-            return allocator_->assignPickupLeg(vehicle);
+            return false;
         }
 
         VehicleAgent* owner = nullptr;
@@ -1586,6 +1591,8 @@ private:
         const bool hold = !admission.clear;
         const std::string hold_reason = admission.ordinary_road_conflict
             ? "ordinary_immediate_conflict"
+            : admission.a1.source_slot_hold
+                ? "a1_source_slot_admission"
             : admission.a1.spatial_stop_launch_infeasible
                 ? "a1_stop_s_before_slot_clear"
                 : "a1_departure_prefix_conflict";
@@ -1671,7 +1678,11 @@ private:
                 if (v.mode == VehicleMode::NEED_TASK) {
                     if (sim_mode_) continue;
                     const int old_gen = v.path_gen;
-                    allocator_->assignNextTask(v, agents_);
+                    if (v.mission_phase == MissionPhase::TO_A1) {
+                        launchPickupLegWithA1Admission(v);
+                    } else {
+                        allocator_->assignNextTask(v, agents_);
+                    }
                     if (v.path_gen != old_gen) force_horizon_refresh_ = true;
                     continue;
                 }
@@ -1695,6 +1706,14 @@ private:
                     } else {
                         v.dwell_remaining = 0.0;
                     }
+                    continue;
+                }
+
+                if (v.mission_phase == MissionPhase::TO_A1 &&
+                    a1_launch_holds_.find(v.id) != a1_launch_holds_.end()) {
+                    const int old_gen = v.path_gen;
+                    launchPickupLegWithA1Admission(v);
+                    if (v.path_gen != old_gen) force_horizon_refresh_ = true;
                     continue;
                 }
 

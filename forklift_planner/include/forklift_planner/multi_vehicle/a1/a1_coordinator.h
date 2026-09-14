@@ -94,6 +94,7 @@ public:
         int owner_id = -1;
         int waiter_id = -1;
         int waiter_path_gen = -1;
+        int blocker_id = -1;
         double target_s = 0.0;
         IntrusionCorrectionMotion motion =
             IntrusionCorrectionMotion::HOLD;
@@ -120,6 +121,7 @@ public:
 
     struct A1LaunchAdmission {
         bool departure_resource_conflict = false;
+        bool source_slot_hold = false;
         bool actual_occupancy_priority = false;
         bool spatial_stop_launch_infeasible = false;
         bool owner_uses_pending_preview = false;
@@ -215,7 +217,8 @@ public:
         const std::vector<VehicleAgent>& vehicles);
     const IntrusionCorrection* intrusionCorrectionFor(int vehicle_id) const;
     void holdIntrusionCorrection(int vehicle_id,
-                                 const std::string& reason);
+                                 const std::string& reason,
+                                 int blocker_id);
     const std::map<int, IntrusionCorrection>& intrusionCorrections() const {
         return intrusion_corrections_;
     }
@@ -278,7 +281,7 @@ private:
         const DepartureClusterCommitment& commitment,
         const VehicleAgent& waiter,
         const std::vector<VehicleAgent>& vehicles,
-        double target_s) const;
+        double target_s, int* blocker_id) const;
     std::string debugLogPrefix() const;
 
     const MapParam& map_param_;
