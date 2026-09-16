@@ -1569,6 +1569,7 @@ private:
         coordLogWithContext(line.str(), "REAL", sim_plan_id_, -1, -1);
     }
 
+    // 是否允许传入的车辆id离库，能则准备路径，否则继续留在库位
     bool launchPickupLegWithA1Admission(VehicleAgent& vehicle) {
         VehicleAgent candidate = vehicle;
         if (!allocator_->assignPickupLeg(candidate, /*emit_log=*/false)) {
@@ -1577,14 +1578,33 @@ private:
             vehicle.mode = VehicleMode::NEED_TASK;
             return false;
         }
+        //读取车辆id是否在库位B0-B9
+        const bool is_b0_b9 = vehicle.current_slot >= 0 && vehicle.current_slot <= 9;
+
+        //读取未来的A1 owner
+        const auto& future_a1_commitment =rule_engine_->futureA1Commitment();
+        
+        //判断该id车辆是否为onwer，且对应是此次B->A1，若是才生效
+        const bool owns_a1 = future_a1_commitment.valid() && future_a1_commitment.owner_id == vehicle.id && future_a1_commitment.owner_path_gen == candidate.path_gen;
+        //若本次车辆不是，则禁止出库，但持续尝试竞争owner
+        if (is_b0_b9 && !owns_a1) 
+        {
+            //将车辆状态机设为卸货休眠位，并且路径目标端为库位B
+            vehicle.mode = VehicleMode::DWELL;
+            vehicle.mission_phase = MissionPhase::UNLOAD_DWELL;
+            vehicle.leg_target = LegTargetKind::B_SLOT;
+
+            vehicle.dwell_remaining = 0.0;
+            vehicle.action = VehicleAction::STOP;
+            vehicle.requested_action = VehicleAction::STOP;
+            vehicle.current_speed = 0.0;
+            vehicle.reason = "a1_b0_b9_wait_owner";
+            return false;
+        }
 
         VehicleAgent* owner = nullptr;
-        const auto& future_a1_commitment =
-            rule_engine_->futureA1Commitment();
-        if (future_a1_commitment.valid() &&
-            future_a1_commitment.owner_id != vehicle.id) {
+        if (future_a1_commitment.valid() && future_a1_commitment.owner_id != vehicle.id)
             owner = agentById(future_a1_commitment.owner_id);
-        }
 
         const auto admission = rule_engine_->checkSlotDepartureAdmission(
             owner, candidate, agents_, rb_horizon_);
@@ -1671,10 +1691,9 @@ private:
                 continue;
             }
 
-            // A1-cycle is a two-leg logistics state machine. A1 is not a map
-            // slot, so current_slot remains the last physical B slot until the
-            // loaded A1->B leg reaches its destination.
+            //使用B->A1->B模式
             if (cfg_.use_a1_cycle) {
+                //1.车辆需要任务
                 if (v.mode == VehicleMode::NEED_TASK) {
                     if (sim_mode_) continue;
                     const int old_gen = v.path_gen;
@@ -1686,7 +1705,7 @@ private:
                     if (v.path_gen != old_gen) force_horizon_refresh_ = true;
                     continue;
                 }
-
+                //2.车辆属于休眠状态
                 if (v.mode != VehicleMode::DWELL) continue;
 
                 v.dwell_remaining = std::max(0.0, v.dwell_remaining - dt);
@@ -1695,28 +1714,24 @@ private:
                 v.current_speed = 0.0;
                 if (v.dwell_remaining > 1e-9) continue;
 
-                // A rollout may predict arrival at A1, but it must not invent
-                // a new B assignment. It may, however, activate the departure
-                // plan that was prepared and reserved at the real A1 arrival.
                 if (sim_mode_) {
-                    if (v.mission_phase == MissionPhase::PICKUP_DWELL &&
-                        v.pending_dropoff_valid) {
-                        allocator_->activatePreparedDropoffLeg(
-                            v, /*emit_log=*/false);
+                    if (v.mission_phase == MissionPhase::PICKUP_DWELL && v.pending_dropoff_valid) {
+                        allocator_->activatePreparedDropoffLeg(v, /*emit_log=*/false);
                     } else {
                         v.dwell_remaining = 0.0;
                     }
                     continue;
                 }
 
-                if (v.mission_phase == MissionPhase::TO_A1 &&
-                    a1_launch_holds_.find(v.id) != a1_launch_holds_.end()) {
+                //3.车辆处于TO A1并且车辆存在a1_launch_holds
+                if (v.mission_phase == MissionPhase::TO_A1 && a1_launch_holds_.find(v.id) != a1_launch_holds_.end()) {
                     const int old_gen = v.path_gen;
                     launchPickupLegWithA1Admission(v);
                     if (v.path_gen != old_gen) force_horizon_refresh_ = true;
                     continue;
                 }
 
+                //4.车辆处于库位卸货休眠
                 if (v.mission_phase == MissionPhase::PICKUP_DWELL) {
                     const int old_gen = v.path_gen;
                     allocator_->assignDropoffLeg(v, agents_);
@@ -1724,6 +1739,7 @@ private:
                     continue;
                 }
 
+                //5.车辆等待卸货
                 if (v.mission_phase == MissionPhase::WAIT_DROPOFF_TASK) {
                     const int old_gen = v.path_gen;
                     allocator_->assignDropoffLeg(v, agents_);
