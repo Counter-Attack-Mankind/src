@@ -1243,43 +1243,35 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 continue;
             }
 
-            // The bridge layer is a stateless correction of an already-real
-            // ordinary synchronized-OBB conflict. A clear baseline never
-            // reaches it, and A1 keeps its existing resource path unchanged.
-            PairBridgeTtcCorrection bridge_correction;
-            if (ordinary) {
-                bridge_correction = evaluateBridgeTtcCorrection(
-                    a, b, predictions[i], predictions[j], interaction,
-                    mp_, cfg_);
-                interaction.type =
-                    bridge_correction.a.bridge_related ||
-                            bridge_correction.b.bridge_related
-                        ? PairInteractionType::OPPOSING
+            //桥式冲突段的检测，与TTC修正，详细的内容见bridge_ttc_correction.cpp文件
+            PairBridgeTtcCorrection bridge_correction;      //创建一个桥式冲突修正结果对象
+            if (ordinary) {     //若存在15sOBB的时空冲突
+                bridge_correction = evaluateBridgeTtcCorrection(a, b, predictions[i], predictions[j], interaction, mp_, cfg_);  //检测是否存在桥式冲突段
+                interaction.type = bridge_correction.a.bridge_related || bridge_correction.b.bridge_related
+                        ? PairInteractionType::OPPOSING     //做三目运算，若一辆车识别到是桥，则冲突段类别改为oppsoing
                         : PairInteractionType::CROSSING;
-            }
+            }   
+            //定义一个匿名函数，把刚才算出来的 bridge 信息写进最近创建的 ConflictMarker，用于绘制与日志
             auto annotateBridgeMarker = [&]() {
                 if (conflicts_.empty()) return;
                 ConflictMarker& marker = conflicts_.back();
+                
                 if (marker.vehicle_a != a.id || marker.vehicle_b != b.id) {
                     return;
                 }
-                marker.bridge_a_related =
-                    bridge_correction.a.bridge_related;
-                marker.bridge_b_related =
-                    bridge_correction.b.bridge_related;
-                const RoughWp boundary_a = a.track.poseAtS(
-                    bridge_correction.a.near_boundary_s);
-                const RoughWp boundary_b = b.track.poseAtS(
-                    bridge_correction.b.near_boundary_s);
+                marker.bridge_a_related = bridge_correction.a.bridge_related;
+                marker.bridge_b_related = bridge_correction.b.bridge_related;
+                const RoughWp boundary_a = a.track.poseAtS(bridge_correction.a.near_boundary_s);        //将s转为实际的（x,y,theta）
+                const RoughWp boundary_b = b.track.poseAtS(bridge_correction.b.near_boundary_s);
                 marker.bridge_boundary_a_x = boundary_a.x;
                 marker.bridge_boundary_a_y = boundary_a.y;
                 marker.bridge_boundary_b_x = boundary_b.x;
                 marker.bridge_boundary_b_y = boundary_b.y;
-                marker.bridge_corrected_ttc_a =
-                    bridge_correction.a.corrected_ttc;
-                marker.bridge_corrected_ttc_b =
-                    bridge_correction.b.corrected_ttc;
+                marker.bridge_corrected_ttc_a = bridge_correction.a.corrected_ttc;
+                marker.bridge_corrected_ttc_b = bridge_correction.b.corrected_ttc;
             };
+
+            // 把这次 timed collision 的起始碰撞位置写进最近一个 ConflictMarker，用于日志/RViz 标记。
             auto annotateTimedCollisionStartMarker = [&]() {
                 if (conflicts_.empty()) return;
                 ConflictMarker& marker = conflicts_.back();
@@ -1288,10 +1280,8 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                         ConflictMarkerKind::CROSSING_OR_OPPOSING) {
                     return;
                 }
-                const RoughWp collision_a = a.track.poseAtS(
-                    event.collision_s_a);
-                const RoughWp collision_b = b.track.poseAtS(
-                    event.collision_s_b);
+                const RoughWp collision_a = a.track.poseAtS(event.collision_s_a);
+                const RoughWp collision_b = b.track.poseAtS(event.collision_s_b);
                 marker.timed_collision_start_valid = true;
                 marker.collision_s_a = event.collision_s_a;
                 marker.collision_s_b = event.collision_s_b;
@@ -1301,16 +1291,13 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                 marker.collision_b_y = collision_b.y;
             };
 
-            pairwise_managed_pairs_.insert(key);
-            ordinary_dynamic_pairs_.insert(key);
+            pairwise_managed_pairs_.insert(key);        //将车辆对信息登记到（冲突事务中）
+            ordinary_dynamic_pairs_.insert(key);        //将车辆对信息登记到（动态调速事务中）
 
-            const ConflictZone zone =
-                eventZone(interaction, predictions[i], predictions[j]);
+            //<输入>1.已检测出的冲突事件，2.a 的预测轨迹。3.b 的预测轨迹----<输出> a的冲突s区间 + b的冲突s区间+ 冲突区域 AABB + 冲突区域中心点
+            const ConflictZone zone = eventZone(interaction, predictions[i], predictions[j]);
 
-            // The rolling-period target was selected from the true state at
-            // frame 0.  Future sandbox states may still run reservation/A1 and
-            // safety rules, but must not turn the same period's FAR into MID,
-            // re-run priority/candidates, or create a new ordinary reservation.
+            //若本轮有冲突，且本轮要求复用已经确定好的协调结果，则不会再做协调决策
             if (ordinary && reuse_ordinary_coordination) {
                 recordConflictZones(
                     a, b, std::vector<ConflictZone>{zone},
@@ -1318,16 +1305,27 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
                     event.first_overlap_t, -1, -1, 0.0,
                     VehicleAction::NOMINAL, -1, -1,
                     decimateTimedOverlaps(event.timed_overlaps),
-                    interaction.type, event.last_t);
-                annotateTimedCollisionStartMarker();
-                annotateBridgeMarker();
-                continue;
+                    interaction.type, event.last_t);        //记录冲突
+                annotateTimedCollisionStartMarker();        //补充碰撞起点
+                annotateBridgeMarker();     //补充桥式修正点
+                continue;           //然后返回下一对车，继续resolvePairwiseConflicts
             }
-
+            
+            //===============（优先级的确定与修正）====================================
+            //下面则进行本轮冲突的优先车辆裁定，默认为普通规则决断出的优先级
             int preferred_winner = ordinary_priority_id;
 
-            const DeadlockPriorityOverride& deadlock_override =
-                deadlock_manager_.priorityOverride();
+            //桥式局部优先级：一车已进入桥式冲突段、一车仍在桥外时，桥内车辆优先
+            const double eps = 1e-6;
+            // A车在桥上---（1.必须是桥式冲突段 2.A车已经在桥式冲突段里 ）
+            const bool a_in_bridge = bridge_correction.a.bridge_related && a.path_s + eps >= bridge_correction.a.near_boundary_s ;
+            const bool b_in_bridge = bridge_correction.b.bridge_related && b.path_s + eps >= bridge_correction.b.near_boundary_s ;
+
+            if (a_in_bridge != b_in_bridge) 
+                preferred_winner = a_in_bridge ? a.id : b.id;
+
+            //========(死锁部分)检测当前有没有一个“死锁优先级覆盖指令”========================================
+            const DeadlockPriorityOverride& deadlock_override = deadlock_manager_.priorityOverride();
             const bool deadlock_direct_match =
                 deadlock_override.active &&
                 deadlock_override.vehicle_a == a.id &&
