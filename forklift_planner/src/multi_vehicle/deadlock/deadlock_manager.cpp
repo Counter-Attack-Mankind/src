@@ -213,19 +213,6 @@ void DeadlockManager::update(const std::vector<VehicleAgent>& vehicles, const st
         return;
     }
 
-    if (priority_override_.active) {
-        const VehicleAgent* override_a = vehicleById(
-            vehicles, priority_override_.vehicle_a);
-        const VehicleAgent* override_b = vehicleById(
-            vehicles, priority_override_.vehicle_b);
-        if (override_a == nullptr || override_b == nullptr ||
-            override_a->mode != VehicleMode::ACTIVE ||
-            override_b->mode != VehicleMode::ACTIVE ||
-            override_a->path_gen != priority_override_.path_gen_a ||
-            override_b->path_gen != priority_override_.path_gen_b) {
-            priority_override_ = {};
-        }
-    }
 
     if (cooldown_.remaining > 1e-9) {
         const VehicleAgent* cooling = vehicleById(vehicles,
@@ -373,13 +360,6 @@ void DeadlockManager::update(const std::vector<VehicleAgent>& vehicles, const st
         if (cooldown_.remaining > 1e-9 &&
             b->id == cooldown_.vehicle_id) continue;
         if (a.id < b->id) {
-            if (priority_override_.active &&
-                priority_override_.vehicle_a == a.id &&
-                priority_override_.vehicle_b == b->id &&
-                priority_override_.path_gen_a == a.path_gen &&
-                priority_override_.path_gen_b == b->path_gen) {
-                continue;
-            }
             candidate_a = &a;
             candidate_b = b;
             break;
@@ -510,8 +490,7 @@ void DeadlockManager::update(const std::vector<VehicleAgent>& vehicles, const st
 }
 
 DeadlockManager::Snapshot DeadlockManager::snapshot() const {
-    return Snapshot{candidate_, transaction_, cooldown_, directive_,
-                    priority_override_};
+    return Snapshot{candidate_, transaction_, cooldown_, directive_};
 }
 
 void DeadlockManager::restore(const Snapshot& snapshot) {
@@ -519,13 +498,9 @@ void DeadlockManager::restore(const Snapshot& snapshot) {
     transaction_ = snapshot.transaction;
     cooldown_ = snapshot.cooldown;
     directive_ = snapshot.directive;
-    priority_override_ = snapshot.priority_override;
 }
 
-void DeadlockManager::clearPriorityOverride() {
-    priority_override_ = {};
-    candidate_ = {};
-}
+
 
 }  // namespace multi_vehicle
 }  // namespace forklift_planner

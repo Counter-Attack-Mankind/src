@@ -1324,23 +1324,7 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             if (a_in_bridge != b_in_bridge) 
                 preferred_winner = a_in_bridge ? a.id : b.id;
 
-            //========(死锁部分)检测当前有没有一个“死锁优先级覆盖指令”========================================
-            const DeadlockPriorityOverride& deadlock_override = deadlock_manager_.priorityOverride();
-            const bool deadlock_direct_match =
-                deadlock_override.active &&
-                deadlock_override.vehicle_a == a.id &&
-                deadlock_override.vehicle_b == b.id &&
-                deadlock_override.path_gen_a == a.path_gen &&
-                deadlock_override.path_gen_b == b.path_gen;
-            const bool deadlock_reverse_match =
-                deadlock_override.active &&
-                deadlock_override.vehicle_a == b.id &&
-                deadlock_override.vehicle_b == a.id &&
-                deadlock_override.path_gen_a == b.path_gen &&
-                deadlock_override.path_gen_b == a.path_gen;
-            if (deadlock_direct_match || deadlock_reverse_match) {
-                preferred_winner = deadlock_override.winner_id;
-            }
+            //========(死锁部分)========================================
 
             const RecoveryDirective& recovery = deadlock_manager_.directive();
             const bool pass_direct_match =
@@ -1851,38 +1835,6 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
         }
     }
 
-    const DeadlockPriorityOverride& active_override =
-        deadlock_manager_.priorityOverride();
-    if (active_override.active) {
-        const VehicleAgent* override_a = nullptr;
-        const VehicleAgent* override_b = nullptr;
-        for (const VehicleAgent& vehicle : vehicles) {
-            if (vehicle.id == active_override.vehicle_a) {
-                override_a = &vehicle;
-            } else if (vehicle.id == active_override.vehicle_b) {
-                override_b = &vehicle;
-            }
-        }
-        const bool identity_changed =
-            override_a == nullptr || override_b == nullptr ||
-            override_a->mode != VehicleMode::ACTIVE ||
-            override_b->mode != VehicleMode::ACTIVE ||
-            override_a->path_gen != active_override.path_gen_a ||
-            override_b->path_gen != active_override.path_gen_b;
-        const std::pair<int, int> override_key{
-            std::min(active_override.vehicle_a, active_override.vehicle_b),
-            std::max(active_override.vehicle_a, active_override.vehicle_b)};
-        const bool stop_holds_expired =
-            !identity_changed &&
-            override_a->ttc_stop_hold_remaining <= 1e-9 &&
-            override_b->ttc_stop_hold_remaining <= 1e-9;
-        const bool timed_conflict_cleared =
-            stop_holds_expired &&
-            ordinary_dynamic_pairs_.count(override_key) == 0;
-        if (identity_changed || timed_conflict_cleared) {
-            deadlock_manager_.clearPriorityOverride();
-        }
-    }
 }
 
 void RuleEngine::enforceFutureA1Admission(
@@ -2387,21 +2339,7 @@ RuleEngine::MotionOverride RuleEngine::motionOverrideFor(
                 return MotionOverride{recovery.motionFor(vehicle_id),
                                       recovery.retreat_target_s, false};
             }
-            const DeadlockPriorityOverride& priority_override =
-                deadlock_manager_.priorityOverride();
-            const bool direct_priority_match = priority_override.active &&
-                priority_override.vehicle_a == correction->owner_id &&
-                priority_override.vehicle_b == correction->waiter_id &&
-                priority_override.path_gen_b == correction->waiter_path_gen;
-            const bool reverse_priority_match = priority_override.active &&
-                priority_override.vehicle_b == correction->owner_id &&
-                priority_override.vehicle_a == correction->waiter_id &&
-                priority_override.path_gen_a == correction->waiter_path_gen;
-            if ((direct_priority_match || reverse_priority_match) &&
-                priority_override.winner_id == correction->waiter_id) {
-                return MotionOverride{RecoveryMotion::NORMAL,
-                                      correction->target_s, false};
-            }
+
         }
         return MotionOverride{
             correction->motion ==

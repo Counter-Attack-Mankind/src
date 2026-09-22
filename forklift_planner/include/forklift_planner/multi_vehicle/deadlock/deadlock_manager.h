@@ -61,14 +61,6 @@ struct DeadlockPairGeometry {
     int preferred_priority_vehicle_id = -1;
 };
 
-struct DeadlockPriorityOverride {
-    bool active = false;
-    int vehicle_a = -1;
-    int vehicle_b = -1;
-    int path_gen_a = -1;
-    int path_gen_b = -1;
-    int winner_id = -1;
-};
 
 class DeadlockManager {
 public:
@@ -108,7 +100,6 @@ public:
         TransactionState transaction;
         CooldownState cooldown;
         RecoveryDirective directive;
-        DeadlockPriorityOverride priority_override;
     };
 
     DeadlockManager(const MapParam& map_param,
@@ -123,10 +114,6 @@ public:
                 double dt, bool emit_logs);
 
     const RecoveryDirective& directive() const { return directive_; }
-    const DeadlockPriorityOverride& priorityOverride() const {
-        return priority_override_;
-    }
-    void clearPriorityOverride();
 
     Snapshot snapshot() const;
     void restore(const Snapshot& snapshot);
@@ -157,7 +144,6 @@ private:
     TransactionState transaction_;
     CooldownState cooldown_;
     RecoveryDirective directive_;
-    DeadlockPriorityOverride priority_override_;
     std::function<void(const std::string&)> log_sink_;
 };
 
