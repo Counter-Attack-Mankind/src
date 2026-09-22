@@ -234,7 +234,11 @@ void DeadlockManager::update(const std::vector<VehicleAgent>& vehicles, const st
         const VehicleAgent* retreat = vehicleById(vehicles, transaction_.retreat_vehicle_id);
         const VehicleAgent* passer = vehicleById(vehicles, transaction_.pass_vehicle_id);
 
-
+        if (retreat == nullptr || passer == nullptr)
+        {
+            abort("recovery_vehicle_missing", emit_logs);
+            return;
+        }
         if (transaction_.phase == RecoveryPhase::PASS)
         {
             const double tolerance =std::max(0.005, config_.path_validation_step);
@@ -317,7 +321,7 @@ void DeadlockManager::update(const std::vector<VehicleAgent>& vehicles, const st
             return;
         }
 
-        if (retreat == nullptr || passer == nullptr ||
+        if (
             retreat->mode != VehicleMode::ACTIVE ||
             passer->mode != VehicleMode::ACTIVE ||
             retreat->path_gen != transaction_.retreat_path_gen ||
