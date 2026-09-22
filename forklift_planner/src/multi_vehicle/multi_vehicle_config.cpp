@@ -114,12 +114,16 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
              c.deadlock_enabled);
     nh.param(ns + "deadlock_confirm_time", c.deadlock_confirm_time,
              c.deadlock_confirm_time);
-    nh.param(ns + "deadlock_retreat_search_step",
-             c.deadlock_retreat_search_step,
-             c.deadlock_retreat_search_step);
-    nh.param(ns + "deadlock_retreat_clearance",
-             c.deadlock_retreat_clearance,
-             c.deadlock_retreat_clearance);
+
+
+    nh.param(ns + "deadlock_retreat_distance",
+         c.deadlock_retreat_distance,
+         c.deadlock_retreat_distance);
+
+    nh.param(ns + "deadlock_retreat_max_attempts",
+         c.deadlock_retreat_max_attempts,
+         c.deadlock_retreat_max_attempts);
+
     nh.param(ns + "deadlock_retreat_speed",
              c.deadlock_retreat_speed,
              c.deadlock_retreat_speed);
@@ -189,12 +193,11 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     c.rolling_refresh_period = std::max(0.1, c.rolling_refresh_period);
     c.path_validation_step = std::max(0.005, c.path_validation_step);
     c.deadlock_confirm_time = std::max(0.1, c.deadlock_confirm_time);
-    c.deadlock_retreat_search_step =
-        std::max(0.005, c.deadlock_retreat_search_step);
-    c.deadlock_retreat_clearance =
-        std::max(0.0, c.deadlock_retreat_clearance);
-    c.deadlock_retreat_speed =
-        std::max(0.01, std::min(c.deadlock_retreat_speed, c.max_speed));
+    
+    c.deadlock_retreat_distance = std::max(0.01, c.deadlock_retreat_distance);
+    c.deadlock_retreat_max_attempts = std::max(1, c.deadlock_retreat_max_attempts);
+    c.deadlock_retreat_speed =  std::max(0.01, std::min(c.deadlock_retreat_speed, c.max_speed));
+
     return c;
 }
 

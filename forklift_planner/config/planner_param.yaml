@@ -109,11 +109,12 @@ forklift_planner:
     action_hold_time: 0.4
 
     # 协调规则开关。硬碰撞保护始终启用，这些只是策略层开关。
+    #===================(死锁)=========================
     enable_priority_tiebreak: true    # 对称冲突时使用优先级打破平局
     deadlock_enabled: true
     deadlock_confirm_time: 4.0             # s; live STOP/STOP confirmation
-    deadlock_retreat_search_step: 0.05     # m along decreasing path_s
-    deadlock_retreat_clearance: 0.02       # m; corridor s exit and safe target backoff
+    deadlock_retreat_distance: 0.50         # 每次回退的距离
+    deadlock_retreat_max_attempts: 3        # 死锁最大迭代
     deadlock_retreat_speed: 0.10           # m/s; RETREAT only
 
     # 目标货位/泊车队列窗口

@@ -2294,33 +2294,55 @@ void RuleEngine::refreshResourceSpans(std::vector<VehicleAgent>& vehicles) {
     }
 }
 
-void RuleEngine::applyRecoveryPolicy(std::vector<VehicleAgent>& vehicles) {
-    const RecoveryDirective& recovery = deadlock_manager_.directive();
-    for (VehicleAgent& vehicle : vehicles) {
+void RuleEngine::applyRecoveryPolicy(
+    std::vector<VehicleAgent>& vehicles)
+{
+    const RecoveryDirective& recovery =
+        deadlock_manager_.directive();
+
+    for (VehicleAgent& vehicle : vehicles)
+    {
         if (recovery.cooldownActive() &&
-            vehicle.id == recovery.cooldown_vehicle_id) {
-            vehicle.requested_action = VehicleAction::STOP;
-            vehicle.reason = "deadlock_restart_hold";
+            vehicle.id == recovery.cooldown_vehicle_id)
+        {
+            vehicle.requested_action =
+                VehicleAction::STOP;
+            vehicle.reason =
+                "deadlock_restart_hold";
             vehicle.blocker_id = -1;
             continue;
         }
-        if (!recovery.active()) continue;
-        if (vehicle.id == recovery.retreat_vehicle_id) {
-            applyActionRequest(vehicle, VehicleAction::STOP,
-                               recovery.phase == RecoveryPhase::PASS
-                                   ? "deadlock_pass_hold"
-                                   : "deadlock_retreat_override",
-                               recovery.pass_vehicle_id);
+
+        if (!recovery.active())
             continue;
+
+        const RecoveryMotion motion =
+            recovery.motionFor(vehicle.id);
+
+        if (motion == RecoveryMotion::HOLD)
+        {
+            const int blocker_id =
+                vehicle.id ==
+                        recovery.retreat_vehicle_id
+                    ? recovery.pass_vehicle_id
+                    : recovery.retreat_vehicle_id;
+
+            applyActionRequest(
+                vehicle,
+                VehicleAction::STOP,
+                "deadlock_hold",
+                blocker_id);
         }
-        if (vehicle.id != recovery.pass_vehicle_id) continue;
-        if (recovery.motionFor(vehicle.id) == RecoveryMotion::HOLD) {
-            applyActionRequest(vehicle, VehicleAction::STOP,
-                               "deadlock_pair_hold",
-                               recovery.retreat_vehicle_id);
+        else if (motion ==
+                 RecoveryMotion::RETREAT)
+        {
+            applyActionRequest(
+                vehicle,
+                VehicleAction::STOP,
+                "deadlock_retreat_override",
+                recovery.pass_vehicle_id);
         }
     }
-
 }
 
 RuleEngine::MotionOverride RuleEngine::motionOverrideFor(
