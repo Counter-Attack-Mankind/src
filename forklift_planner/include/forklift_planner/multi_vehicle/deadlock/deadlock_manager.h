@@ -12,6 +12,7 @@
 namespace forklift_planner {
 namespace multi_vehicle {
 
+//死锁恢复状态机的阶段,也就是车辆进入死锁，可能会出现的阶段
 enum class RecoveryPhase {
     NONE,
     RETREAT,
@@ -21,26 +22,26 @@ enum class RecoveryPhase {
     ABORT,
 };
 
+//车辆在死锁阶段所要采取的动作
 enum class RecoveryMotion {
     NORMAL,
     HOLD,
     RETREAT,
 };
 
+//DeadlockManager 对外发布的“当前死锁恢复指令”
 struct RecoveryDirective {
     RecoveryPhase phase = RecoveryPhase::NONE;
+    int retreat_attempt = 0;   // 当前第几次固定退让，目前设定容忍退让三次
     int retreat_vehicle_id = -1;
     int pass_vehicle_id = -1;
     int retreat_path_gen = -1;
     int pass_path_gen = -1;
     double retreat_target_s = 0.0;
-    double pass_clear_s = 0.0;
     double retreat_distance = 0.0;
-    double estimated_retreat_time = 0.0;
     int cooldown_vehicle_id = -1;
     int cooldown_path_gen = -1;
     double cooldown_remaining = 0.0;
-    bool hold_pass_vehicle_during_retreat = true;
     std::string reason;
 
     bool active() const {
@@ -82,19 +83,17 @@ public:
         double anchor_s_b = 0.0;
     };
 
+    //DeadlockManager 内部真正执行中的恢复事务状态。
     struct TransactionState {
         RecoveryPhase phase = RecoveryPhase::NONE;
+        int retreat_attempt = 0;   // 当前 recovery 已执行到第几次退让（真实操作）
         int retreat_vehicle_id = -1;
         int pass_vehicle_id = -1;
         int retreat_path_gen = -1;
         int pass_path_gen = -1;
         double retreat_target_s = 0.0;
-        double pass_clear_s = 0.0;
         double retreat_distance = 0.0;
-        double estimated_retreat_time = 0.0;
         double pass_confirmation_elapsed = 0.0;
-        double pass_track_length = 0.0;
-        bool hold_pass_vehicle_during_retreat = true;
         std::string reason;
     };
 
@@ -133,39 +132,17 @@ public:
     void restore(const Snapshot& snapshot);
 
 private:
-    enum class RetreatOutcome {
-        FEASIBLE_RETREAT,
-        NO_COMPONENT,
-        BLOCKED,
-    };
 
-    struct RetreatEvaluation {
-        bool feasible = false;
-        RetreatOutcome outcome = RetreatOutcome::BLOCKED;
-        int retreat_vehicle_id = -1;
-        int pass_vehicle_id = -1;
-        double target_s = 0.0;
-        double pass_clear_s = 0.0;
-        double distance = 0.0;
-        std::string reason;
-    };
 
     const VehicleAgent* vehicleById(const std::vector<VehicleAgent>& vehicles,
                                     int id) const;
     const DeadlockPairGeometry* geometryFor(
         const std::vector<DeadlockPairGeometry>& geometry,
         int vehicle_a, int vehicle_b) const;
-    RetreatEvaluation evaluateRetreat(
-        const VehicleAgent& retreat, const VehicleAgent& passer,
-        const std::vector<VehicleAgent>& vehicles) const;
     bool retreatSweepClear(const VehicleAgent& retreat,
                            const VehicleAgent& passer,
                            const std::vector<VehicleAgent>& vehicles,
                            double target_s) const;
-    bool retreatPoseClearsPassCorridor(const VehicleAgent& retreat,
-                                       const VehicleAgent& passer,
-                                       double retreat_s,
-                                       double pass_clear_s) const;
     void refreshDirective();
     void emit(const char* event, const std::string& details, bool enabled) const;
     void abort(const std::string& reason, bool emit_logs);

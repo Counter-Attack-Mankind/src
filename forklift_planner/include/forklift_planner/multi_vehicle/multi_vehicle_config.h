@@ -82,16 +82,12 @@ struct MultiVehicleConfig {
     // Set <= 0 to disable smoothing (raw rule output each cycle).
     double action_hold_time = 0.4;
 
-    // Optional coordination rules layered ON TOP of the hard collision guard.
-    // The collision guard itself (no two vehicle bodies may overlap) is always
-    // active and cannot be turned off -- it is the safety bottom line. These two
-    // are policy, not safety. Set both false for pure collision avoidance: it is
-    // provably collision-free but will deadlock on symmetric conflicts.
+    //==============(死锁的部分参数)=========================
     bool enable_priority_tiebreak = true;  // who proceeds in a symmetric conflict
     bool deadlock_enabled = true;
+    double deadlock_retreat_distance = 0.50;  // 每次固定沿 s- 退让 0.5 m
+    int deadlock_retreat_max_attempts = 3;    // 最多退让 3 次
     double deadlock_confirm_time = 4.0;          // s
-    double deadlock_retreat_search_step = 0.05;  // m along path_s
-    double deadlock_retreat_clearance = 0.02;    // m; corridor exit / safe backoff
     double deadlock_retreat_speed = 0.10;        // m/s; RETREAT only
 
     // 实车模式:位置来自动捕 /object(替代 advanceVehicles 积分),输出 /traj_i + /coord_speed_i

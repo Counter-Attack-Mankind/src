@@ -59,15 +59,15 @@ RecoveryMotion RecoveryDirective::motionFor(int vehicle_id) const {
         return RecoveryMotion::HOLD;
     }
     //在死锁解决触发的恢复状态下，retreat车辆执行退让，pass车辆执行hold静止
-    if (phase == RecoveryPhase::RETREAT) {
+    if (phase == RecoveryPhase::RETREAT) 
+    {
         if (vehicle_id == retreat_vehicle_id) return RecoveryMotion::RETREAT;
-        if (vehicle_id == pass_vehicle_id &&
-            hold_pass_vehicle_during_retreat) {
-            return RecoveryMotion::HOLD;
-        }
-    } else if (phase == RecoveryPhase::PASS) {
+        if (vehicle_id == pass_vehicle_id ) return RecoveryMotion::HOLD;
+    } else if (phase == RecoveryPhase::PASS) 
+    {
         if (vehicle_id == retreat_vehicle_id) return RecoveryMotion::HOLD;
-    } else if (phase == RecoveryPhase::UNRESOLVED) {
+    } else if (phase == RecoveryPhase::UNRESOLVED)
+     {
         if (vehicle_id == retreat_vehicle_id || vehicle_id == pass_vehicle_id) {
             return RecoveryMotion::HOLD;
         }
@@ -75,21 +75,6 @@ RecoveryMotion RecoveryDirective::motionFor(int vehicle_id) const {
     return RecoveryMotion::NORMAL;
 }
 
-bool DeadlockManager::retreatPoseClearsPassCorridor(
-    const VehicleAgent& retreat, const VehicleAgent& passer,
-    double retreat_s, double pass_clear_s) const {
-    if (retreat.track.empty() || passer.track.empty()) return false;
-    const OBB stopped = makeBody(retreat.track.poseAtS(retreat_s),
-                                 map_param_, 0.0);
-    const double sweep_step = std::max(
-        0.005, std::min(0.01, config_.path_validation_step));
-    return sampleInterval(passer.path_s, pass_clear_s, sweep_step,
-                          [&](double pass_s) {
-        const OBB pass_body = makeBody(passer.track.poseAtS(pass_s),
-                                       map_param_, 0.0);
-        return !overlaps(stopped, pass_body);
-    });
-}
 
 //构造函数。创建一个 DeadlockManager 对象时，这个构造函数会执行一次
 DeadlockManager::DeadlockManager(const MapParam& map_param,
@@ -150,153 +135,24 @@ bool DeadlockManager::retreatSweepClear(
     });
 }
 
-DeadlockManager::RetreatEvaluation DeadlockManager::evaluateRetreat(
-    const VehicleAgent& retreat, const VehicleAgent& passer,
-    const std::vector<VehicleAgent>& vehicles) const {
-    RetreatEvaluation result;
-    result.retreat_vehicle_id = retreat.id;
-    result.pass_vehicle_id = passer.id;
-    if (retreat.track.empty() || passer.track.empty()) {
-        result.reason = "empty_track";
-        return result;
-    }
 
-    // NORMAL_DEADLOCK geometry is derived directly from the two bare-body
-    // OBBs.  Build the overlap set in (pass_s, retreat_s), seed it with the
-    // overlap sample nearest the current state, then retain only its
-    // 8-connected component.  A later, disconnected crossing must not extend
-    // this recovery transaction.
-    constexpr double kClosureStep = 0.01;
-    auto samples = [&](double begin, double end) {
-        const double distance = std::max(0.0, end - begin);
-        const size_t count = std::max<size_t>(
-            1, static_cast<size_t>(std::ceil(distance / kClosureStep)));
-        std::vector<double> values(count + 1);
-        for (size_t i = 0; i <= count; ++i) {
-            values[i] = begin + distance * static_cast<double>(i) /
-                                    static_cast<double>(count);
-        }
-        return values;
-    };
-    const std::vector<double> pass_samples = samples(
-        passer.path_s, passer.track.length());
-    const std::vector<double> retreat_samples = samples(0.0, retreat.path_s);
-    const size_t rows = pass_samples.size();
-    const size_t cols = retreat_samples.size();
-    if (rows == 0 || cols == 0 ||
-        rows > std::numeric_limits<size_t>::max() / cols) {
-        result.reason = "invalid_obb_closure_grid";
-        return result;
-    }
 
-    std::vector<OBB> pass_bodies;
-    std::vector<OBB> retreat_bodies;
-    pass_bodies.reserve(rows);
-    retreat_bodies.reserve(cols);
-    for (double s : pass_samples) {
-        pass_bodies.push_back(makeBody(passer.track.poseAtS(s),
-                                       map_param_, 0.0));
-    }
-    for (double s : retreat_samples) {
-        retreat_bodies.push_back(makeBody(retreat.track.poseAtS(s),
-                                          map_param_, 0.0));
-    }
-
-    std::vector<uint8_t> overlap_grid(rows * cols, 0);
-    size_t seed = rows * cols;
-    double seed_distance_sq = std::numeric_limits<double>::infinity();
-    for (size_t pass_i = 0; pass_i < rows; ++pass_i) {
-        const double pass_delta = pass_samples[pass_i] - passer.path_s;
-        for (size_t retreat_i = 0; retreat_i < cols; ++retreat_i) {
-            if (!overlaps(pass_bodies[pass_i],
-                          retreat_bodies[retreat_i])) {
-                continue;
-            }
-            const size_t index = pass_i * cols + retreat_i;
-            overlap_grid[index] = 1;
-            const double retreat_delta =
-                retreat.path_s - retreat_samples[retreat_i];
-            const double distance_sq = pass_delta * pass_delta +
-                                       retreat_delta * retreat_delta;
-            if (distance_sq < seed_distance_sq) {
-                seed_distance_sq = distance_sq;
-                seed = index;
-            }
-        }
-    }
-    if (seed == overlap_grid.size()) {
-        result.outcome = RetreatOutcome::NO_COMPONENT;
-        result.reason = "no_obb_overlap_component";
-        return result;
-    }
-
-    size_t min_retreat_i = seed % cols;
-    size_t max_pass_i = seed / cols;
-    std::vector<size_t> frontier{seed};
-    overlap_grid[seed] = 2;
-    for (size_t head = 0; head < frontier.size(); ++head) {
-        const size_t index = frontier[head];
-        const size_t pass_i = index / cols;
-        const size_t retreat_i = index % cols;
-        min_retreat_i = std::min(min_retreat_i, retreat_i);
-        max_pass_i = std::max(max_pass_i, pass_i);
-        for (int dp = -1; dp <= 1; ++dp) {
-            for (int dr = -1; dr <= 1; ++dr) {
-                if (dp == 0 && dr == 0) continue;
-                const std::ptrdiff_t next_pass =
-                    static_cast<std::ptrdiff_t>(pass_i) + dp;
-                const std::ptrdiff_t next_retreat =
-                    static_cast<std::ptrdiff_t>(retreat_i) + dr;
-                if (next_pass < 0 || next_retreat < 0 ||
-                    next_pass >= static_cast<std::ptrdiff_t>(rows) ||
-                    next_retreat >= static_cast<std::ptrdiff_t>(cols)) {
-                    continue;
-                }
-                const size_t next = static_cast<size_t>(next_pass) * cols +
-                                    static_cast<size_t>(next_retreat);
-                if (overlap_grid[next] != 1) continue;
-                overlap_grid[next] = 2;
-                frontier.push_back(next);
-            }
-        }
-    }
-
-    result.pass_clear_s = pass_samples[max_pass_i];
-    const double retreat_clear_boundary_s = retreat_samples[min_retreat_i];
-    result.target_s = std::max(
-        0.0, retreat_clear_boundary_s -
-                 config_.deadlock_retreat_clearance);
-    if (result.target_s >= retreat.path_s - 1e-9 ||
-        !retreatPoseClearsPassCorridor(
-            retreat, passer, result.target_s, result.pass_clear_s) ||
-        !retreatSweepClear(retreat, passer, vehicles, result.target_s)) {
-        result.reason = "retreat_sweep_or_corridor_blocked";
-        return result;
-    }
-
-    result.feasible = true;
-    result.outcome = RetreatOutcome::FEASIBLE_RETREAT;
-    result.distance = retreat.path_s - result.target_s;
-    result.reason = "clear";
-    return result;
-}
-
+//把 DeadlockManager 内部的恢复事务状态 transaction_（脑子想执行的事情），同步成对外可读的执行指令 directive_（实际执行的动作）
 void DeadlockManager::refreshDirective() {
     directive_ = {};
     directive_.phase = transaction_.phase;
+    directive_.retreat_attempt = transaction_.retreat_attempt;   //死锁最多回退次数
     directive_.retreat_vehicle_id = transaction_.retreat_vehicle_id;
     directive_.pass_vehicle_id = transaction_.pass_vehicle_id;
     directive_.retreat_path_gen = transaction_.retreat_path_gen;
     directive_.pass_path_gen = transaction_.pass_path_gen;
-    directive_.retreat_target_s = transaction_.retreat_target_s;
-    directive_.pass_clear_s = transaction_.pass_clear_s;
+    directive_.retreat_target_s = transaction_.retreat_target_s;    //死锁恢复每次需要的回退的距离
+
+   
     directive_.retreat_distance = transaction_.retreat_distance;
-    directive_.estimated_retreat_time = transaction_.estimated_retreat_time;
     directive_.cooldown_vehicle_id = cooldown_.vehicle_id;
     directive_.cooldown_path_gen = cooldown_.path_gen;
     directive_.cooldown_remaining = cooldown_.remaining;
-    directive_.hold_pass_vehicle_during_retreat =
-        transaction_.hold_pass_vehicle_during_retreat;
     directive_.reason = transaction_.reason;
 }
 
@@ -346,10 +202,8 @@ void DeadlockManager::clearSuccessfulRecovery(
     refreshDirective();
 }
 
-void DeadlockManager::update(
-    const std::vector<VehicleAgent>& vehicles,
-    const std::vector<DeadlockPairGeometry>& pair_geometry,
-    double dt, bool emit_logs) {
+void DeadlockManager::update(const std::vector<VehicleAgent>& vehicles, const std::vector<DeadlockPairGeometry>& pair_geometry,double dt, bool emit_logs) 
+{
     if (!config_.deadlock_enabled) {
         candidate_ = {};
         transaction_ = {};
@@ -387,40 +241,66 @@ void DeadlockManager::update(
     }
 
     if (transaction_.phase != RecoveryPhase::NONE) {
-        const VehicleAgent* retreat = vehicleById(
-            vehicles, transaction_.retreat_vehicle_id);
-        const VehicleAgent* passer = vehicleById(
-            vehicles, transaction_.pass_vehicle_id);
+        const VehicleAgent* retreat = vehicleById(vehicles, transaction_.retreat_vehicle_id);
+        const VehicleAgent* passer = vehicleById(vehicles, transaction_.pass_vehicle_id);
 
-        // PASS ends only after the passer has physically cleared the frozen
-        // transaction corridor. Check success before identity changes so a
-        // natural arrival at the end of the same path is not misclassified.
-        if (transaction_.phase == RecoveryPhase::PASS) {
-            if (passer == nullptr) {
-                abort("pass_vehicle_missing", emit_logs);
-                return;
-            }
+
+        if (transaction_.phase == RecoveryPhase::PASS)
+        {
+
             transaction_.pass_confirmation_elapsed += std::max(0.0, dt);
-            const bool same_path_cleared =
-                passer->path_gen == transaction_.pass_path_gen &&
-                passer->path_s + 1e-9 >= transaction_.pass_clear_s;
-            const bool natural_path_completion =
-                passer->path_gen != transaction_.pass_path_gen &&
-                transaction_.pass_track_length + 1e-9 >=
-                    transaction_.pass_clear_s;
-            if (same_path_cleared || natural_path_completion) {
-                clearSuccessfulRecovery(
-                    retreat, passer, "passer_cleared_pass_corridor",
-                    emit_logs);
+            const double tolerance =std::max(0.005, config_.path_validation_step);
+
+            // 若已经退到原路径起点，即原库位，则直接视为死锁解除成功。
+            // 但实际这里存疑，因为s=0不一定是库位，也有可能是A1，但目前大多数情况如此，先应用，后续再更改
+            if (retreat->path_s <= tolerance) 
+            {
+                clearSuccessfulRecovery(retreat,passer,"retreat_reached_origin_slot",emit_logs);
                 return;
             }
-            if (retreat == nullptr ||
-                retreat->mode != VehicleMode::ACTIVE ||
-                retreat->path_gen != transaction_.retreat_path_gen ||
-                passer->mode != VehicleMode::ACTIVE ||
-                passer->path_gen != transaction_.pass_path_gen) {
-                abort("vehicle_or_path_identity_changed", emit_logs);
+
+            const bool still_deadlocked = geometryFor(pair_geometry,retreat->id,passer->id) != nullptr;
+            // 若已经不再形成 mutual STOP，则记录成功
+            if (!still_deadlocked) 
+            {
+                clearSuccessfulRecovery(retreat,passer,"deadlock_cleared_after_retreat",emit_logs);
+                return;
             }
+
+
+            //给普通协调至少一个 rolling period 的时间重新起步和判断，防止刚退到 target 的下一拍马上又继续退 0.5 m。
+            if (transaction_.pass_confirmation_elapsed + 1e-9 <config_.rolling_refresh_period)
+            {
+                refreshDirective();
+                return;
+            }
+
+            //若已经尝试 3 次
+            if (transaction_.retreat_attempt >= config_.deadlock_retreat_max_attempts) {
+                transaction_.phase = RecoveryPhase::UNRESOLVED;
+                transaction_.reason ="max_fixed_retreat_attempts_reached";
+                refreshDirective();
+                emit("UNRESOLVED","pair=V" + std::to_string(retreat->id) +"-V" + std::to_string(passer->id) +" reason=max_fixed_retreat_attempts_reached",emit_logs);
+                return;
+            }
+
+            //若没用达到最大迭代次数，下一次继续固定退 0.5 m
+            const double next_target_s =std::max(0.0,retreat->path_s -config_.deadlock_retreat_distance);
+            if (!retreatSweepClear(*retreat,*passer,vehicles,next_target_s)) 
+            {
+                transaction_.phase = RecoveryPhase::UNRESOLVED;
+                transaction_.reason ="next_retreat_sweep_blocked";
+                refreshDirective();
+                emit("UNRESOLVED","pair=V" + std::to_string(retreat->id) +"-V" + std::to_string(passer->id) +" reason=next_retreat_sweep_blocked",emit_logs);
+                return;
+            }
+
+            ++transaction_.retreat_attempt;
+            transaction_.retreat_target_s = next_target_s;
+            transaction_.phase = RecoveryPhase::RETREAT;
+            transaction_.pass_confirmation_elapsed = 0.0;
+            transaction_.reason = "fixed_step_retreat_retry";
+            refreshDirective();
             return;
         }
 
@@ -433,38 +313,37 @@ void DeadlockManager::update(
             return;
         }
 
+        //如果处在死锁恢复阶段---真正执行的状态机
         if (transaction_.phase == RecoveryPhase::RETREAT) {
-            if (!retreatSweepClear(*retreat, *passer, vehicles,
-                                   transaction_.retreat_target_s)) {
+            // 每一拍都重新检查：从当前实际位置继续退到本次 target 是否仍然安全，不安全则直接退出
+            if (!retreatSweepClear(*retreat, *passer, vehicles,transaction_.retreat_target_s)) 
+            {   
                 abort("retreat_sweep_invalidated", emit_logs);
                 return;
             }
-            const double tolerance = std::max(
-                0.005, 0.25 * config_.deadlock_retreat_search_step);
-            if (retreat->path_s <= transaction_.retreat_target_s + tolerance) {
-                if (!retreatPoseClearsPassCorridor(
-                        *retreat, *passer, retreat->path_s,
-                        transaction_.pass_clear_s)) {
-                    transaction_.reason =
-                        "actual_retreat_pose_still_blocks_pass_corridor";
-                    refreshDirective();
-                    return;
-                }
+            const double tolerance = std::max(0.005, config_.path_validation_step);
+            
+            // 已经到达本次固定退让目标，则低优先级车停住，优先车恢复 NORMAL，进入观察阶段。
+            if (retreat->path_s <=transaction_.retreat_target_s + tolerance) 
+            {
                 transaction_.phase = RecoveryPhase::PASS;
                 transaction_.pass_confirmation_elapsed = 0.0;
-                transaction_.reason = "actual_retreat_pose_clears_corridor";
+                transaction_.reason = "retreat_step_done_recheck";
                 refreshDirective();
+
                 std::ostringstream details;
-                details << "pair=V" << retreat->id << "-V" << passer->id
-                        << " retreat=V" << retreat->id
-                        << " pass=V" << passer->id
-                        << " target_s=" << transaction_.retreat_target_s;
+                details << "pair=V" << retreat->id
+                << "-V" << passer->id
+                << " retreat=V" << retreat->id
+                << " pass=V" << passer->id
+                << " attempt=" << transaction_.retreat_attempt
+                << " target_s=" << transaction_.retreat_target_s
+                << " actual_s=" << retreat->path_s;
                 emit("RETREAT_DONE", details.str(), emit_logs);
                 emit("PASS_START", details.str(), emit_logs);
             }
             return;
         }
-
         return;
     }
 
@@ -521,8 +400,7 @@ void DeadlockManager::update(
         return;
     }
 
-    const double progress_epsilon = std::max(
-        0.005, 0.25 * config_.deadlock_retreat_search_step);
+    const double progress_epsilon = std::max(0.005, config_.path_validation_step);
     const bool same_candidate = candidate_.valid &&
         candidate_.vehicle_a == candidate_a->id &&
         candidate_.vehicle_b == candidate_b->id &&
@@ -562,130 +440,72 @@ void DeadlockManager::update(
               << candidate_b->path_gen;
     emit("CONFIRMED", confirmed.str(), emit_logs);
 
-    RetreatEvaluation a_retreat;
-    RetreatEvaluation b_retreat;
-    if (geometry != nullptr) {
-        a_retreat = evaluateRetreat(*candidate_a, *candidate_b, vehicles);
-        b_retreat = evaluateRetreat(*candidate_b, *candidate_a, vehicles);
-    } else {
-        a_retreat.retreat_vehicle_id = candidate_a->id;
-        a_retreat.pass_vehicle_id = candidate_b->id;
-        a_retreat.reason = "no_pair_geometry";
-        b_retreat.retreat_vehicle_id = candidate_b->id;
-        b_retreat.pass_vehicle_id = candidate_a->id;
-        b_retreat.reason = "no_pair_geometry";
-    }
-
-    std::ostringstream evaluation;
-    const int preferred_priority_id =
-        geometry != nullptr ? geometry->preferred_priority_vehicle_id : -1;
-    evaluation << "pair=V" << candidate_a->id << "-V" << candidate_b->id
-               << " preferred_priority=V" << preferred_priority_id
-               << " a_retreat_feasible=" << (a_retreat.feasible ? 1 : 0)
-               << " a_distance=" << a_retreat.distance
-               << " a_reason=" << a_retreat.reason
-               << " b_retreat_feasible=" << (b_retreat.feasible ? 1 : 0)
-               << " b_distance=" << b_retreat.distance
-               << " b_reason=" << b_retreat.reason;
-    emit("EVAL", evaluation.str(), emit_logs);
-
-    const RetreatEvaluation* selected = nullptr;
-    std::string selection_reason;
-    const bool a_is_priority = preferred_priority_id == candidate_a->id;
-    const bool b_is_priority = preferred_priority_id == candidate_b->id;
-    const RetreatEvaluation* preferred_retreat = nullptr;
-    const RetreatEvaluation* safety_fallback = nullptr;
-    if (a_is_priority || b_is_priority) {
-        preferred_retreat = a_is_priority ? &b_retreat : &a_retreat;
-        safety_fallback = a_is_priority ? &a_retreat : &b_retreat;
-    } else {
-        // priorityWinner() can return -1 only when priority tiebreaking is
-        // explicitly disabled. Keep recovery deterministic without reviving
-        // distance-based role selection.
-        preferred_retreat = candidate_a->id < candidate_b->id
-            ? &b_retreat : &a_retreat;
-        safety_fallback = preferred_retreat == &a_retreat
-            ? &b_retreat : &a_retreat;
-    }
-    if (preferred_retreat->feasible) {
-        selected = preferred_retreat;
-        selection_reason = "priority_yielding_vehicle_retreat";
-    } else if (safety_fallback->feasible) {
-        selected = safety_fallback;
-        selection_reason = "preferred_retreat_infeasible";
-    }
+    //==============新的死锁更新恢复逻辑==============
+    const int preferred_priority_id = geometry->preferred_priority_vehicle_id;
+    //冻结死锁恢复角色，一定是低优先级退让，高优先级清出，这样才不会出现TTC打架
+    const VehicleAgent* passer = nullptr;
+    const VehicleAgent* retreat = nullptr;
+    
+    if (preferred_priority_id == candidate_a->id)
+    {
+        passer = candidate_a;
+        retreat = candidate_b;
+    } 
+    else
+    {
+        passer = candidate_b;
+        retreat = candidate_a;
+    } 
 
     candidate_ = {};
-    if (selected == nullptr) {
-        const bool a_no_component =
-            a_retreat.outcome == RetreatOutcome::NO_COMPONENT;
-        const bool b_no_component =
-            b_retreat.outcome == RetreatOutcome::NO_COMPONENT;
-        if (a_no_component || b_no_component) {
-            int override_winner = -1;
-            if (a_no_component != b_no_component) {
-                override_winner = a_no_component
-                    ? a_retreat.pass_vehicle_id
-                    : b_retreat.pass_vehicle_id;
-            } else if (preferred_priority_id == candidate_a->id) {
-                override_winner = candidate_b->id;
-            } else if (preferred_priority_id == candidate_b->id) {
-                override_winner = candidate_a->id;
-            } else {
-                override_winner = std::min(candidate_a->id, candidate_b->id);
-            }
-            transaction_ = {};
-            priority_override_.active = true;
-            priority_override_.vehicle_a = candidate_a->id;
-            priority_override_.vehicle_b = candidate_b->id;
-            priority_override_.path_gen_a = candidate_a->path_gen;
-            priority_override_.path_gen_b = candidate_b->path_gen;
-            priority_override_.winner_id = override_winner;
-            refreshDirective();
-            std::ostringstream selection;
-            selection << "pair=V" << candidate_a->id << "-V"
-                      << candidate_b->id << " pass=V" << override_winner
-                      << " selection_reason=no_component_priority_swap";
-            emit("SELECT", selection.str(), emit_logs);
-            return;
-        }
-        transaction_.phase = RecoveryPhase::UNRESOLVED;
-        transaction_.retreat_vehicle_id = candidate_a->id;
-        transaction_.pass_vehicle_id = candidate_b->id;
-        transaction_.retreat_path_gen = candidate_a->path_gen;
-        transaction_.pass_path_gen = candidate_b->path_gen;
-        transaction_.reason = "both_retreat_candidates_infeasible";
+    transaction_ = {};
+    transaction_.retreat_vehicle_id = retreat->id;
+    transaction_.pass_vehicle_id = passer->id;
+    transaction_.retreat_path_gen = retreat->path_gen;
+    transaction_.pass_path_gen = passer->path_gen;
+
+    const double tolerance = std::max(0.005, config_.path_validation_step);
+    // 若已经在路径起点，不再退
+    if (retreat->path_s <= tolerance) 
+    {
+        transaction_.phase = RecoveryPhase::PASS;
+        transaction_.retreat_attempt = 0;
+        transaction_.retreat_target_s = 0.0;
+        transaction_.pass_confirmation_elapsed = 0.0;
+        transaction_.reason = "retreater_already_at_path_start";
         refreshDirective();
-        emit("UNRESOLVED", evaluation.str(), emit_logs);
         return;
     }
 
-    const VehicleAgent* retreat = vehicleById(
-        vehicles, selected->retreat_vehicle_id);
-    const VehicleAgent* passer = vehicleById(
-        vehicles, selected->pass_vehicle_id);
+    // 否则第一次退 0.5 m，不足则退到 s=0，如果后退会碰到车，证明后退失效，直接无解----后续可以考虑多车联动，目前双车先这样
+    const double target_s = std::max(0.0,   retreat->path_s - config_.deadlock_retreat_distance);
+    if (!retreatSweepClear(*retreat, *passer, vehicles,target_s)) 
+    {
+        transaction_.phase = RecoveryPhase::UNRESOLVED;
+        transaction_.reason = "first_retreat_sweep_blocked";
+        refreshDirective();
+        emit("UNRESOLVED","pair=V" + std::to_string(retreat->id) + "-V" + std::to_string(passer->id) + " reason=first_retreat_sweep_blocked",emit_logs);
+        return;
+    }
+
     transaction_.phase = RecoveryPhase::RETREAT;
-    transaction_.retreat_vehicle_id = selected->retreat_vehicle_id;
-    transaction_.pass_vehicle_id = selected->pass_vehicle_id;
-    transaction_.retreat_path_gen = retreat->path_gen;
-    transaction_.pass_path_gen = passer->path_gen;
-    transaction_.retreat_target_s = selected->target_s;
-    transaction_.pass_clear_s = selected->pass_clear_s;
-    transaction_.pass_track_length = passer->track.length();
-    transaction_.retreat_distance = selected->distance;
-    const double recovery_speed = std::max(
-        1e-6, config_.deadlock_retreat_speed);
-    transaction_.estimated_retreat_time = selected->distance / recovery_speed;
-    transaction_.reason = selection_reason;
+    transaction_.retreat_attempt = 1;
+    transaction_.retreat_target_s = target_s;
+    transaction_.retreat_distance =
+    retreat->path_s - target_s;
+
+    transaction_.reason ="priority_yielding_fixed_retreat";
     refreshDirective();
+
     std::ostringstream selection;
     selection << "pair=V" << candidate_a->id << "-V" << candidate_b->id
-              << " retreat=V" << retreat->id << " pass=V" << passer->id
-              << " target_s=" << selected->target_s
-              << " pass_clear_s=" << selected->pass_clear_s
-              << " distance=" << selected->distance
-              << " estimated_time=" << transaction_.estimated_retreat_time
-              << " selection_reason=" << selection_reason;
+          << " priority=V" << passer->id
+          << " retreat=V" << retreat->id
+          << " attempt=1"
+          << " start_s=" << retreat->path_s 
+          << " target_s=" << target_s
+          << " distance=" << transaction_.retreat_distance;
+
     emit("SELECT", selection.str(), emit_logs);
 }
 
