@@ -1310,7 +1310,7 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
         const double first_inner_connector_x =
             (tgt.pre_dock_x < spine_x_) ? row1_left_up_x : row1_right_down_x;
         const double connector_match_tol = std::max(1e-4, sample_ds * 0.25);
-        const bool a1_first_inner_connector_keep_turn =
+        const bool a1_first_inner_lane_shift =
             use_a1_to_b_rules &&
             src.id >= 0 &&
             src_corr == 1 &&
@@ -1321,15 +1321,8 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
             std::abs(simplified[j].x     - first_inner_connector_x) <= connector_match_tol &&
             std::abs(simplified[j + 1].x - spine_x_) <= connector_match_tol &&
             std::abs(simplified[j + 2].x - spine_x_) <= connector_match_tol;
-        if (a1_first_inner_connector_keep_turn) {
-            if (debug_row1_target) {
-                ROS_WARN("[planner][row1-debug] lane_shift skipped tgt=%d j=%zu "
-                         "terminal=%d lateral=%.3f: keep inner 1->2 connector, "
-                         "corridor-2 straight, and 2->3 spine connector",
-                         tgt.id, j, terminal_lane_shift ? 1 : 0, lateral);
-            }
-            continue;
-        }
+        //左侧走圆弧拼接
+        const bool a1_first_inner_left = a1_first_inner_lane_shift && tgt.pre_dock_x < spine_x_;
         if (row1_upper_terminal_keep_turn) {
             if (debug_row1_target) {
                 ROS_WARN("[planner][row1-debug] lane_shift skipped tgt=%d j=%zu "
@@ -1365,6 +1358,16 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
             }
             continue;
         }
+
+        if (a1_first_inner_left) {
+        if (debug_row1_target) {
+        ROS_WARN(
+            "[planner][row1-debug] lane_shift skipped for left first connector "
+            "tgt=%d j=%zu lateral=%.3f",
+            tgt.id, j, lateral);
+        }
+            continue;
+        }   
         double min_total =
             std::max(2.0 * sample_ds,
                      std::sqrt(6.0 * lateral / std::max(max_curvature, kEps)));
@@ -1387,6 +1390,8 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
             lead_out = avail_out;
             lead_in = min_total - lead_out;
         }
+
+
         if (j > 1) {
             const Pt prev_u = normalize(simplified[j - 1] - simplified[j - 2]);
             const Pt in_u = normalize(simplified[j] - simplified[j - 1]);
@@ -1406,6 +1411,35 @@ RoughPath PathGenerator::generateRouteA1ToB(const Slot& src, const Slot& tgt,
                 }
             }
         }
+
+        // A1 -> row4/5/6/7：右侧第一条大 lane shift 后移 0.05m
+if (a1_first_inner_lane_shift &&
+    tgt.pre_dock_x > spine_x_) {
+
+    constexpr double kLaneShiftDelay = 0.05;
+
+    // 既不能把 lead_in 减到 0，也不能让 lead_out 超过可用空间
+    const double max_delay_from_in =
+        std::max(0.0, lead_in - sample_ds);
+
+    const double max_delay_from_out =
+        std::max(0.0, avail_out - lead_out);
+
+    const double delay =
+        std::min({kLaneShiftDelay,
+                  max_delay_from_in,
+                  max_delay_from_out});
+
+    lead_in  -= delay;
+    lead_out += delay;
+
+    if (debug_row1_target) {
+        ROS_WARN(
+            "[planner][row1-debug] delayed right first lane_shift "
+            "tgt=%d j=%zu delay=%.3f lead_in=%.3f lead_out=%.3f",
+            tgt.id, j, delay, lead_in, lead_out);
+    }
+}
         if (use_a1_to_b_rules && terminal_lane_shift && tgt.row_id == 5) {
             const double final_straight_reserve =
                 std::max(0.02, final_min_req_y * 0.05);
