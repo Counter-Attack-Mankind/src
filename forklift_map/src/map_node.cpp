@@ -222,6 +222,7 @@ public:
         ros::NodeHandle param_nh;
         param_nh.param("forklift_map/show_slot_ids", show_slot_ids_, true);
         param_nh.param("forklift_map/show_slot_poses", show_slot_poses_, true);
+        param_nh.param("forklift_map/show_coordinate_axes",show_coordinate_axes_,true);
 
         // latched publisher - new RViz subscribers get the map immediately
         pub_ = nh_.advertise<visualization_msgs::MarkerArray>(
@@ -247,6 +248,7 @@ private:
     int next_id_ = 0;
     bool show_slot_ids_ = true;
     bool show_slot_poses_ = true;
+    bool show_coordinate_axes_ = true;
 
     int newId() { return next_id_++; }
 
@@ -258,6 +260,10 @@ private:
         addSlots();
         addRoads();   // 黄色车道中心线 + 共性拐弯圆弧（无箭头、无末端弧、无尖点）
         addBoundary();
+
+        if (show_coordinate_axes_)
+            addCoordinateAxes();
+    
     }
 
     void publish() {
@@ -306,6 +312,115 @@ private:
                      lw, Color::kBoundary);
     }
 
+    // ---x,y坐标轴显示----------
+    void addCoordinateAxes() {
+        const auto& p = map_->param();
+        constexpr double z = 0.045;
+        constexpr double tick = 0.5;
+
+        // 坐标轴超过地图边界的长度
+        constexpr double axis_extend = 0.18;
+        // 刻度长度
+        constexpr double tick_len = 0.06;
+        // 数字大小
+        constexpr double label_size = 0.085;
+        // 坐标轴名称大小
+        constexpr double axis_name_size = 0.11;
+        // 红色坐标轴
+        const auto axis_color = rgba(1.0f, 0.0f, 0.0f, 1.0f);
+
+        //==================== X axis ====================
+
+        // 原点与地图原点(0,0)完全重合
+        addLineStrip(
+            arr_, frame_, "coord_axis", newId(),
+            {
+                pt(0.0, 0.0, z),
+                pt(p.field_width + axis_extend, 0.0, z)
+            },
+            0.015, axis_color
+        );
+
+
+        //==================== Y axis ====================
+
+        // 原点与地图原点(0,0)完全重合
+        addLineStrip(
+            arr_, frame_, "coord_axis", newId(),
+            {
+                pt(0.0, 0.0, z),
+                pt(0.0, p.field_height + axis_extend, z)
+            },
+            0.015, axis_color
+        );
+
+        //==================== X ticks ====================
+
+        for (double x = 0.0;x <= p.field_width + 1e-6;x += tick)
+        {
+            // X轴刻度向下画
+            addLineStrip(
+                arr_, frame_, "coord_tick_x", newId(),
+                {
+                    pt(x, 0.0, z),
+                    pt(x, -tick_len, z)
+                },
+                0.010, axis_color
+            );
+
+            std::ostringstream ss;
+            ss << std::fixed << std::setprecision(1) << x;
+
+            // X轴数字放在直线下面
+            addText(arr_, frame_, "coord_label_x", newId(),x,-tick_len - 0.05,z + 0.02,label_size,ss.str(),axis_color);
+        }
+
+        //==================== Y ticks ====================
+
+        for (double y = 0.0;
+            y <= p.field_height + 1e-6;
+            y += tick)
+        {
+            // Y轴刻度向左画
+            addLineStrip(
+                arr_, frame_, "coord_tick_y", newId(),
+                {
+                    pt(0.0, y, z),
+                    pt(-tick_len, y, z)
+                },
+                0.010, axis_color
+            );
+
+            std::ostringstream ss;
+            ss << std::fixed << std::setprecision(1) << y;
+
+            // Y轴数字放在直线左边
+            addText(arr_, frame_, "coord_label_y", newId(),-tick_len - 0.08,y,z + 0.02,label_size,ss.str(),axis_color);
+        }
+
+
+        //==================== Axis names ====================
+        addText(
+            arr_, frame_, "coord_axis_name", newId(),
+            p.field_width + axis_extend - 0.03,
+            -0.04,
+            z + 0.03,
+            axis_name_size,
+            "X",
+            axis_color
+        );
+
+        // Y
+        addText(
+            arr_, frame_, "coord_axis_name", newId(),
+            -0.04,
+            p.field_height + axis_extend - 0.03,
+            z + 0.03,
+            axis_name_size,
+            "Y",
+            axis_color
+        );
+    }
     // 按 row_id 返回该货位所占货架格子的物理 Y 区间 [y0,y1]。
     //   单排（顶/底货架）：整排深度；双排（行1/2/3）：上半/下半排。
     static void shelfCellY(const MapParam& p, int row_id, double& y0, double& y1) {

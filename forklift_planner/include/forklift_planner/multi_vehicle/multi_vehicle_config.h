@@ -97,15 +97,7 @@ struct MultiVehicleConfig {
     // 实车安全/到点阈值(仅 real_mode 用,现场可调,不影响 sim):
     double real_pose_timeout = 0.5;   // s,某车动捕失联>此值→强制其 coord_speed=0(防盲走)
     double real_arrive_tol = 0.05;    // m,path_s 距 length<此值即判到点(>PP的2cm硬停容差,防卡死)
-    // 实车硬护栏(第二层兜底):用真实 /object 足迹两两检测,充气 margin 后重叠即双方急停。
-    // sim 的 advanceVehicles 有这层,realAdvance 没有 → 预测层(decide)漏判时实车无人兜底。
-    // margin 要 < 预测层维持的间距才不误触发(预测层按 conflict_margin=0.12 把车拉开,
-    // 故 margin<0.12 时正常运行不会触,只在预测层快失守、两车逼到 <margin 时才急停);
-    // 默认 0.08,可现场调;设 0 = 关闭实车硬护栏。
-    double real_emergency_margin = 0.08;  // m,0=关闭实车硬护栏
-    // 曲率限速(规划侧,sim 与实车共用):弯道速度 v≤√(a_lat/κ),令规划速度运动学完备
-    // (纵向已有加减速+精确刹车距离,这里补"速度随曲率降"的横向运动学约束)。sim/实车一致才能
-    // 用 sim 验证它对协调的影响。0=关。
+    double real_emergency_margin = 0;  // m,0=关闭实车硬护栏，相当于安全检查两层。1.规划层的enforceForwardClearance() + 2.实车执行层的膨胀检测
     double lat_accel_max = 0.10;          // m/s² 侧向加速度上限:越小弯道越慢、跟得越紧
 
     bool show_paths = true;

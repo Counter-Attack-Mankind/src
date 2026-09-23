@@ -40,6 +40,7 @@ forklift_map:
   # Visualization parameters
   show_slot_ids:       true    # RViz 中显示每个货位的编号；设为 false 可关闭
   show_slot_poses:     true    # RViz 中显示每个货位的 cx/cy/dock_theta 和朝向箭头
+  show_coordinate_axes: true
   pre_dock_clearance:  0.150   # 预停靠点距货架边缘距离 (m)
   road_line_width:     0.020   # 道路中心线线宽 (m)
   arrow_size:          0.060   # 方向箭头长度 (m)
