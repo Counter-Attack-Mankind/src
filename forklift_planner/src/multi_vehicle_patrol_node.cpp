@@ -239,7 +239,7 @@ private:
     using DepartureTransactionIdentity =
         std::tuple<int, int, int, int, int, int, int, bool>;
     using RecoveryIdentity =
-        std::tuple<int, int, int, int, int, double, double, int, int>;
+        std::tuple<int, int, int, int, int, double, double>;
 
     struct ExecutedRollingDecisionMetrics {
         unsigned long long far_periods = 0;

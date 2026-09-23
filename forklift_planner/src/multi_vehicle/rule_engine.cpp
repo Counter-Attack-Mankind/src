@@ -2398,7 +2398,8 @@ void RuleEngine::applyRecoveryDirectiveToOutput(
     applyRecoveryPolicy(vehicles);
     const RecoveryDirective& recovery = deadlock_manager_.directive();
     if (!recovery.active()) return;
-    for (VehicleAgent& vehicle : vehicles) 
+    for (VehicleAgent& vehicle : vehicles)
+    { 
         if (!recovery.active()) continue;
         if (vehicle.id != recovery.retreat_vehicle_id &&
             vehicle.id != recovery.pass_vehicle_id) continue;
