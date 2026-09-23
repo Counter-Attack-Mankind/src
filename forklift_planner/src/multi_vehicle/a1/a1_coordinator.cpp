@@ -14,6 +14,7 @@ namespace forklift_planner {
 namespace multi_vehicle {
 namespace {
 
+constexpr double kIntrusionRetreatClearance = 0.02;
 const char* missionPhaseName(MissionPhase phase) {
     switch (phase) {
         case MissionPhase::DIRECT_TO_B: return "DIRECT_TO_B";
@@ -138,15 +139,11 @@ void logAdmissionInvariantViolation(
 
 }  // namespace
 
-A1Coordinator::A1Coordinator(const MapParam& map_param,
-                             const MultiVehicleConfig& cfg,
-                             Dependencies dependencies)
-    : map_param_(map_param), cfg_(cfg),
-      dependencies_(std::move(dependencies)) {}
+A1Coordinator::A1Coordinator(const MapParam& map_param,const MultiVehicleConfig& cfg,Dependencies dependencies)
+                            : map_param_(map_param), cfg_(cfg),dependencies_(std::move(dependencies)) {}
 
-void A1Coordinator::setDebugLogContext(const std::string& source,
-                                       uint64_t plan_id, int frame_id,
-                                       int rollout_step) {
+void A1Coordinator::setDebugLogContext(const std::string& source,uint64_t plan_id, int frame_id,int rollout_step)
+{
     if (source != debug_log_source_ || plan_id != debug_log_plan_id_) {
         a1_decision_logs_.clear();
     }
@@ -1205,12 +1202,10 @@ void A1Coordinator::refreshIntrusionCorrections(
             previous != intrusion_corrections_.end() &&
             previous->second.waiter_path_gen == waiter->path_gen;
         if (!crossed && !inside && !correction_active) continue;
-
+        
+        //检验回退库位是否是B0-B9，若是，则退回原库位。否则在原来计算的基础stop_s上多退一个阈值，防止车身入侵
         const bool return_to_source_slot = isB0ToB9Source(*waiter);
-        double target_s = return_to_source_slot
-            ? 0.0
-            : std::max(0.0, commitment.waiter_stop_s -
-                                cfg_.deadlock_retreat_clearance);
+        double target_s = return_to_source_slot ? 0.0   : std::max(0.0, commitment.waiter_stop_s -  kIntrusionRetreatClearance);
         while (!return_to_source_slot && target_s > 1e-9 &&
                !waiterPoseClearsFrozenClosure(commitment, target_s)) {
             target_s = std::max(0.0, target_s - kSearchStep);

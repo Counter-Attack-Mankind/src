@@ -1327,34 +1327,17 @@ void RuleEngine::resolvePairwiseConflicts(std::vector<VehicleAgent>& vehicles,
             //========(死锁部分)========================================
 
             const RecoveryDirective& recovery = deadlock_manager_.directive();
-            const bool pass_direct_match =
-                ordinary && recovery.phase == RecoveryPhase::PASS &&
-                recovery.retreat_vehicle_id == a.id &&
-                recovery.pass_vehicle_id == b.id &&
-                recovery.retreat_path_gen == a.path_gen &&
-                recovery.pass_path_gen == b.path_gen;
-            const bool pass_reverse_match =
-                ordinary && recovery.phase == RecoveryPhase::PASS &&
-                recovery.retreat_vehicle_id == b.id &&
-                recovery.pass_vehicle_id == a.id &&
-                recovery.retreat_path_gen == b.path_gen &&
-                recovery.pass_path_gen == a.path_gen;
-            if (pass_direct_match || pass_reverse_match) {
-                preferred_winner = recovery.pass_vehicle_id;
-            }
 
-            if (ordinary &&
-                (preferred_winner == a.id || preferred_winner == b.id)) {
+            if (ordinary &&(preferred_winner == a.id || preferred_winner == b.id)) 
+            {
                 const bool a_is_priority = preferred_winner == a.id;
                 const VehicleAgent& priority_vehicle = a_is_priority ? a : b;
                 const VehicleAgent& other_vehicle = a_is_priority ? b : a;
-                const auto& priority_prediction =
-                    a_is_priority ? predictions[i] : predictions[j];
-                if (priority_vehicle.ttc_stop_hold_remaining <= 1e-9) {
-                    priority_physical = evaluatePriorityPhysicalTtc(
-                        priority_vehicle, other_vehicle, priority_prediction,
-                        mp_, cfg_);
-                }
+                const auto& priority_prediction = a_is_priority ? predictions[i] : predictions[j];
+
+                if (priority_vehicle.ttc_stop_hold_remaining <= 1e-9) 
+                    priority_physical = evaluatePriorityPhysicalTtc(priority_vehicle, other_vehicle, priority_prediction,mp_, cfg_);
+                
             }
 
             if (dynamic_speed_enabled) {

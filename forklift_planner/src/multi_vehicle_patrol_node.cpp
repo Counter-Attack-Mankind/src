@@ -891,7 +891,7 @@ private:
             static_cast<int>(recovery.phase), recovery.retreat_vehicle_id,
             recovery.pass_vehicle_id, recovery.retreat_path_gen,
             recovery.pass_path_gen, recovery.retreat_target_s,
-            recovery.pass_clear_s, recovery.cooldown_vehicle_id,
+            recovery.retreat_distance, recovery.cooldown_vehicle_id,
             recovery.cooldown_path_gen);
     }
 
