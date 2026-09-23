@@ -39,17 +39,12 @@ struct RecoveryDirective {
     int pass_path_gen = -1;
     double retreat_target_s = 0.0;
     double retreat_distance = 0.0;
-    int cooldown_vehicle_id = -1;
-    int cooldown_path_gen = -1;
-    double cooldown_remaining = 0.0;
     std::string reason;
 
     bool active() const {
         return phase != RecoveryPhase::NONE && phase != RecoveryPhase::CLEAR;
     }
-    bool cooldownActive() const {
-        return cooldown_vehicle_id >= 0 && cooldown_remaining > 1e-9;
-    }
+
     RecoveryMotion motionFor(int vehicle_id) const;
 };
 
@@ -90,16 +85,10 @@ public:
         std::string reason;
     };
 
-    struct CooldownState {
-        int vehicle_id = -1;
-        int path_gen = -1;
-        double remaining = 0.0;
-    };
 
     struct Snapshot {
         CandidateState candidate;
         TransactionState transaction;
-        CooldownState cooldown;
         RecoveryDirective directive;
     };
 
@@ -143,7 +132,6 @@ private:
     const MultiVehicleConfig& config_;
     CandidateState candidate_;
     TransactionState transaction_;
-    CooldownState cooldown_;
     RecoveryDirective directive_;
     std::function<void(const std::string&)> log_sink_;
 };

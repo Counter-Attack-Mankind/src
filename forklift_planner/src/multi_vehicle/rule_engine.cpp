@@ -2285,16 +2285,6 @@ void RuleEngine::applyRecoveryPolicy(
 
     for (VehicleAgent& vehicle : vehicles)
     {
-        if (recovery.cooldownActive() &&
-            vehicle.id == recovery.cooldown_vehicle_id)
-        {
-            vehicle.requested_action =
-                VehicleAction::STOP;
-            vehicle.reason =
-                "deadlock_restart_hold";
-            vehicle.blocker_id = -1;
-            continue;
-        }
 
         if (!recovery.active())
             continue;
@@ -2328,33 +2318,20 @@ void RuleEngine::applyRecoveryPolicy(
     }
 }
 
-RuleEngine::MotionOverride RuleEngine::motionOverrideFor(
-    int vehicle_id) const {
-    if (const A1Coordinator::IntrusionCorrection* correction =
-            a1_coordinator_.intrusionCorrectionFor(vehicle_id)) {
-        const RecoveryDirective& recovery = deadlock_manager_.directive();
-        const bool same_deadlock_pair = recovery.active() &&
-            ((recovery.retreat_vehicle_id == correction->owner_id &&
-              recovery.pass_vehicle_id == correction->waiter_id) ||
-             (recovery.retreat_vehicle_id == correction->waiter_id &&
-              recovery.pass_vehicle_id == correction->owner_id));
-        if (correction->motion ==
-                A1Coordinator::IntrusionCorrectionMotion::HOLD) {
-            if (same_deadlock_pair) {
-                return MotionOverride{recovery.motionFor(vehicle_id),
-                                      recovery.retreat_target_s, false};
-            }
-
-        }
-        return MotionOverride{
-            correction->motion ==
-                    A1Coordinator::IntrusionCorrectionMotion::RETREAT
-                ? RecoveryMotion::RETREAT : RecoveryMotion::HOLD,
-            correction->target_s, true};
-    }
+RuleEngine::MotionOverride RuleEngine::motionOverrideFor(int vehicle_id) const
+{
     const RecoveryDirective& recovery = deadlock_manager_.directive();
-    return MotionOverride{recovery.motionFor(vehicle_id),
-                          recovery.retreat_target_s, false};
+
+    // Deadlock recovery 活跃期间，recovery pair 的纵向特殊运动只由 DeadlockManager 控制。
+    const bool recovery_vehicle =   recovery.active() &&    (vehicle_id == recovery.retreat_vehicle_id ||   vehicle_id == recovery.pass_vehicle_id);
+    if (recovery_vehicle)
+        return MotionOverride{recovery.motionFor(vehicle_id),recovery.retreat_target_s,false};
+    
+    // 非 deadlock recovery 车辆仍正常执行 A1 intrusion correction。
+    if (const A1Coordinator::IntrusionCorrection* correction =  a1_coordinator_.intrusionCorrectionFor(vehicle_id))
+        return MotionOverride{correction->motion == A1Coordinator::IntrusionCorrectionMotion::RETREAT ? RecoveryMotion::RETREAT: RecoveryMotion::HOLD, correction->target_s,true};
+    
+    return MotionOverride{RecoveryMotion::NORMAL,0.0,false};
 }
 
 void RuleEngine::refreshA1IntrusionCorrections(
@@ -2420,17 +2397,8 @@ void RuleEngine::applyRecoveryDirectiveToOutput(
     std::vector<VehicleAgent>& vehicles) {
     applyRecoveryPolicy(vehicles);
     const RecoveryDirective& recovery = deadlock_manager_.directive();
-    if (!recovery.active() && !recovery.cooldownActive()) return;
-    for (VehicleAgent& vehicle : vehicles) {
-        if (recovery.cooldownActive() &&
-            vehicle.id == recovery.cooldown_vehicle_id) {
-            vehicle.action = VehicleAction::STOP;
-            vehicle.requested_action = VehicleAction::STOP;
-            vehicle.current_speed = 0.0;
-            vehicle.reason = "deadlock_restart_hold";
-            vehicle.blocker_id = -1;
-            continue;
-        }
+    if (!recovery.active()) return;
+    for (VehicleAgent& vehicle : vehicles) 
         if (!recovery.active()) continue;
         if (vehicle.id != recovery.retreat_vehicle_id &&
             vehicle.id != recovery.pass_vehicle_id) continue;
@@ -2473,7 +2441,6 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
                         bool reuse_ordinary_coordination,
                         const RollingDynamicDecision*
                             period_ordinary_decision) {
-    observeDeadlock(vehicles, dt, debug_log_source_ == "REAL");
 
     conflicts_.clear();
     last_rolling_dynamic_decision_ = RollingDynamicDecision{};
@@ -2539,20 +2506,17 @@ void RuleEngine::decide(std::vector<VehicleAgent>& vehicles, double dt,
     // 几何冲突(findConflictZones:沿固定路径采样车身OBB,只标真实重叠弧段)作唯一交叉
     // 协调权威。八竿子打不着的两车它根本不报冲突→各自全速。
     // arbitrateResources(vehicles, dt);   // 已停用(资源盒=幻象冲突源)
-    const double pairwise_horizon = prediction_horizon_override >= 0.0
-        ? prediction_horizon_override
-        : cfg_.prediction_horizon;
+    const double pairwise_horizon = prediction_horizon_override >= 0.0 ? prediction_horizon_override : cfg_.prediction_horizon;
+
     refreshDepartureClusterCommitments(vehicles);
-    resolvePairwiseConflicts(vehicles, dt, pairwise_horizon,
-                             reuse_ordinary_coordination);
+    resolvePairwiseConflicts(vehicles, dt, pairwise_horizon,reuse_ordinary_coordination);
     enforceFutureA1Admission(vehicles, dt);
     enforceDepartureClusterCommitments(vehicles, dt);
     resolveTargetSlotOccupancy(vehicles);  // slot-mouth queueing (spec 6/7)
     applyRecoveryPolicy(vehicles);
-    // Safety validation runs after all coordination/special-resource outputs
-    // and may only reject a physically illegal next control step.
     enforceForwardClearance(vehicles, dt);
     applyRequestedActions(vehicles, dt);
+    observeDeadlock(vehicles, dt, debug_log_source_ == "REAL");
 
     for (VehicleAgent& v : vehicles) {
         if (v.mode != VehicleMode::ACTIVE) continue;  // DWELL/NEED_TASK do not accumulate

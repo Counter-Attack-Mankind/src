@@ -55,9 +55,6 @@ const char* recoveryPhaseName(RecoveryPhase phase) {
 
 //寻找当前死锁恢复状态下，某一辆车到底应该执行RETREAT、HOLD 还是 NORMAL
 RecoveryMotion RecoveryDirective::motionFor(int vehicle_id) const {
-    if (cooldownActive() && vehicle_id == cooldown_vehicle_id) {
-        return RecoveryMotion::HOLD;
-    }
 
     if (phase == RecoveryPhase::RETREAT)
     {
@@ -153,9 +150,6 @@ void DeadlockManager::refreshDirective() {
 
    
     directive_.retreat_distance = transaction_.retreat_distance;
-    directive_.cooldown_vehicle_id = cooldown_.vehicle_id;
-    directive_.cooldown_path_gen = cooldown_.path_gen;
-    directive_.cooldown_remaining = cooldown_.remaining;
     directive_.reason = transaction_.reason;
 }
 
@@ -196,10 +190,6 @@ void DeadlockManager::clearSuccessfulRecovery(
             << " reason=" << reason;
     emit("CLEAR", details.str(), emit_logs);
 
-    cooldown_.vehicle_id = retreat_id;
-    cooldown_.path_gen = retreat != nullptr
-        ? retreat->path_gen : transaction_.retreat_path_gen;
-    cooldown_.remaining = config_.rolling_refresh_period;
     candidate_ = {};
     transaction_ = {};
     refreshDirective();
@@ -210,24 +200,11 @@ void DeadlockManager::update(const std::vector<VehicleAgent>& vehicles, const st
     if (!config_.deadlock_enabled) {
         candidate_ = {};
         transaction_ = {};
-        cooldown_ = {};
         directive_ = {};
         return;
     }
 
 
-    if (cooldown_.remaining > 1e-9) {
-        const VehicleAgent* cooling = vehicleById(vehicles,
-                                                   cooldown_.vehicle_id);
-        if (cooling == nullptr || cooling->mode != VehicleMode::ACTIVE ||
-            cooling->path_gen != cooldown_.path_gen) {
-            cooldown_ = {};
-        } else {
-            cooldown_.remaining = std::max(0.0, cooldown_.remaining - dt);
-            if (cooldown_.remaining <= 1e-9) cooldown_ = {};
-        }
-        refreshDirective();
-    }
 
     if (transaction_.phase != RecoveryPhase::NONE)
     {
@@ -241,6 +218,7 @@ void DeadlockManager::update(const std::vector<VehicleAgent>& vehicles, const st
         }
         if (transaction_.phase == RecoveryPhase::PASS)
         {
+            
             const double tolerance =std::max(0.005, config_.path_validation_step);
             //判断车辆是否失活的标志位
             const bool retreat_active = retreat->action != VehicleAction::STOP;
@@ -365,14 +343,6 @@ void DeadlockManager::update(const std::vector<VehicleAgent>& vehicles, const st
         return;
     }
 
-    // The manager owns one short-lived recovery at a time. During restart
-    // hold, keep all other vehicles under ordinary coordination and wait
-    // until this single-vehicle cooldown has expired before confirming a new
-    // deadlock transaction.
-    if (cooldown_.remaining > 1e-9) {
-        candidate_ = {};
-        return;
-    }
 
     const VehicleAgent* candidate_a = nullptr;
     const VehicleAgent* candidate_b = nullptr;
@@ -381,15 +351,13 @@ void DeadlockManager::update(const std::vector<VehicleAgent>& vehicles, const st
             a.action != VehicleAction::STOP || a.blocker_id < 0) {
             continue;
         }
-        if (cooldown_.remaining > 1e-9 &&
-            a.id == cooldown_.vehicle_id) continue;
+
         const VehicleAgent* b = vehicleById(vehicles, a.blocker_id);
         if (b == nullptr || b->mode != VehicleMode::ACTIVE ||
             b->action != VehicleAction::STOP || b->blocker_id != a.id) {
             continue;
         }
-        if (cooldown_.remaining > 1e-9 &&
-            b->id == cooldown_.vehicle_id) continue;
+
         if (a.id < b->id) {
             candidate_a = &a;
             candidate_b = b;
@@ -522,13 +490,12 @@ void DeadlockManager::update(const std::vector<VehicleAgent>& vehicles, const st
 }
 
 DeadlockManager::Snapshot DeadlockManager::snapshot() const {
-    return Snapshot{candidate_, transaction_, cooldown_, directive_};
+    return Snapshot{candidate_, transaction_, directive_};
 }
 
 void DeadlockManager::restore(const Snapshot& snapshot) {
     candidate_ = snapshot.candidate;
     transaction_ = snapshot.transaction;
-    cooldown_ = snapshot.cooldown;
     directive_ = snapshot.directive;
 }
 
