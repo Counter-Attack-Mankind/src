@@ -364,10 +364,7 @@ void MarkerPublisher::addLabelMarker(visualization_msgs::MarkerArray& arr,
     m.scale.z = 0.070;
     m.color = v.color;
     std::string displayed_action = actionName(v.action);
-    if (recovery.cooldownActive() &&
-        recovery.cooldown_vehicle_id == v.id) {
-        displayed_action = "DEADLOCK_COOLDOWN";
-    } else if (recovery.active()) {
+    if (recovery.active()) {
         const RecoveryMotion motion = recovery.motionFor(v.id);
         if (motion == RecoveryMotion::RETREAT) {
             displayed_action = "RETREAT";
@@ -409,10 +406,7 @@ void MarkerPublisher::addLabelMarker(visualization_msgs::MarkerArray& arr,
     } else {
         text << "clear";
     }
-    if (recovery.cooldownActive() &&
-        recovery.cooldown_vehicle_id == v.id) {
-        text << "\nRESTART_HOLD=" << recovery.cooldown_remaining << "s";
-    }
+
     m.text = text.str();
     arr.markers.push_back(m);
 }
