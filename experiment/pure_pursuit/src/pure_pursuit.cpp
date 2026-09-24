@@ -2,6 +2,7 @@
 #include <ros/package.h>
 #include <tf/tf.h>
 #include <std_msgs/Empty.h>
+#include <std_msgs/Bool.h>
 #include <std_msgs/Int32.h>
 #include <sandbox_msgs/Trajectory.h>
 #include <sandbox_msgs/AprilObject.h>
@@ -310,6 +311,8 @@ public:
     object_subscriber_ = node_handle_.subscribe<AprilObject>("/object", 5, &PurePursuit::object_callback, this);
     command_publisher_ = node_handle_.advertise<ChassisCommand>("/chassis", 1, true);
     reached_publisher_ = node_handle_.advertise<std_msgs::Int32>("/reached", 1, false);
+    estop_subscriber_ = node_handle_.subscribe<std_msgs::Bool>(
+        "/estop", 1, &PurePursuit::estop_callback, this);
 
     timer_ = node_handle_.createTimer(ros::Duration(0.1), &PurePursuit::control_callback, this);
   }
@@ -318,6 +321,7 @@ private:
   ros::NodeHandle node_handle_;
   ros::Publisher command_publisher_, reached_publisher_;
   ros::Subscriber traj_subscriber_, object_subscriber_, truth_subscriber_, execute_subscriber_;
+  ros::Subscriber estop_subscriber_;
   ros::Timer timer_;
   double start_time_ = 0.0;
   PurePursuitVisualization visualization_;
@@ -359,6 +363,53 @@ private:
   std::ofstream open_loop_log_, closed_loop_log_;
 
   bool approached_ = false;
+  bool estop_ = false;
+  bool waiting_for_post_estop_trajectory_ = false;
+
+  void reset_control_history() {
+    longitude_output_ = 0.0;
+    longitude_perror_ = 0.0;
+    final_stable_cycles_ = 0;
+    car_index_ = 0;
+    lookahead_index_ = 0;
+    current_range_ = 0;
+    using_virtual_lookahead_ = false;
+    approached_ = false;
+  }
+
+  void publish_zero_command() {
+    ChassisCommand command;
+    command.target = tracking_object_;
+    command.throttle = 0.0;
+    command.steering = 0.0;
+    command_publisher_.publish(command);
+  }
+
+  void estop_callback(const std_msgs::BoolConstPtr &msg) {
+    const bool was_estopped = estop_;
+    estop_ = msg->data;
+
+    if(estop_) {
+      waiting_for_post_estop_trajectory_ = true;
+      reset_control_history();
+      publish_zero_command();
+      ROS_ERROR("[PP] target=%d global estop asserted: chassis throttle=0",
+                tracking_object_);
+      return;
+    }
+
+    if(was_estopped) {
+      // Drop the pre-estop reference and PI state. Control stays at zero
+      // until the planner's measured-state refresh reaches traj_callback().
+      trajectory_.points.clear();
+      ranges_.clear();
+      reset_control_history();
+      waiting_for_post_estop_trajectory_ = true;
+      publish_zero_command();
+      ROS_WARN("[PP] target=%d global estop released: waiting for fresh trajectory",
+               tracking_object_);
+    }
+  }
 
   void object_callback(const AprilObjectConstPtr &msg) {
     if(msg->id == tracking_object_ && msg->type == AprilObject::VEHICLE) {
@@ -395,6 +446,9 @@ private:
   void traj_callback(const TrajectoryConstPtr &msg) {
     if(msg->target != tracking_object_) return;
     if(msg->points.empty()) return;
+    if(estop_) return;
+
+    waiting_for_post_estop_trajectory_ = false;
 
     std::cout << tracking_object_ << " - Trajectory received" << std::endl;
 
@@ -823,6 +877,11 @@ private:
   }
 
   void control_callback(const ros::TimerEvent &evt) {
+    if(estop_ || waiting_for_post_estop_trajectory_) {
+      publish_zero_command();
+      return;
+    }
+
     if(!trajectory_.points.empty() && !approached_) {
       switch_range();
       // 本周期刚满足末端位姿判定时立即停车，避免再发送一帧非零控制命令。

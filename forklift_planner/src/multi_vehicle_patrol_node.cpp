@@ -1296,6 +1296,10 @@ private:
     // hold 车(整段不动)发单点轨迹(size=1)作静止标志 → 控制器 idle 不控制。
     // 滚动时域发布：重新推演并覆盖每辆车的短时轨迹。
     void publishHorizon() {
+        // The estop callback has already published current-pose hold
+        // trajectories. Never overwrite them with a moving real-mode horizon.
+        if (cfg_.real_mode && rb_estop_) return;
+
         std::vector<sandbox_msgs::Trajectory> trajs;
         std::vector<bool> hold;
         std::vector<size_t> path_gen_cut_indices;
@@ -2466,7 +2470,7 @@ private:
             // entered DWELL phase is not decremented again in the same tick.
             updateDwellAndTasks(dt);
             realAdvance(dt);
-            if (realPlanNeedsRefresh()) {
+            if (!rb_estop_ && realPlanNeedsRefresh()) {
                 publishHorizon();
                 force_horizon_refresh_ = false;
             }
@@ -2479,7 +2483,8 @@ private:
                 marker_pub_->setRollingDecision(
                     rule_engine_->lastRollingDynamicDecision());
             }
-            if (captureRecoveryIdentity() != real_plan_recovery_) {
+            if (!rb_estop_ &&
+                captureRecoveryIdentity() != real_plan_recovery_) {
                 publishHorizon();
                 force_horizon_refresh_ = false;
             }
@@ -2803,7 +2808,25 @@ private:
 
     // 空格:急停切换。true=全车瞬时停;再按一下=false 恢复协调速度。
     void estopCallback(const std_msgs::Bool::ConstPtr& msg) {
+        const bool was_estopped = rb_estop_;
         rb_estop_ = msg->data;
+        if (rb_estop_) {
+            // Close the coordinated-speed path immediately and publish the
+            // existing current-pose hold trajectory for the PP path.
+            for (size_t i = 0; i < speed_pubs_.size(); ++i) {
+                if (!targetEnabled(static_cast<int>(i))) continue;
+                rb_cmd_speed_[i] = 0.0;
+                std_msgs::Float64 zero;
+                zero.data = 0.0;
+                speed_pubs_[i].publish(zero);
+            }
+            publishHoldAll();
+        } else if (was_estopped) {
+            // Never resume from the prediction frozen before estop. The next
+            // measured-state tick rebuilds and publishes a fresh horizon.
+            real_plan_valid_ = false;
+            force_horizon_refresh_ = true;
+        }
         ROS_ERROR("[real] *** 急停 %s ***", rb_estop_ ? "已触发(全车停)" : "已解除(恢复)");
     }
 

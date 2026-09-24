@@ -74,6 +74,7 @@ target_link_libraries(multi_vehicle_patrol_node
 )
 
 catkin_install_python(PROGRAMS
+  scripts/realbridge_keyboard_control.py
   scripts/rolling_rviz_bag_recorder.py
   scripts/replay_rviz_snapshot.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

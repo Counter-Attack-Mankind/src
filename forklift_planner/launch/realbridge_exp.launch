@@ -2,7 +2,7 @@
 <!-- ============================================================
      实车实验:把仿真多车协调搬上真车(realbridge)
        定位(vrpn+nokov) → realbridge(/object→forklift协调→/traj_i+/coord_speed_i)
-         → 8×pure_pursuit(纵向用/coord_speed, 横向跟/traj) → chassis → 实车
+         → pure_pursuit(跟踪/traj并直接响应/estop) → chassis → 实车
      配置一律用 forklift 仿真那套(map_param + planner_param),与仿真完全一致。
      用法: roslaunch forklift_planner realbridge_exp.launch server:=10.1.1.198
      或一键: ./exp_scripts/run_realbridge.sh
@@ -18,7 +18,7 @@
   <arg name="emerg_margin" default="0.08"/>    <!-- m: 实车硬护栏,两车真实足迹逼近<此值→双方急停(0=关) -->
   <arg name="veh_count"    default="8"/>       <!-- 实车车数 1..8:只跑这么多车+这么多控制器(排查时可只跑1辆) -->
   <arg name="target_only"  default="-1"/>      <!-- -1=全车; 0..7=只控制指定ID单车,路径仍按该ID的start/target槽位生成 -->
-  <arg name="long_pid"     default="true"/>    <!-- PP纵向: true=位置PID | false=直接coord_speed(退路) -->
+  <arg name="long_pid"     default="true"/>    <!-- 兼容旧启动命令；当前 PP 不读取该参数 -->
   <arg name="long_kp"      default="1.8"/>     <!-- PP纵向位置反馈增益 -->
   <arg name="look_scale"   default="1.0"/>    <!-- PP前瞻额外缩放(AD公式已自适应,保持1.0) -->
   <arg name="a_lat"        default="0.10"/>    <!-- 曲率限速侧向加速度上限[m/s²](规划侧,sim/实车共用):越小弯越慢跟越紧 -->
@@ -64,7 +64,8 @@
   </node>
 
   <!-- ⑦ 车控制(target 0..veh_count-1):每个仅当 veh_count>target 才起 → 想跑几辆起几辆。
-       按 controller 选 pp/lqr。横向跟 /traj_i,纵向用 /coord_speed_i。 -->
+       按 controller 选 pp/lqr。PP 跟踪 /traj_i 并直接响应 /estop；
+       LQR 的纵向速度使用 /coord_speed_i。 -->
   <include if="$(eval int(arg('target_only')) == 0 or (int(arg('target_only')) &lt; 0 and int(arg('veh_count')) > 0))" file="$(find forklift_planner)/launch/one_controller.launch">
     <arg name="target" value="0"/> <arg name="controller" value="$(arg controller)"/><arg name="lqr_q" value="$(arg lqr_q)"/><arg name="long_pid" value="$(arg long_pid)"/><arg name="long_kp" value="$(arg long_kp)"/><arg name="look_scale" value="$(arg look_scale)"/></include>
   <include if="$(eval int(arg('target_only')) == 1 or (int(arg('target_only')) &lt; 0 and int(arg('veh_count')) > 1))" file="$(find forklift_planner)/launch/one_controller.launch">

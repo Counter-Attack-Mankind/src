@@ -63,6 +63,7 @@
   <exec_depend>roslib</exec_depend>
   <depend>rospy</depend>
   <depend>sandbox_msgs</depend>
+  <depend>std_msgs</depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->

@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   roslib
   sandbox_msgs
+  std_msgs
 )
 
 ###################################
