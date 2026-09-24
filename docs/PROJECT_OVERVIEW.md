@@ -535,6 +535,10 @@ VRPN / Nokov 位姿
   -> 串口底盘
 ```
 
+实车 launch 以逗号分隔的 `vehicle_ids` 作为参与车辆的唯一选择参数。
+规划器只创建这些真实 ID 的 `VehicleAgent`，控制器启动器也从同一 ROS 参数
+启动对应的 `controller_<id>`；`vehicle_count` 仅保留给连续编号的仿真模式。
+
 该流程的源码和 launch 存在，但当前虚拟机不具备完整实车依赖，因此不能据此确认实车全链已在当前基线完成运行验收。
 
 状态：**Confirmed / Experimental**；运行验收为 **Unknown——未知，需要确认**。

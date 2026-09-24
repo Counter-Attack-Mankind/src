@@ -7,10 +7,6 @@
   <arg name="controller" default="pp"/>   <!-- pp | lqr -->
   <arg name="debug_log_dir" default="$(find forklift_planner)/../log"/>
   <arg name="lqr_q" default="1.0"/>        <!-- LQR 横向权重 Q(0,0): 1.0原版 | 8调后(二选一实测) -->
-  <!-- 兼容旧启动命令；当前 PP 不读取 coord_speed_pid。 -->
-  <arg name="long_pid" default="true"/>
-  <arg name="long_kp"  default="1.8"/>     <!-- PP纵向位置反馈增益 -->
-  <arg name="look_scale" default="1.0"/>   <!-- PP前瞻额外缩放(AD公式已自适应,一般保持1.0) -->
   <arg name="_lqr" value="$(eval arg('controller') == 'lqr')"/>
 
   <!-- Pure Pursuit(默认) -->
@@ -19,7 +15,6 @@
     <rosparam command="load" file="$(find pure_pursuit)/config/pure_pursuit.yaml"/>
     <param name="target" value="$(arg target)"/>
     <param name="debug_log_dir" value="$(arg debug_log_dir)"/>
-    <param name="coord_speed_pid" value="$(arg long_pid)"/>
     <!-- longitude_kp / longitude_ki / lookahead_scale are per-vehicle gains
          loaded from vehicle_controller_gains.yaml as /controller_<target>/... -->
   </node>

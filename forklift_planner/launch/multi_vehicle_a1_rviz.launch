@@ -24,7 +24,6 @@
         type="multi_vehicle_patrol_node"
         name="multi_vehicle_patrol_node"
         output="screen">
-    <param name="target_only" value="-1"/>
     <!-- false means: after reaching one target and dwelling, assign the next reachable target. -->
     <param name="one_shot" value="$(arg one_shot)"/>
     <param name="coord_log_file" value="$(arg coord_log_file)"/>

@@ -3,6 +3,9 @@
 #include <XmlRpcValue.h>
 
 #include <algorithm>
+#include <cctype>
+#include <sstream>
+#include <stdexcept>
 
 namespace forklift_planner {
 namespace multi_vehicle {
@@ -24,6 +27,52 @@ std::vector<int> readIntVector(ros::NodeHandle& nh, const std::string& name,
         }
     }
     return out.empty() ? fallback : out;
+}
+
+std::vector<int> readVehicleIds(ros::NodeHandle& nh,
+                                const std::string& name) {
+    std::string text;
+    if (!nh.getParam(name, text) || text.empty()) {
+        ROS_FATAL_STREAM("[multi_patrol] real_mode requires non-empty "
+                         << name << " (for example: 4,5,7)");
+        throw std::runtime_error("missing real-mode vehicle_ids");
+    }
+    if (text.front() == ',' || text.back() == ',') {
+        ROS_FATAL_STREAM("[multi_patrol] invalid vehicle_ids: '" << text
+                         << "'");
+        throw std::runtime_error("invalid real-mode vehicle_ids");
+    }
+
+    std::vector<int> ids;
+    std::istringstream input(text);
+    std::string token;
+    while (std::getline(input, token, ',')) {
+        token.erase(token.begin(), std::find_if(token.begin(), token.end(),
+            [](unsigned char ch) { return !std::isspace(ch); }));
+        token.erase(std::find_if(token.rbegin(), token.rend(),
+            [](unsigned char ch) { return !std::isspace(ch); }).base(),
+            token.end());
+        size_t parsed = 0;
+        int id = -1;
+        try {
+            id = std::stoi(token, &parsed);
+        } catch (const std::exception&) {
+            ROS_FATAL_STREAM("[multi_patrol] invalid vehicle_ids: '" << text
+                             << "'");
+            throw std::runtime_error("invalid real-mode vehicle_ids");
+        }
+        if (parsed != token.size() || id < 0 || id > 7 ||
+            std::find(ids.begin(), ids.end(), id) != ids.end()) {
+            ROS_FATAL_STREAM("[multi_patrol] vehicle_ids must contain unique "
+                             "IDs in [0,7]: '" << text << "'");
+            throw std::runtime_error("invalid real-mode vehicle_ids");
+        }
+        ids.push_back(id);
+    }
+    if (ids.empty()) {
+        throw std::runtime_error("empty real-mode vehicle_ids");
+    }
+    return ids;
 }
 
 }  // namespace
@@ -166,7 +215,12 @@ MultiVehicleConfig MultiVehicleConfig::fromROSParam(ros::NodeHandle& nh) {
     c.target_slots = readIntVector(nh, ns + "target_slots", {});
     nh.param(ns + "randomize_start", c.randomize_start, c.randomize_start);
 
-    c.vehicle_count = std::max(1, std::min(c.vehicle_count, 8));
+    if (c.real_mode) {
+        c.vehicle_ids = readVehicleIds(nh, ns + "vehicle_ids");
+        c.vehicle_count = static_cast<int>(c.vehicle_ids.size());
+    } else {
+        c.vehicle_count = std::max(1, std::min(c.vehicle_count, 8));
+    }
     c.prediction_step = std::max(0.02, c.prediction_step);
     c.prediction_horizon = std::max(c.prediction_step, c.prediction_horizon);
     c.dynamic_speed_near_threshold =

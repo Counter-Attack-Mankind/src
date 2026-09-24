@@ -93,6 +93,9 @@ struct MultiVehicleConfig {
     // 实车模式:位置来自动捕 /object(替代 advanceVehicles 积分),输出 /traj_i + /coord_speed_i
     // 给 pure_pursuit。协调(updateDwellAndTasks/decide/到库DWELL/预测错峰)与 sim 逐字节一致。
     bool real_mode = false;
+    // Real mode only: physical vehicle IDs selected for this experiment.
+    // vehicle_count is derived from this list; simulation keeps V0..V(N-1).
+    std::vector<int> vehicle_ids;
     bool one_shot_traj = false;          // true=一次性规划，false=滚动时域
     // 实车安全/到点阈值(仅 real_mode 用,现场可调,不影响 sim):
     double real_pose_timeout = 0.5;   // s,某车动捕失联>此值→强制其 coord_speed=0(防盲走)

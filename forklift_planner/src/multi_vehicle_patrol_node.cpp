@@ -64,7 +64,6 @@ public:
         pp_ = PlannerParam::fromROSParam(param_nh);
         cfg_ = forklift_planner::multi_vehicle::MultiVehicleConfig::fromROSParam(
             param_nh);
-        nh_.param("target_only", target_only_, -1);
         nh_.param("one_shot", one_shot_, one_shot_);
         const std::string planner_package =
             ros::package::getPath("forklift_planner");
@@ -106,13 +105,6 @@ public:
                      "task assignment at A1; forcing rolling-horizon mode");
             cfg_.one_shot_traj = false;
             rb_one_shot_traj_ = false;
-        }
-        if (target_only_ >= 0) {
-            target_only_ = std::max(0, std::min(7, target_only_));
-            cfg_.vehicle_count = std::max(cfg_.vehicle_count, target_only_ + 1);
-            ROS_WARN("[real] single-target mode: only V%d will receive a task/controller; "
-                     "its path still uses start_slots[%d] -> target_slots[%d].",
-                     target_only_, target_only_, target_only_);
         }
         initCoordLog();
 
@@ -331,7 +323,6 @@ private:
         }
         real_projection_logs_.resize(agents_.size());
         for (size_t i = 0; i < agents_.size(); ++i) {
-            if (!targetEnabled(static_cast<int>(i))) continue;
             const std::string path =
                 debug_log_dir_ + "/real_projection_V" +
                 std::to_string(agents_[i].id) + ".csv";
@@ -472,10 +463,6 @@ private:
         return text;
     }
 
-    bool targetEnabled(int id) const {
-        return target_only_ < 0 || id == target_only_;
-    }
-
     const char* modeName(VehicleMode mode) const {
         switch (mode) {
             case VehicleMode::NEED_TASK: return "NEED_TASK";
@@ -582,15 +569,20 @@ private:
         std::vector<bool> used(static_cast<size_t>(slot_count), false);
         for (int i = 0; i < cfg_.vehicle_count; ++i) {
             VehicleAgent v;
-            v.id = i;
+            const int vehicle_id = cfg_.real_mode
+                ? cfg_.vehicle_ids.at(static_cast<size_t>(i)) : i;
+            v.id = vehicle_id;
             int start_slot;
             if (cfg_.randomize_start && !random_starts.empty()) {
                 start_slot = random_starts[static_cast<size_t>(i) %
                                            random_starts.size()];
             } else {
+                const size_t slot_config_index = cfg_.real_mode
+                    ? static_cast<size_t>(vehicle_id)
+                    : static_cast<size_t>(i);
                 start_slot = cfg_.start_slots.empty()
-                    ? i
-                    : cfg_.start_slots[static_cast<size_t>(i) %
+                    ? vehicle_id
+                    : cfg_.start_slots[slot_config_index %
                                        cfg_.start_slots.size()];
             }
             start_slot = ((start_slot % slot_count) + slot_count) % slot_count;
@@ -608,7 +600,7 @@ private:
                     if (!startOK(start_slot)) {
                         ROS_WARN("[multi_patrol] start slot %d 不可用"
                                  "(陷阱/无前进目标); V%d 改从 slot %d 起步",
-                                 start_slot, i, repl);
+                                 start_slot, vehicle_id, repl);
                     }
                     start_slot = repl;
                 }
@@ -627,22 +619,19 @@ private:
                 v.mission_phase = MissionPhase::DIRECT_TO_B;
                 v.leg_target = LegTargetKind::B_SLOT;
             }
-            v.color = colors[static_cast<size_t>(i) % colors.size()];
+            v.color = colors[static_cast<size_t>(vehicle_id) % colors.size()];
             v.mode = VehicleMode::NEED_TASK;
             agents_.push_back(v);
         }
 
-        int enabled_count = 0;
+        const int enabled_count = static_cast<int>(agents_.size());
         int assigned_count = 0;
         for (VehicleAgent& v : agents_) {
-            if (targetEnabled(v.id)) {
-                ++enabled_count;
-                const bool assigned = cfg_.use_a1_cycle
-                    ? launchPickupLegWithA1Admission(v)
-                    : allocator_->assignNextTask(v, agents_);
-                if (assigned) {
-                    ++assigned_count;
-                }
+            const bool assigned = cfg_.use_a1_cycle
+                ? launchPickupLegWithA1Admission(v)
+                : allocator_->assignNextTask(v, agents_);
+            if (assigned) {
+                ++assigned_count;
             }
         }
         if (cfg_.use_a1_cycle) {
@@ -735,7 +724,10 @@ private:
             plan_frames != nullptr ? sim_plan_id_ + 1 : ++rollout_log_id_;
         setCoordLogContext("ROLLOUT", rollout_plan_id, 0, 0);
         //初始化轨迹，所有离散点中的目标点按序排列，并且坐标系设为世界坐标系
-        for (size_t i = 0; i < n; ++i) { out[i].target = (int)i; out[i].header.frame_id = "world"; }
+        for (size_t i = 0; i < n; ++i) {
+            out[i].target = agents_[i].id;
+            out[i].header.frame_id = "world";
+        }
 
         //===========（状态快照与回滚）============
         const std::vector<VehicleAgent> sa = agents_;    //（将Agents通过拷贝构造函数给sa，sa设为const，后续仅改变备份的agents，对显示不产生影响）  
@@ -935,8 +927,7 @@ private:
         forklift_planner::multi_vehicle::RuleEngine::A1ArrivalKinematics
             a1_kinematics;
         a1_kinematics.dt = 1.0 / pp_.update_rate;
-        a1_kinematics.enabled =
-            [this](int vehicle_id) { return targetEnabled(vehicle_id); };
+        a1_kinematics.enabled = [](int) { return true; };
         a1_kinematics.desired_speed = [this](const VehicleAgent& vehicle) {
             return std::min(
                 rule_engine_->speedForAction(VehicleAction::NOMINAL),
@@ -1279,8 +1270,7 @@ private:
         if (!cfg_.use_a1_cycle || sim_mode_) return;
 
         for (VehicleAgent& v : agents_) {
-            if (!targetEnabled(v.id) ||
-                v.mode != VehicleMode::ACTIVE ||
+            if (v.mode != VehicleMode::ACTIVE ||
                 v.mission_phase != MissionPhase::TO_A1 ||
                 v.leg_target != LegTargetKind::A1 ||
                 v.track.empty() ||
@@ -1334,7 +1324,7 @@ private:
             del.header.frame_id = pp_.frame_id;
             del.header.stamp = now;
             del.ns = "horizon_traj";
-            del.id = static_cast<int>(i);
+            del.id = agents_[i].id;
             del.action = visualization_msgs::Marker::DELETE;
             arr.markers.push_back(del);
 
@@ -1345,7 +1335,7 @@ private:
                 !v.pending_dropoff_valid) {
                 if (i < traj_pubs_.size()) {
                     sandbox_msgs::Trajectory hold;
-                    hold.target = static_cast<int>(i);
+                    hold.target = v.id;
                     hold.header.frame_id = "world";
                     hold.header.stamp = now;
 
@@ -1382,7 +1372,7 @@ private:
             m.header.frame_id = pp_.frame_id;
             m.header.stamp = now;
             m.ns = "horizon_traj";
-            m.id = static_cast<int>(i);
+            m.id = v.id;
             m.type = visualization_msgs::Marker::LINE_STRIP;
             m.action = visualization_msgs::Marker::ADD;
             m.pose.orientation.w = 1.0;
@@ -1418,11 +1408,10 @@ private:
         visualization_msgs::MarkerArray arr;
         bool all_done = true;
         for (size_t i = 0; i < trajs.size(); ++i) {
-            if (!targetEnabled(static_cast<int>(i))) continue;
             if (agents_[i].track.empty()) continue;      // 无路径的车不计入(不卡总进度)
             if (one_shot_done_[i]) continue;             // 已发过的车不重发(latched 已在控制器手上)
             if (cfg_.real_mode && !real_pose_ok_[i]) {                     // 动捕未就位 → 这辆暂不发,标记未完成下拍补
-                ROS_WARN_THROTTLE(1.0, "[real][one_shot] V%zu 动捕未就位 → 暂不发轨迹(就位后补发)", i);
+                ROS_WARN_THROTTLE(1.0, "[real][one_shot] V%d 动捕未就位 → 暂不发轨迹(就位后补发)", agents_[i].id);
                 all_done = false;
                 continue;
             }
@@ -1435,7 +1424,7 @@ private:
             if (trajs[i].points.size() >= 2) {
                 visualization_msgs::Marker m;
                 m.header.frame_id = pp_.frame_id; m.header.stamp = now;
-                m.ns = "horizon_traj"; m.id = (int)i;
+                m.ns = "horizon_traj"; m.id = agents_[i].id;
                 m.type = visualization_msgs::Marker::LINE_STRIP;
                 m.action = visualization_msgs::Marker::ADD;
                 m.pose.orientation.w = 1.0; m.scale.x = 0.02;
@@ -1457,10 +1446,11 @@ private:
         const ros::Time now = ros::Time::now();
         int sent = 0;
         for (size_t i = 0; i < agents_.size(); ++i) {
-            if (!targetEnabled(static_cast<int>(i))) continue;
             if (cfg_.real_mode && !real_pose_ok_[i]) continue;          // 没真实位姿就别发垃圾点
             sandbox_msgs::Trajectory t;
-            t.target = (int)i; t.header.frame_id = "world"; t.header.stamp = now;
+            t.target = agents_[i].id;
+            t.header.frame_id = "world";
+            t.header.stamp = now;
             sandbox_msgs::TrajectoryPoint p;
             p.x = real_x_[i]; p.y = real_y_[i]; p.yaw = real_yaw_[i];
             p.velocity = 0.0; p.time = 0.0;
@@ -1502,8 +1492,9 @@ private:
         for (const auto& p : t.points) if (p.velocity < -1e-3) { has_rev = true; break; }
         const double len = agents_[i].track.empty() ? 0.0 : agents_[i].track.length();
         const bool reached = std::fabs(t.points.back().velocity) < 1e-3;
-        ROS_WARN("[real][one_shot] V%zu 发整条轨迹 → /traj_%zu: 点数=%zu 时长=%.1fs 全长=%.2fm 倒车段=%s%s",
-                 i, i, t.points.size(), dur, len, has_rev ? "有" : "无",
+        ROS_WARN("[real][one_shot] V%d 发整条轨迹 → /traj_%d: 点数=%zu 时长=%.1fs 全长=%.2fm 倒车段=%s%s",
+                 agents_[i].id, agents_[i].id, t.points.size(), dur, len,
+                 has_rev ? "有" : "无",
                  reached ? "" : "  ⚠ 末点仍在动:full_horizon 太短,加大 ~full_horizon");
     }
 
@@ -1685,14 +1676,6 @@ private:
 
     void updateDwellAndTasks(double dt) {
         for (VehicleAgent& v : agents_) {
-
-            //*************** 1. 若该车未启用，则车状态一直置为STOP *******
-            if (!targetEnabled(v.id)) {
-                v.action = VehicleAction::STOP;
-                v.requested_action = VehicleAction::STOP;
-                v.current_speed = 0.0;
-                continue;
-            }
 
             //使用B->A1->B模式
             if (cfg_.use_a1_cycle) {
@@ -2256,14 +2239,14 @@ private:
 
             const RoughWp pv = v.track.poseAtS(v.path_s);
             const int wt = static_cast<int>(v.track.typeAtS(v.path_s));
-            if (v.blocker_id < 0 ||
-                v.blocker_id >= static_cast<int>(agents_.size())) {
+            const VehicleAgent* blocker = agentById_c(v.blocker_id);
+            if (blocker == nullptr) {
                 ROS_DEBUG("[DIAG stuck] V%d wait=%.1f reason=%s wp=%d "
                          "pose=(%.3f,%.3f) blocker=none",
                          v.id, v.wait_time, v.reason.c_str(), wt, pv.x, pv.y);
                 continue;
             }
-            const VehicleAgent& b = agents_[v.blocker_id];
+            const VehicleAgent& b = *blocker;
             const RoughWp pb = b.track.poseAtS(b.path_s);
             const double hv = motionHeading(v);
             const double hb = motionHeading(b);
@@ -2571,7 +2554,7 @@ private:
             if (path.size() < 2) continue;
             visualization_msgs::Marker m;
             m.header.frame_id = pp_.frame_id; m.header.stamp = ros::Time::now();
-            m.ns = "sim_track"; m.id = static_cast<int>(i);
+            m.ns = "sim_track"; m.id = agents_[i].id;
             m.type = visualization_msgs::Marker::LINE_STRIP;
             m.action = visualization_msgs::Marker::ADD;
             m.pose.orientation.w = 1.0; m.scale.x = 0.02;
@@ -2589,13 +2572,12 @@ private:
         visualization_msgs::MarkerArray arr;
         const ros::Time now = ros::Time::now();
         for (size_t i = 0; i < real_trails_.size(); ++i) {
-            if (!targetEnabled(static_cast<int>(i))) continue;
             if (real_trails_[i].size() < 2) continue;
             visualization_msgs::Marker m;
             m.header.frame_id = pp_.frame_id;
             m.header.stamp = now;
             m.ns = "real_trail";
-            m.id = static_cast<int>(i);
+            m.id = agents_[i].id;
             m.type = visualization_msgs::Marker::LINE_STRIP;
             m.action = visualization_msgs::Marker::ADD;
             m.pose.orientation.w = 1.0;
@@ -2614,7 +2596,7 @@ private:
 
     // ───────── 实车模式:I/O 建立 + 摆位打印 ─────────
     void setupRealIO() {
-        const int n = cfg_.vehicle_count;
+        const int n = static_cast<int>(agents_.size());
         traj_pubs_.resize(n);
         speed_pubs_.resize(n);
         state_pubs_.resize(n);
@@ -2637,18 +2619,21 @@ private:
         rb_logged_gen_.assign(n, -1);
         real_trails_.assign(n, {});
         for (int i = 0; i < n; ++i) {
+            const int vehicle_id = agents_[static_cast<size_t>(i)].id;
             ros::AdvertiseOptions traj_options;
             traj_options.init<sandbox_msgs::Trajectory>(
-                "/traj_" + std::to_string(i), 1);
+                "/traj_" + std::to_string(vehicle_id), 1);
             // ROS1 normally overwrites Header.seq with its publication counter.
             // This topic deliberately owns seq as the stable mission path_gen.
             traj_options.has_header = false;
             traj_options.latch = true;
             traj_pubs_[i] = nh_.advertise(traj_options);
             speed_pubs_[i] = nh_.advertise<std_msgs::Float64>(
-                "/coord_speed_" + std::to_string(i), 1, /*latch=*/false);
+                "/coord_speed_" + std::to_string(vehicle_id), 1,
+                /*latch=*/false);
             state_pubs_[i] = nh_.advertise<std_msgs::String>(
-                "/coord_state_" + std::to_string(i), 1, /*latch=*/false);
+                "/coord_state_" + std::to_string(vehicle_id), 1,
+                /*latch=*/false);
         }
         object_sub_ = nh_.subscribe("/object", 20,
                                     &MultiVehiclePatrolNode::objectCallback, this);
@@ -2764,25 +2749,28 @@ private:
     // /object(动捕,mm,后轮中心=后轴参考)→ 各车真实位姿(转米)
     void objectCallback(const sandbox_msgs::AprilObject::ConstPtr& msg) {
         if (msg->type != sandbox_msgs::AprilObject::VEHICLE) return;
-        const int id = msg->id;
-        if (id < 0 || id >= static_cast<int>(agents_.size())) return;
-        real_x_[id] = msg->x / 1000.0;  // mm→m(nokov 发 mm,pure_pursuit 也 /1000)
-        real_y_[id] = msg->y / 1000.0;
-        real_yaw_[id] = msg->yaw;
-        real_pose_ok_[id] = true;
-        rb_last_seen_[id] = ros::Time::now().toSec();  // 动捕看门狗:记最后一次见到的时刻
+        const auto agent_it = std::find_if(
+            agents_.begin(), agents_.end(),
+            [msg](const VehicleAgent& vehicle) { return vehicle.id == msg->id; });
+        if (agent_it == agents_.end()) return;
+        const size_t i = static_cast<size_t>(agent_it - agents_.begin());
+        real_x_[i] = msg->x / 1000.0;  // mm→m(nokov 发 mm,pure_pursuit 也 /1000)
+        real_y_[i] = msg->y / 1000.0;
+        real_yaw_[i] = msg->yaw;
+        real_pose_ok_[i] = true;
+        rb_last_seen_[i] = ros::Time::now().toSec();  // 动捕看门狗:记最后一次见到的时刻
         // RViz 显示真实位姿(实际位置,非投影):同步进 agent 供 marker 用。
-        agents_[id].real_pose_valid = true;
-        agents_[id].real_x = real_x_[id];
-        agents_[id].real_y = real_y_[id];
-        agents_[id].real_yaw = real_yaw_[id];
+        agents_[i].real_pose_valid = true;
+        agents_[i].real_x = real_x_[i];
+        agents_[i].real_y = real_y_[i];
+        agents_[i].real_yaw = real_yaw_[i];
 
-        if (targetEnabled(id) && id < static_cast<int>(real_trails_.size())) {
+        if (i < real_trails_.size()) {
             geometry_msgs::Point p;
-            p.x = real_x_[id];
-            p.y = real_y_[id];
+            p.x = real_x_[i];
+            p.y = real_y_[i];
             p.z = 0.12;
-            auto& trail = real_trails_[id];
+            auto& trail = real_trails_[i];
             const bool moved_enough =
                 trail.empty() || std::hypot(p.x - trail.back().x, p.y - trail.back().y) > 0.01;
             if (moved_enough) {
@@ -2798,7 +2786,7 @@ private:
         if (!msg->data || rb_started_) return;
         int missing = 0;
         for (size_t i = 0; i < real_pose_ok_.size(); ++i) {
-            if (targetEnabled(static_cast<int>(i)) && !real_pose_ok_[i]) ++missing;
+            if (!real_pose_ok_[i]) ++missing;
         }
         rb_started_ = true;
         if (missing > 0)
@@ -2814,7 +2802,6 @@ private:
             // Close the coordinated-speed path immediately and publish the
             // existing current-pose hold trajectory for the PP path.
             for (size_t i = 0; i < speed_pubs_.size(); ++i) {
-                if (!targetEnabled(static_cast<int>(i))) continue;
                 rb_cmd_speed_[i] = 0.0;
                 std_msgs::Float64 zero;
                 zero.data = 0.0;
@@ -2834,8 +2821,8 @@ private:
     void logPlacementStatus() {
         std::string seen, miss;
         for (size_t i = 0; i < real_pose_ok_.size(); ++i) {
-            if (!targetEnabled(static_cast<int>(i))) continue;
-            (real_pose_ok_[i] ? seen : miss) += "V" + std::to_string(i) + " ";
+            (real_pose_ok_[i] ? seen : miss) +=
+                "V" + std::to_string(agents_[i].id) + " ";
         }
         if (miss.empty())
             ROS_WARN_THROTTLE(2.0, "[real] 全部就位 ✓ [%s] —— 去【启动/急停键盘】终端按 Enter 启动"
@@ -2930,7 +2917,7 @@ private:
         const double nan = std::numeric_limits<double>::quiet_NaN();
         for (size_t i = 0; i < agents_.size(); ++i) {
             const VehicleAgent& v = agents_[i];
-            if (!targetEnabled(v.id) || !real_pose_ok_[i]) continue;
+            if (!real_pose_ok_[i]) continue;
             if (v.mode == VehicleMode::ACTIVE && !v.track.empty()) continue;
             rb_speed_windows_[i].clear(0.0);
             forklift_planner::multi_vehicle::ArcLengthSpeedResult speed;
@@ -2967,9 +2954,9 @@ private:
                     if (agents_[i].mode == VehicleMode::ACTIVE) { estop[i] = true; any = true; }
                     if (agents_[j].mode == VehicleMode::ACTIVE) { estop[j] = true; any = true; }
                     if (any) {
-                        ROS_ERROR_THROTTLE(0.5, "[real] 硬护栏急停: V%zu 与 V%zu 实测足迹逼近"
+                        ROS_ERROR_THROTTLE(0.5, "[real] 硬护栏急停: V%d 与 V%d 实测足迹逼近"
                                            "(<%.2fm)。预测层疑似漏判,查 logger 车间距/coord_flag。",
-                                           i, j, m);
+                                           agents_[i].id, agents_[j].id, m);
                     }
                 }
             }
@@ -3071,37 +3058,9 @@ private:
             state_pubs_[i].publish(st);
             // 在动时节流打印:进度+段向+协调速度,实时看"倒车段是否被识别、coord_speed 是否变负"。
             if (v.mode == VehicleMode::ACTIVE)
-                ROS_INFO_THROTTLE(1.0, "[real] V%zu s=%.2f/%.2f seg=%s coord_speed=%+.2f action=%s",
-                                  i, v.path_s, len, seg, rb_cmd_speed_[i], actionName(v.action));
+                ROS_INFO_THROTTLE(1.0, "[real] V%d s=%.2f/%.2f seg=%s coord_speed=%+.2f action=%s",
+                                  v.id, v.path_s, len, seg, rb_cmd_speed_[i], actionName(v.action));
         }
-    }
-
-    void publishTraj(int id, const forklift_planner::multi_vehicle::PathTrack& tr) {
-        sandbox_msgs::Trajectory msg;
-        msg.target = id;
-        msg.header.frame_id = "world";
-        msg.header.stamp = ros::Time::now();
-        const double len = tr.length();
-        std::string segs; bool prev_rev = false; double seg_start = 0.0;  // 诊断:倒车段 s 区间
-        for (double s = 0.0; s <= len + 1e-9; s += 0.02) {
-            const double ss = std::min(s, len);
-            const auto p = tr.poseAtS(ss);
-            const bool rev = (tr.typeAtS(ss) == WpType::REVERSE);
-            sandbox_msgs::TrajectoryPoint tp;
-            tp.x = p.x; tp.y = p.y; tp.yaw = p.theta;
-            tp.velocity = rev ? -1.0 : 1.0;  // 方向标记;速度幅值走 /coord_speed_i
-            tp.time = 0.0;
-            msg.points.push_back(tp);
-            if (rev && !prev_rev) seg_start = ss;
-            if (!rev && prev_rev) segs += "[" + std::to_string(seg_start).substr(0,4) + "," +
-                                            std::to_string(ss).substr(0,4) + "] ";
-            prev_rev = rev;
-        }
-        if (prev_rev) segs += "[" + std::to_string(seg_start).substr(0,4) + "," +
-                                  std::to_string(len).substr(0,4) + "]";
-        ROS_WARN("[real] V%d 新路径 len=%.2f  倒车段 s=%s", id, len,
-                 segs.empty() ? "无(全程前进)" : segs.c_str());
-        publishTrajectoryWithPathGen(static_cast<size_t>(id), msg);
     }
 
     ros::NodeHandle nh_;
@@ -3120,7 +3079,6 @@ private:
     std::unique_ptr<forklift_planner::multi_vehicle::TrafficResourceMap> resource_map_;
     std::vector<VehicleAgent> agents_;
     std::vector<bool> visited_slots_;
-    int target_only_ = -1;  // realbridge debug: -1 = all vehicles, otherwise control only this id
     std::string debug_log_dir_;
     std::string coord_log_file_;
     bool coord_log_enabled_ = true;
@@ -3757,11 +3715,12 @@ public:
                 ? action_seconds[i][static_cast<size_t>(
                       VehicleAction::NOMINAL)] / active_seconds
                 : 0.0;
-            ROS_WARN("[BATCH_ACTION_METRICS] V%zu tasks=%d max_wait=%.1f "
+            ROS_WARN("[BATCH_ACTION_METRICS] V%d tasks=%d max_wait=%.1f "
                      "active_s=%.1f STOP=%.1f CREEP=%.1f YIELD=%.1f "
                      "NOMINAL=%.1f BOOST=%.1f nominal_ratio=%.6f "
                      "transitions=%llu",
-                     i, agents_[i].task_count, max_wait_by_vehicle[i],
+                     agents_[i].id, agents_[i].task_count,
+                     max_wait_by_vehicle[i],
                      active_seconds,
                      action_seconds[i][static_cast<size_t>(
                          VehicleAction::STOP)],

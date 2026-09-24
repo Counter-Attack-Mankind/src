@@ -31,7 +31,6 @@
         type="multi_vehicle_patrol_node"
         name="multi_vehicle_patrol_node"
         output="$(arg node_output)" required="true">
-    <param name="target_only" value="-1"/>
     <param name="one_shot" value="false"/>
     <param name="batch_minutes" value="$(arg minutes)"/>
     <param name="coord_log_file" value="$(arg coord_log_file)"/>
