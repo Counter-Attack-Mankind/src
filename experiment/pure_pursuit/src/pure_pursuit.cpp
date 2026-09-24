@@ -475,27 +475,40 @@ private:
 
     ranges_.clear();
     int start = 0;
+
     for(int i = 1; i < (int)msg->points.size(); i++) {
-      if(fabs(msg->points[i].velocity) > 0.01 && fabs(msg->points[i-1].velocity) > 0.01 &&
-         copysign(1.0, msg->points[i].velocity) != copysign(1.0, msg->points[i-1].velocity)) {
+      if(fabs(msg->points[i].velocity) > 0.01 &&
+        fabs(msg->points[i-1].velocity) > 0.01 &&
+        copysign(1.0, msg->points[i].velocity) !=
+        copysign(1.0, msg->points[i-1].velocity)) {
+
         ranges_.emplace_back(start, i);
         start = i;
       }
     }
-    ranges_.emplace_back(start, (int)msg->points.size());
 
-    if(!new_path) {
-      car_index_ = nearest_index_in(*msg);
+    ranges_.emplace_back(start, (int)msg->points.size());
+    // 先安装本次新的 rolling trajectory
+    trajectory_ = *msg;
+
+    if(!new_path)
+    {
+    // 新 rolling trajectory 的 range 0 就是当前运动段，禁止在整条未来轨迹上重新做全局 nearest。
       current_range_ = 0;
-      for(int range = 0; range < static_cast<int>(ranges_.size()); ++range) {
-        if(car_index_ >= ranges_[range].first &&
-           car_index_ < ranges_[range].second) {
-          current_range_ = range;
-          break;
-        }
-      }
+      const int range_start = ranges_[current_range_].first;
+      const int range_end   = ranges_[current_range_].second;
+      car_index_ = nearest_index_in_range(range_start, range_end);
       lookahead_index_ = car_index_;
       using_virtual_lookahead_ = false;
+      ROS_INFO(
+      "[PP][ROLLING_RANGE] target=%d path_gen=%d "
+      "force_current_range=0 range=[%d,%d) car_index=%d ranges=%zu",
+      tracking_object_,
+      current_path_gen_,
+      range_start,
+      range_end,
+      car_index_,
+      ranges_.size());
     }
 
     auto next_goal = msg->points[ranges_[current_range_].second - 1];
@@ -505,7 +518,6 @@ private:
     trajectory_receive_time_ = start_time_;
     ++trajectory_seq_;
     log_open_loop_trajectory(*msg);
-    trajectory_ = *msg;
     if(!new_path && object_seen_) update_lookahead();
     ROS_INFO("[PP] target=%d trajectory_seq=%llu path_gen=%d refresh=%s "
              "car_index=%d lookahead_index=%d longitude_output=%.6f "
