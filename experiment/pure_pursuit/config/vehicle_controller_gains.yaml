@@ -10,7 +10,7 @@ controller_0:  #changed
   K_yaw: 1.8
   ff_lead_time: 0.0
 
-  lookahead_scale: 1.2
+  lookahead_scale: 1.0
   longitude_kp: 2.0
   longitude_ki: 0.1
 

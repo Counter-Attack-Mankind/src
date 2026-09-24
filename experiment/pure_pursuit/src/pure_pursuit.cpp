@@ -363,6 +363,7 @@ private:
   std::ofstream open_loop_log_, closed_loop_log_;
 
   bool approached_ = false;
+  bool temporary_hold_ = false;    //短暂静止
   bool estop_ = false;
   bool waiting_for_post_estop_trajectory_ = false;
 
@@ -450,6 +451,13 @@ private:
 
     waiting_for_post_estop_trajectory_ = false;
 
+    // 单点轨迹是 planner 的临时 HOLD，不代表当前 path_gen 已真正到达终点。后续收到正常 rolling trajectory 时自动解除 HOLD。
+    temporary_hold_ = (msg->points.size() == 1);
+    if(!temporary_hold_ && approached_) 
+    {
+      approached_ = false;
+      final_stable_cycles_ = 0;
+    }
     std::cout << tracking_object_ << " - Trajectory received" << std::endl;
 
     const int incoming_path_gen = static_cast<int>(msg->header.seq);
@@ -877,7 +885,7 @@ private:
   }
 
   void control_callback(const ros::TimerEvent &evt) {
-    if(estop_ || waiting_for_post_estop_trajectory_) {
+    if(estop_ || waiting_for_post_estop_trajectory_ || temporary_hold_) {
       publish_zero_command();
       return;
     }
